@@ -1,5 +1,3 @@
-# Nero
-
 # Nero - SYN Flood Testing Tool
 
 ⚠️ **Legal Notice**  
