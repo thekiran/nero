@@ -22,9 +22,6 @@ It allows you to:
 </div>
 
 ---
-
-##Installation
-
 Install the required packages:
 
 ```bash
