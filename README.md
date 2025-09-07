@@ -2,34 +2,42 @@
 
 # Nero - SYN Flood Testing Tool
 
-⚠️ **Yasal Uyarı**  
-Bu yazılım yalnızca eğitim, araştırma ve kendi sistemlerinizde test amaçlı geliştirilmiştir. Yetkisiz kullanım yasadışıdır. Geliştirici hiçbir sorumluluk kabul etmez.  
+⚠️ **Legal Notice**  
+This software is intended **only for educational, research, and testing purposes on your own systems**. Unauthorized use is illegal. The developer assumes no responsibility for misuse.
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/60ef735b-c908-48c2-a8c1-99245a935e03" width="731" height="504" alt="Ekran görüntüsü 2025-09-07 142023" />
+</div>
 
 ---
 
-## 📌 Açıklama
-**Nero**, yüksek hacimli SYN paketleri üreterek **SYN Flood saldırılarını simüle eden** bir ağ test aracıdır.  
-Amacı:
-- Sistemlerin SYN flood saldırılarına karşı dayanıklılığını ölçmek
-- Firewall / IDS / IPS gibi güvenlik çözümlerini test etmek
-- Ağ yöneticilerine gerçekçi senaryolar sağlamak
+## Overview
+**Nero** is a high-performance network testing tool designed to simulate **SYN Flood attacks**.  
+
+It allows you to:
+- Assess the resilience of systems against SYN flood attacks  
+- Test firewalls, IDS/IPS, and other security solutions  
+- Provide realistic scenarios for network administrators and security researchers  
+
 
 ---
 
-## 🛠️ Kurulum
+##Installation
 
-Gerekli paketleri yükleyin:
+Install the required packages:
 
 ```bash
 
 sudo apt update
-sudo apt install build-essential git
-
+git clone https://github.com/thekiran/nero
+cd live_recon_alert
+make
+make run
+nero
 ```
 
 
 <div align="center">
-
-[![Proje Tanıtım Videosu](https://img.youtube.com/vi/2HGtMkmqwpU/0.jpg)](https://www.youtube.com/watch?v=2HGtMkmqwpU)
-
+  <a href="https://www.youtube.com/watch?v=2HGtMkmqwpU">
+    <img src="https://img.youtube.com/vi/2HGtMkmqwpU/0.jpg" width="731" height="504" alt="Project Demo Video" />
+  </a>
 </div>
