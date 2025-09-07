@@ -5,7 +5,7 @@
 ⚠️ **Legal Notice**  
 This software is intended **only for educational, research, and testing purposes on your own systems**. Unauthorized use is illegal. The developer assumes no responsibility for misuse.
 
-![2025-09-07 14-20-47 gif](https://github.com/user-attachments/assets/589407e0-1168-41e7-b5ba-f1a638ab8e75)
+![2025-09-07 18-26-00](https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084)
 
 ---
 
