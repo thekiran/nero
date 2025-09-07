@@ -4,9 +4,8 @@
 
 ⚠️ **Legal Notice**  
 This software is intended **only for educational, research, and testing purposes on your own systems**. Unauthorized use is illegal. The developer assumes no responsibility for misuse.
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/60ef735b-c908-48c2-a8c1-99245a935e03" width="731" height="504" alt="Ekran görüntüsü 2025-09-07 142023" />
-</div>
+
+![2025-09-07 14-20-47 gif](https://github.com/user-attachments/assets/589407e0-1168-41e7-b5ba-f1a638ab8e75)
 
 ---
 
@@ -18,6 +17,9 @@ It allows you to:
 - Test firewalls, IDS/IPS, and other security solutions  
 - Provide realistic scenarios for network administrators and security researchers  
 
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/60ef735b-c908-48c2-a8c1-99245a935e03" width="731" height="504" alt="Ekran görüntüsü 2025-09-07 142023" />
+</div>
 
 ---
 
