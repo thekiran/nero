@@ -29,7 +29,7 @@ git clone https://github.com/thekiran/nero
 cd live_recon_alert
 make
 make run
-nero
+sudo nero
 ```
 
 
