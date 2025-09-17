@@ -66,8 +66,24 @@ int portscanner(const char *target_ip) {
             continue;
         }
 
+        // Kullanıcının seçtiği porta karşılık gelen servisi bul
+        // Bu bölüm eksik, çünkü servis bilgisi tarama sırasında elde edilmedi
+        printf("[*] Seçilen port: %d\n", port_select);
+        // Burada, port_select'e karşılık gelen servisi bulmak için ek kod gerekecek
+
         break;
     }
+
+    return 0;
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Kullanım: %s <hedef_ip>\n", argv[0]);
+        return 1;
+    }
+    printf("Port Scanner sadfasfasdf...\n");
+    portscanner(argv[1]);
 
     return 0;
 }
