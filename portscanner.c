@@ -49,7 +49,7 @@ int portscanner(const char *target_ip) {
 
         close(sockfd);
     }
-        
+
     printf("[*] Toplam açık port: %d\n", open_ports);
     int port_select;
     while (1) {
@@ -82,7 +82,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Kullanım: %s <hedef_ip>\n", argv[0]);
         return 1;
     }
-    printf("Port Scanner sadfasfasdf...\n");
+
     portscanner(argv[1]);
 
     return 0;
