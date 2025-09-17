@@ -25,10 +25,11 @@ Install the required packages:
 ```bash
 
 sudo apt update
+sudo apt install libcjson-dev libldns-dev
 git clone https://github.com/thekiran/nero
 cd live_recon_alert
 make
-make run
+make install
 sudo nero
 ```
 
