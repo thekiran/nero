@@ -8,6 +8,7 @@
 #include "printing.h"
 #include "syn_flood_powered.h"
 #include "ascii.h"
+#include "monitormode.h"
 
 /*-------------------------------*/    
 #define MAX_HISTORY 256
