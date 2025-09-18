@@ -12,8 +12,8 @@ int portscanner(const char *target_ip) {
     int sockfd;
     int port;
     int port_select;
-    int port_counter = 0;
-    
+    int port_counter = 0; // Başlatıldı
+
     // IP adresinin geçerli olup olmadığını kontrol et
     if (inet_pton(AF_INET, target_ip, &addr.sin_addr) <= 0) {
         fprintf(stderr, "[-] Geçersiz IP adresi: %s\n", target_ip);
@@ -24,7 +24,7 @@ int portscanner(const char *target_ip) {
 
     printf("\n[*] Taranıyor: %s\n", target_ip);
 
-    for (port = 1; port <= 1000; port++) {//65535
+    for (port = 1; port <= 1000; port++) { //65535
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
         if (sockfd < 0) {
@@ -36,7 +36,6 @@ int portscanner(const char *target_ip) {
 
         // Timeout ayarı (0.5 saniye)
         struct timeval tv;
-        
         tv.tv_sec = 0;
         tv.tv_usec = 500000;
 
@@ -44,17 +43,16 @@ int portscanner(const char *target_ip) {
         setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
         if (connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-
             printf("[+] Port %d açık\n", port);
-            port_counter++;//test
+            port_counter++;
         }
 
         close(sockfd);
     }
-        
-    
-    while (1) 
-    {
+
+    printf("\n[!] Toplam açık port: %d\n", port_counter);
+
+    while (1) {
         printf("Please select a port (1-65535): ");
         fflush(stdout);
 
@@ -75,5 +73,5 @@ int portscanner(const char *target_ip) {
         break;
     }
 
-    return port_select;
+    return port_select; // Kullanıcının seçtiği portu döndür
 }
