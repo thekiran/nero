@@ -19,7 +19,22 @@ int portscanner(const char *target_ip) {
         fprintf(stderr, "[-] Geçersiz IP adresi: %s\n", target_ip);
         return 1;
     }
+    // Ping komutunu çalıştır ve sonucu kontrol et
+    else
+    {
+        // Komutu oluştur
+        char command[150];
+        snprintf(command, sizeof(command), "ping -c 4 %s", target_ip); // Linux için, 4 paket gönderir
 
+        // Sistemde ping komutunu çalıştır
+        int ret = system(command);
+
+        if(ret == 0) {
+            printf("[+] %s IP adresine ping başarılı!\n", target_ip);
+        } else {
+            printf("[-] %s IP adresine ping başarısız!\n", target_ip);
+        }
+    }
     addr.sin_family = AF_INET;
 
     printf("\n[*] Taranıyor: %s\n", target_ip);
@@ -73,5 +88,5 @@ int portscanner(const char *target_ip) {
         break;
     }
 
-    return port_select; // Kullanıcının seçtiği portu döndür
+    return port_select; // Kullanıcının seçtiği portu döndürme
 }
