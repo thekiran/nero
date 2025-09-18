@@ -12,8 +12,8 @@ int portscanner(const char *target_ip) {
     int sockfd;
     int port;
     int port_select;
-    int port_counter;
-
+    int port_counter = 0;
+    
     // IP adresinin geçerli olup olmadığını kontrol et
     if (inet_pton(AF_INET, target_ip, &addr.sin_addr) <= 0) {
         fprintf(stderr, "[-] Geçersiz IP adresi: %s\n", target_ip);
@@ -75,5 +75,5 @@ int portscanner(const char *target_ip) {
         break;
     }
 
-    return 80;
+    return port_select;
 }
