@@ -8,7 +8,6 @@
 #include "printing.h"
 #include "syn_flood_powered.h"
 #include "ascii.h"
-#include "monitormode.h"
 
 /*-------------------------------*/    
 #define MAX_HISTORY 256
@@ -251,17 +250,11 @@ int terminal_code()
                 }
             }
         } 
-        else if (strstr(command, "monitor") != NULL) 
-        {
-            
-            
-        } 
         else if (strstr(command,"help") != NULL) 
         {
                 row_location+=11;
                 const char *commands[][2] = {
                 {"<network IP> -Syn", ": Scan Port"},
-                {"monitor", ": monitor-mode"},
                 {"help", ": Show this help message"},
                 {"help -All", ": Show this help message"},
                 {"exit", ": Quit the shell"},

@@ -13,8 +13,7 @@ LDFLAGS      := \
                  -lcjson \
                  -lldns \
                  -pthread \
-                 -lncurses \
-                 -lpcap
+                 -lncurses 
 
 # Project files
 SRCS         := \
@@ -70,3 +69,4 @@ install: $(TARGET)
 clean:
 	@echo "[CLEAN] Removing object files and $(TARGET)"
 	rm -f $(OBJS) $(TARGET)
+
