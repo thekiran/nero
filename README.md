@@ -23,7 +23,7 @@ It allows you to:
 Install the required packages:
 
 ```bash
-
+git clone https://github.com/thekiran/nero.git
 sudo apt update
 sudo apt install libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev
 cd nero
