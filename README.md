@@ -26,7 +26,7 @@ Install the required packages:
 
 sudo apt update
 sudo apt install libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev
-cd live_recon_alert
+cd nero
 make
 make install
 sudo nero
