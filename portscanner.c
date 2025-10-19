@@ -121,9 +121,14 @@ int portscanner(const char *target_ip) {
 
     addr.sin_family = AF_INET;
 
-    printf("\n[*] Taranıyor: %s\n", target_ip);
+    
 
-    for (port = 1; port <= 1000; port++) { //65535
+    for (port = 1; port <= 65535; port++) { //65535
+
+        printf("[*] Taranıyor: %s:%d\n",target_ip,port);
+        fflush(stdout);
+        printf("\033[A\033[2K\r");
+
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
         if (sockfd < 0) {
@@ -134,10 +139,9 @@ int portscanner(const char *target_ip) {
 
         addr.sin_port = htons(port);
 
-        // Timeout ayarı (0.5 saniye)
         struct timeval tv;
         tv.tv_sec = 0;
-        tv.tv_usec = 500000;
+        tv.tv_usec = 100000;
 
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
