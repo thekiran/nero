@@ -13,7 +13,8 @@ LDFLAGS      := \
                  -lcjson \
                  -lldns \
                  -pthread \
-                 -lncurses 
+                 -lncurses \
+                 -lbluetooth
 
 # Project files
 SRCS         := \
@@ -23,6 +24,7 @@ SRCS         := \
                  ascii.c \
                  terminal.c \
                  select_interface.c \
+                 ble_scanner.c \
                  portscanner.c
 
 OBJS         := $(SRCS:.c=.o)
@@ -69,4 +71,3 @@ install: $(TARGET)
 clean:
 	@echo "[CLEAN] Removing object files and $(TARGET)"
 	rm -f $(OBJS) $(TARGET)
-
