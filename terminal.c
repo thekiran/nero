@@ -5,6 +5,7 @@
 #include <stdlib.h> 
 #include <signal.h>//--
 
+#include "ble_scanner.h"
 #include "printing.h"
 #include "syn_flood_powered.h"
 #include "ascii.h"
@@ -31,6 +32,25 @@ void disableBuffering(struct termios *old) {
 // Terminal ayarlarını geri yükleme
 void restoreBuffering(struct termios *old) {
     tcsetattr(STDIN_FILENO, TCSANOW, old);
+}
+
+static int parse_ble_scan_duration(const char *command) {
+    const char *flag = strstr(command, "-t");
+    int duration = BLE_SCAN_DEFAULT_DURATION;
+
+    if (flag != NULL) {
+        flag += 2;
+        while (*flag == ' ') {
+            flag++;
+        }
+
+        int parsed_duration = atoi(flag);
+        if (parsed_duration > 0) {
+            duration = parsed_duration;
+        }
+    }
+
+    return duration;
 }
 
 void clear_screen() {
@@ -255,6 +275,7 @@ int terminal_code()
                 row_location+=11;
                 const char *commands[][2] = {
                 {"<network IP> -Syn", ": Scan Port"},
+                {"ble-scan [-t <seconds>]", ": Listen for nearby BLE advertising packets"},
                 {"help", ": Show this help message"},
                 {"help -All", ": Show this help message"},
                 {"exit", ": Quit the shell"},
@@ -303,6 +324,11 @@ int terminal_code()
             terminal_code();
 
         } 
+        else if (strstr(command, "ble-scan") != NULL)
+        {
+            int duration_seconds = parse_ble_scan_duration(command);
+            start_ble_scan(duration_seconds);
+        }
         else if (strstr(command, "version") != NULL) 
         {
             printf(VERSION_MESSAGE);
@@ -315,4 +341,3 @@ int terminal_code()
 
     return 0;
 }
-
