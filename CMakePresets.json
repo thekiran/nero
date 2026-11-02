@@ -39,7 +39,7 @@
     {
       "name": "windows",
       "binaryDir": "${sourceDir}/.build/cmake/windows",
-      "generator": "Visual Studio 17 2022",
+      "generator": "Visual Studio 18 2026",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
