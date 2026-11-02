@@ -33,7 +33,7 @@
     }
   },
   "added": {
-    "src/cli/input.c": "23aacfd55421d126bd242aee6953d58613db381aaaeea9bba518ebaa6412d367",
+    "src/cli/input.c": "3dd6d832fc08870b2bb3a520640bc8d5d51c78ff77ac1439d68e7800feebc4ea",
     "src/cli/render.c": "d946c72cf6f16d45fb7468cc7deccec656c92a0aa99dca969d7b0fae0f11476c",
     "src/cli/commands.c": "8c0d402725e7a6c2953634382e4a4e36884c13fe36c4946d65105654e145b285",
     "src/cli/cli_internal.h": "4154b5ac820da04f149c88b211b2bd5f7363a18fe4fdb1597a973f503b84d4a1",

@@ -65,12 +65,13 @@ enum input_key { KEY_NONE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_DELETE, KE
 static enum input_key escape_key(void)
 {
     char ch;
-    if (read_byte(&ch, 100) != 1 || (ch != '[' && ch != 'O'))
+    int continuation_timeout = isatty(STDIN_FILENO) ? 100 : -1;
+    if (read_byte(&ch, continuation_timeout) != 1 || (ch != '[' && ch != 'O'))
         return KEY_NONE;
     char sequence[16];
     size_t length = 0;
     while (length < sizeof(sequence) - 1) {
-        if (read_byte(&ch, 100) != 1)
+        if (read_byte(&ch, continuation_timeout) != 1)
             return KEY_NONE;
         sequence[length++] = ch;
         if ((unsigned char)ch >= 0x40 && (unsigned char)ch <= 0x7e) {
