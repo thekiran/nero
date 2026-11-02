@@ -118,10 +118,10 @@ void cli_show_help(void)
     int num_commands = sizeof(commands) / sizeof(commands[0]);
 
     printf("\nEXPERIMENTAL SOFTWARE — LABORATORY USE ONLY\n"
-           "DENEYSEL YAZILIM — YALNIZCA LABORATUVAR KULLANIMI\n"
+           "EXPERIMENTAL SOFTWARE — RESTRICTED TO LABORATORY USE\n"
            "Isolated or explicitly authorized testing only. Not for public or production use.\n"
-           "Yalnızca izole veya açıkça yetkilendirilmiş testler; genel kullanım/üretim için "
-           "değildir.\n");
+           "Use isolated or authorized test environments; public and production use is "
+           "not permitted.\n");
 #if defined(__APPLE__) || defined(NERO_SAFE_TEST)
     printf("-Syn: unsupported in this build; no network traffic is generated.\n");
 #endif

@@ -9,16 +9,16 @@
 #define MAX_INTERFACES 128
 #define MAX_NAME_LEN 64
 
-// ANSI renk kodları
+// ANSI color codes
 enum {
     COLOR_RESET = 0,
     COLOR_BLUE = 34,    // Ethernet
     COLOR_GREEN = 32,   // Wireless
     COLOR_YELLOW = 33,  // Loopback
-    COLOR_RED = 31      // Diğer
+    COLOR_RED = 31      // Other
 };
 
-// Tipin okunabilir adı
+// Human-readable interface type
 static const char* type_str(int type) {
     switch (type) {
         case 1:   return "Ethernet";
@@ -28,18 +28,18 @@ static const char* type_str(int type) {
     }
 }
 
-// Renkli satır yazdırma fonksiyonu
+// Print a colored interface row
 static void print_colored(int idx, const char *name, const char *desc, int type) {
     int color;
     if (type == 1)        color = COLOR_BLUE;   // Ethernet
     else if (type == 801) color = COLOR_GREEN;  // Wireless
     else if (type == 772) color = COLOR_YELLOW; // Loopback
-    else                  color = COLOR_RED;    // Diğer
+    else                  color = COLOR_RED;    // Other
 
     printf("%2d) \033[1;%dm%-15s\033[0m (%s)\n", idx, color, name, desc);
 }
 
-// Arayüzleri listele ve kullanıcıdan seçim al
+// List interfaces and read the selection
 const char *list_and_select_interface(void) {
     static char names[MAX_INTERFACES][MAX_NAME_LEN];
     static int types[MAX_INTERFACES];
@@ -71,22 +71,22 @@ const char *list_and_select_interface(void) {
     freeifaddrs(addresses);
 
     if (count == 0) {
-        fprintf(stderr, "Ağ arayüzü bulunamadı.\n");
+        fprintf(stderr, "No network interfaces found.\n");
         return NULL;
     }
 
-    // Ekranı temizle
+    // Clear the screen
     printf("\033[H\033[J");
-    printf("\033[1;31mMevcut Ağ Arayüzleri:\033[0m\n\n");
+    printf("\033[1;31mAvailable Network Interfaces:\033[0m\n\n");
 
     for (int i = 0; i < count; ++i) {
         print_colored(i + 1, names[i], type_str(types[i]), types[i]);
     }
 
     int choice = 0;
-    printf("\nArayüz seçin [1-%d]: ", count);
+    printf("\nSelect an interface [1-%d]: ", count);
     if (scanf("%d", &choice) != 1 || choice < 1 || choice > count) {
-        fprintf(stderr, "Geçersiz seçim.\n");
+        fprintf(stderr, "Invalid selection.\n");
         return NULL;
     }
 

@@ -1,63 +1,63 @@
 # Nero
 
-C ile yazılmış deneysel terminal ve ağ araştırma projesi.
-Yalnızca izole veya açıkça yetkilendirilmiş laboratuvar ortamları içindir.
+An experimental terminal application and network research project written in C.
+For isolated or explicitly authorized laboratory environments only.
 
-## Nereden başlamalıyım?
+## Start here
 
-| İhtiyaç | Başlangıç noktası |
+| Task | Entry point |
 | --- | --- |
-| Kodda ne nerede? | [Kod haritası](docs/code-map.md) |
-| Derlemek ve test etmek | [Geliştirme rehberi](docs/building.md) |
-| Bileşenlerin ilişkisi | [Mimari](docs/architecture.md) |
-| Yeni kod eklemek | [Katkı kuralları](CONTRIBUTING.md) |
-| Belgelerin tamamı | [Doküman dizini](docs/README.md) |
+| Find your way around the code | [Code map](docs/code-map.md) |
+| Build and test the project | [Development guide](docs/building.md) |
+| Understand component boundaries | [Architecture](docs/architecture.md) |
+| Contribute changes | [Contribution guidelines](CONTRIBUTING.md) |
+| Browse all documentation | [Documentation index](docs/README.md) |
 
-## Hızlı başlangıç — macOS
+## Quick start — macOS
 
-Depo kökünde:
+From the repository root:
 
 ```sh
-make             # .build/ altında derler, kökte nero oluşturur
-./nero           # Terminal arayüzünü açar
-make test        # Ağ işlemi yapmayan testleri çalıştırır
-make help        # Geliştirme komutlarını listeler
+make             # Build objects in .build/ and the nero executable at the root
+./nero           # Open the terminal interface
+make test        # Run offline regression tests
+make help        # List development commands
 ```
 
-C derleyicisi ve SDK gerekir; testler ayrıca Python 3 kullanır.
-CMake ile geliştirme için [kurulum ve preset komutlarına](docs/building.md) bakın.
+A C compiler and SDK are required; tests also require Python 3.
+For CMake development, see the [setup and preset commands](docs/building.md).
 
-## Kaynak düzeni
+## Source layout
 
 ```text
 nero/
 ├── src/
-│   ├── main.c                  Uygulamanın giriş noktası
-│   ├── cli/                    Terminal oturumu, giriş, çizim ve komutlar
-│   ├── core/                   Platform bilgisi ve ortak temel kod
-│   ├── modules/                Platform raporu ve mevcut Linux modülleri
-│   └── platform/               İşletim sistemi adaptörleri
-├── include/nero/               Dışarıya açık proje başlıkları
-├── third_party/cjson/          Üçüncü taraf kodu
-├── tests/                     Regresyon, birim, entegrasyon ve mock testleri
-├── cmake/                     Ortak CMake hedef ayarları
-├── docs/                      Kod haritası ve geliştirme belgeleri
-├── data/                      Veri dosyaları
-└── .build/                    Üretilen çıktılar; Git dışında
+│   ├── main.c                  Application entry point
+│   ├── cli/                    Terminal session, input, rendering and commands
+│   ├── core/                   Platform information and shared foundation
+│   ├── modules/                Platform report and existing Linux modules
+│   └── platform/               Operating system adapters
+├── include/nero/               Public project headers
+├── third_party/cjson/          Third-party code
+├── tests/                     Regression, unit, integration and mock tests
+├── cmake/                     Shared CMake target configuration
+├── docs/                      Code map and development documentation
+├── data/                      Data files
+└── .build/                    Generated files; excluded from Git
 ```
 
-`src/cli/cli_internal.h` yalnızca CLI dosyaları arasındaki özel sözleşmedir.
-Dış bileşenler `include/nero/` başlıklarını kullanır.
+`src/cli/cli_internal.h` defines the private contract between CLI modules.
+External components use the headers in `include/nero/`.
 
-## Platform kapsamı
+## Platform scope
 
 | Platform | Make | CMake |
 | --- | --- | --- |
-| macOS | Terminal ve yerel arayüz adaptörü; ağ işlemleri devre dışı | Çevrimdışı CLI ve platform testleri |
-| Linux | Mevcut Linux modülleri | Çevrimdışı CLI ve platform testleri |
-| Windows | Desteklenmiyor | Platform raporu ve temel testler; CLI yok |
+| macOS | Terminal and local interface adapter; network operations disabled | Offline CLI and platform tests |
+| Linux | Existing Linux modules | Offline CLI and platform tests |
+| Windows | Unsupported | Platform report and foundation tests; no CLI |
 
-Yerelde macOS doğrulanmıştır. Linux ve Windows CI tanımları, bu platformlarda
-başarılı çalıştırma kanıtı değildir. Ayrıntılar: [platform kapsamı](docs/platform-support.md).
+Local validation covers macOS. Linux and Windows CI definitions are not evidence
+of successful execution on those platforms. See [platform support](docs/platform-support.md).
 
-[Lisans](LICENSE.txt) · [Güvenlik](SECURITY.md) · [Laboratuvar kullanımı](docs/laboratory-safety.md)
+[License](LICENSE.txt) · [Security](SECURITY.md) · [Laboratory use](docs/laboratory-safety.md)

@@ -48,6 +48,8 @@ test verifies the mapping, current contents and absence of old source locations.
 This replaces a reference to the absent `terminal-quality-baseline.json` file.
 `tests/readability-baseline.json` records the subsequent CLI extraction and build
 changes separately; the layout and historical snapshots are not rewritten.
+`tests/english-baseline.json` records the subsequent translation of messages and
+comments, preserving ANSI/control escapes and format placeholders.
 Integrity checks do not replace compilation, terminal regression or platform tests.
 
 ## Validation

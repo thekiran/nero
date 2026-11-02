@@ -6,10 +6,11 @@ Nero is an experimental network research and testing project intended exclusivel
 for controlled, authorized laboratory environments. It is not intended for public
 use, production deployment or unauthorized network activity.
 
-**DENEYSEL YAZILIM — YALNIZCA LABORATUVAR KULLANIMI**
+**CONTROLLED, AUTHORIZED TESTING ONLY**
 
-Yalnızca izole veya açıkça test izni verilmiş ortamlarda eğitim, araştırma ve
-uyumluluk doğrulaması yapılmalıdır. Genel kullanım veya üretim dağıtımı amaçlanmaz.
+Education, research and compatibility validation must take place only in isolated
+or explicitly authorized environments. Public use and production deployment are
+not supported.
 
 Compatibility tests must not execute the Linux engine or scanner, including against
 loopback. CMake development targets never link either module. The unavailable

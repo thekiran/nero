@@ -5,7 +5,7 @@
 #include "nero/terminal.h"
 
 #define COLOR "\033[35m\n" // Magenta banner color
-#define CLEAR "\033[0m\n"  // Renk sıfırlama
+#define CLEAR "\033[0m\n"  // Reset color
 
 pthread_mutex_t ekran_mutex = PTHREAD_MUTEX_INITIALIZER;
 

