@@ -1,7 +1,0 @@
-*.o
-*.obj
-*.exe
-
-obj/
-
-*.log

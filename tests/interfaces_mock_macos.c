@@ -50,7 +50,7 @@ static void fixture_freeifaddrs(struct ifaddrs *addresses)
 
 #define getifaddrs fixture_getifaddrs
 #define freeifaddrs fixture_freeifaddrs
-#include "../platform/select_interface_macos.c"
+#include "../src/platform/macos/select_interface_macos.c"
 
 int main(void)
 {

@@ -1,27 +1,26 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
 #include <pthread.h>
+#include <stdio.h>
 
-#include "terminal.h"
-#include "syn_flood_powered.h"
-#include "ascii.h"
+#include "nero/ascii.h"
+#include "nero/terminal.h"
 
-#define COLOR "\033[35m\n"  // Siyah arka plan, beyaz yazı
-#define CLEAR "\033[0m\n"      // Renk sıfırlama
-
-extern const char *windows[];
-
-int row_location_function(void);
+#define COLOR "\033[35m\n" // Magenta banner color
+#define CLEAR "\033[0m\n"  // Renk sıfırlama
 
 pthread_mutex_t ekran_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int ascii_function(void) {
-    printf("\033[H\033[J");
-    system("clear");
-    fflush(stdout);
-    printf(COLOR
-           "                                                         \n"
+int ascii_function(void)
+{
+    pthread_mutex_lock(&ekran_mutex);
+    clear_screen();
+    if (!terminal_unicode_enabled()) {
+        puts("\nN E R O\n");
+        fflush(stdout);
+        pthread_mutex_unlock(&ekran_mutex);
+        return 0;
+    }
+    fputs(terminal_color_enabled() ? COLOR : "\n", stdout);
+    printf("                                                         \n"
            "                                                         \n"
            "░▒▓███████▓▒░ ░▒▓████████▓▒░░▒▓███████▓▒░  ░▒▓██████▓▒░  \n"
            "░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ \n"
@@ -30,18 +29,18 @@ int ascii_function(void) {
            "░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ \n"
            "░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ \n"
            "░▒▓█▓▒░░▒▓█▓▒░░▒▓████████▓▒░░▒▓█▓▒░░▒▓█▓▒░ ░▒▓██████▓▒░  \n"
-           "                                                         \n"
-           CLEAR);fflush(stdout); 
+           "                                                         \n");
+    fputs(terminal_color_enabled() ? CLEAR : "\n", stdout);
+    fflush(stdout);
+    pthread_mutex_unlock(&ekran_mutex);
 
     return 0;
 }
 
+/* Legacy animation frames consumed by the Linux module. */
 
-// Animasyonu gösteren thread fonksiyonu
-
-const char *windows[] = 
-{
-    // Frame 1    
+const char *windows[] = {
+    // Frame 1
     "     \033[41m         \033[0m                    \033[42m         \033[0m\n"
     "     \033[41m  NERO  \033[0m\033[43mSYN\033[0m                   \033[42m TARGET \033[0m\n"
     "     \033[41m         \033[0m                    \033[42m         \033[0m\n",
@@ -59,6 +58,4 @@ const char *windows[] =
     // Frame 4
     "     \033[41m         \033[0m                    \033[42m         \033[0m\n"
     "     \033[41m  NERO  \033[0m                   \033[43mSYN\033[0m\033[42m TARGET \033[0m\n"
-    "     \033[41m         \033[0m                    \033[42m         \033[0m\n"
-};
-
+    "     \033[41m         \033[0m                    \033[42m         \033[0m\n"};

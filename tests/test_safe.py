@@ -39,7 +39,7 @@ class SafeTests(unittest.TestCase):
         self.assertIsNone(re.search(
             rb"\b_?(socket|connect|sendto|sendmsg|getaddrinfo|gethostbyname)(?:@[^\s]+)?$",
             symbols, re.M), symbols)
-        self.assertIn(b"unsupported in this build", self.cli(b"not-a-target -Syn\nexit\n"))
+        self.assertIn(b"unsupported in this build", self.cli(b"192.0.2.1 -Syn\nexit\n"))
 
     def test_eof_and_incomplete_escape(self):
         for data in (b"", b"unfinished", b"\x1b", b"\x1b["):
