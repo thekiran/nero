@@ -3,7 +3,7 @@
 
 int SYN_Flood(const char *target_ip);
 void sigint_handler(int sig);
-void animation_fuction();
+void animation_fuction(void);
 
 #endif
 

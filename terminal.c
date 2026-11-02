@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <stdlib.h> 
 #include <signal.h>//--
+#include <errno.h>
+#include "terminal.h"
 
 #include "printing.h"
 #include "syn_flood_powered.h"
@@ -20,28 +22,49 @@ int history_index = 0;
 int history_count = 0;
 int row_location = 14;
 
+static int terminal_changed = 0;
+
+static int read_character(char *ch) {
+    ssize_t result;
+    do {
+        result = read(STDIN_FILENO, ch, 1);
+    } while (result < 0 && errno == EINTR);
+    return result == 1;
+}
+
 // Terminal girişini anlık okumaya ayarlama
 void disableBuffering(struct termios *old) {
     struct termios new;
-    tcgetattr(STDIN_FILENO, old); // Mevcut ayarları al
+    terminal_changed = 0;
+    if (!isatty(STDIN_FILENO)) return;
+    if (tcgetattr(STDIN_FILENO, old) != 0) {
+        perror("tcgetattr");
+        return;
+    }
     new = *old;
     new.c_lflag &= ~(ICANON | ECHO); // Canonical mode ve echo'yu kapat
-    tcsetattr(STDIN_FILENO, TCSANOW, &new); // Yeni ayarları uygula
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &new) == 0)
+        terminal_changed = 1;
+    else
+        perror("tcsetattr");
 }
 // Terminal ayarlarını geri yükleme
 void restoreBuffering(struct termios *old) {
-    tcsetattr(STDIN_FILENO, TCSANOW, old);
+    if (terminal_changed) {
+        if (tcsetattr(STDIN_FILENO, TCSANOW, old) != 0) perror("tcsetattr");
+        terminal_changed = 0;
+    }
 }
 
-void clear_screen() {
+void clear_screen(void) {
     write(STDOUT_FILENO, "\033[H\033[J", 6);
 }
 
-int row_location_function(){
+int row_location_function(void){
     return row_location; 
 }
 
-int terminal_code()
+int terminal_code(void)
 {
     // Set up signal handler
     struct termios old;
@@ -63,7 +86,7 @@ int terminal_code()
         while (1) 
         {
             char ch;
-            read(STDIN_FILENO, &ch, 1); // Tek karakter oku
+            if (!read_character(&ch)) goto input_end; // Tek karakter oku
 
             // Enter'a basıldıysa komutu çalıştır
             if (ch == '\n') { // Enter tuşu
@@ -89,9 +112,9 @@ int terminal_code()
 
             // Yön tuşlarını kontrol et
             if (ch == 27) { // Escape karakteri (yön tuşları için)
-                read(STDIN_FILENO, &ch, 1); // '[' karakterini oku
+                if (!read_character(&ch)) goto input_end; // '[' karakterini oku
                 if (ch == '[') {
-                    read(STDIN_FILENO, &ch, 1); // Asıl yön karakterini oku
+                    if (!read_character(&ch)) goto input_end; // Asıl yön karakterini oku
 
                     if (ch == 'A') { // Yukarı tuşu
 
@@ -128,6 +151,7 @@ int terminal_code()
                         }             
                     }
                     else if (ch == 'C') { 
+                        if (i >= (int)strlen(command)) continue;
                         i++;
                         //CD_COUNTER++;
                         printf("\033[C");
@@ -179,6 +203,11 @@ int terminal_code()
 
 
             // Normal karakterleri ekle
+            if (i >= MAX_COMMAND_LENGTH - 1 || ch == '\0') {
+                printf("\a");
+                fflush(stdout);
+                continue;
+            }
             command[i++] = ch;
             printf("%c", ch);
             fflush(stdout);
@@ -265,6 +294,13 @@ int terminal_code()
 
             int num_commands = sizeof(commands) / sizeof(commands[0]);
 
+            printf("\nEXPERIMENTAL SOFTWARE — LABORATORY USE ONLY\n"
+                   "DENEYSEL YAZILIM — YALNIZCA LABORATUVAR KULLANIMI\n"
+                   "Isolated or explicitly authorized testing only. Not for public or production use.\n"
+                   "Yalnızca izole veya açıkça yetkilendirilmiş testler; genel kullanım/üretim için değildir.\n");
+#if defined(__APPLE__) || defined(NERO_SAFE_TEST)
+            printf("-Syn: unsupported in this build; no network traffic is generated.\n");
+#endif
             printf("\n\033[1;32mAvailable Commands:\033[0m\n");
             printf(PRINTING_LINE_1);
 
@@ -300,7 +336,7 @@ int terminal_code()
         else if (strstr(command, "clear") != NULL) 
         {   
             row_location = 16;            
-            terminal_code();
+            ascii_function();
 
         } 
         else if (strstr(command, "version") != NULL) 
@@ -313,6 +349,8 @@ int terminal_code()
         }
     }
 
+input_end:
+    restoreBuffering(&old);
     return 0;
 }
 
