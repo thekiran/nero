@@ -12,11 +12,11 @@
 
 extern const char *windows[];
 
-int row_location_function();
+int row_location_function(void);
 
 pthread_mutex_t ekran_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int ascii_function() {
+int ascii_function(void) {
     printf("\033[H\033[J");
     system("clear");
     fflush(stdout);

@@ -1,9 +1,8 @@
 #include <stdio.h>
 #include "terminal.h"
 
-int main() {
+int main(void) {
     
-    terminal_code();
+    return terminal_code();
 
-    return 0;
 }
