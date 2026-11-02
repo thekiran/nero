@@ -17,6 +17,14 @@ class FoundationTests(unittest.TestCase):
         layout = json.loads((ROOT / "tests/layout-baseline.json").read_text())["files"]
         readability = json.loads((ROOT / "tests/readability-baseline.json").read_text())
         changes = readability["changes"]
+        english = json.loads((ROOT / "tests/english-baseline.json").read_text())["changes"]
+
+        def translated_digest(path, expected):
+            if path in english:
+                self.assertEqual(english[path]["before"], expected)
+                return english[path]["after"]
+            return expected
+
         self.assertEqual(set(layout), set(baseline["files"]))
         destinations = [entry["path"] for entry in layout.values()]
         self.assertEqual(len(destinations), len(set(destinations)))
@@ -29,7 +37,7 @@ class FoundationTests(unittest.TestCase):
                     self.assertEqual(change["before"], expected)
                     expected = change["after"]
                 self.assertEqual(hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
-                                 expected)
+                                 translated_digest(entry["path"], expected))
                 if original != entry["path"]:
                     self.assertFalse((ROOT / original).exists())
 
@@ -37,10 +45,17 @@ class FoundationTests(unittest.TestCase):
             with self.subTest(changed=path):
                 self.assertTrue(change["reason"])
                 self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(),
-                                 change["after"])
+                                 translated_digest(path, change["after"]))
         for path, digest in readability["added"].items():
             with self.subTest(added=path):
-                self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(), digest)
+                self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(),
+                                 translated_digest(path, digest))
+
+        for path, change in english.items():
+            with self.subTest(translated=path):
+                self.assertTrue(change["reason"])
+                self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(),
+                                 change["after"])
 
     def test_platform_report(self):
         run = subprocess.run([str(REPORT)], capture_output=True, text=True, timeout=10)
@@ -51,6 +66,7 @@ class FoundationTests(unittest.TestCase):
         expected_arch = {"arm64": "ARM64", "aarch64": "ARM64", "amd64": "x86_64", "x86_64": "x86_64"}[arch]
         self.assertIn("Architecture: " + expected_arch, run.stdout)
         self.assertIn("LABORATORY USE ONLY", run.stdout)
+        self.assertIn("RESTRICTED TO LABORATORY USE", run.stdout)
         self.assertIn("Traffic generation: Unsupported", run.stdout)
         self.assertIn("Port scanning: Unsupported", run.stdout)
         if platform.system() == "Windows":

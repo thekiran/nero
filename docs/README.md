@@ -1,20 +1,20 @@
-# Belgeler
+# Documentation
 
-[Proje ana sayfası](../README.md)
+[Project home](../README.md)
 
-## Güncel geliştirme belgeleri
+## Current development guides
 
-- [Kod haritası](code-map.md): neyi değiştirmek için hangi dosyayı açmalısınız?
-- [Geliştirme ve doğrulama](building.md): derleme, test, çıktı ve biçim kuralları.
-- [Mimari](architecture.md): bileşen sınırları ve derleme sözleşmeleri.
-- [Platform kapsamı](platform-support.md): desteklenen ve eksik platform özellikleri.
-- [Katkı kuralları](../CONTRIBUTING.md): değişiklik yapma ve doğrulama süreci.
-- [Güvenlik](../SECURITY.md) ve [laboratuvar kullanımı](laboratory-safety.md).
+- [Code map](code-map.md): which file to open for each responsibility.
+- [Development and validation](building.md): builds, tests, outputs and formatting.
+- [Architecture](architecture.md): component boundaries and build contracts.
+- [Platform support](platform-support.md): supported and unavailable features.
+- [Contribution guidelines](../CONTRIBUTING.md): change and validation workflow.
+- [Security](../SECURITY.md) and [laboratory use](laboratory-safety.md).
 
-## İnceleme geçmişi
+## Review history
 
-- [Platform uyumluluk incelemesi](platform-compatibility.md).
-- [Terminal kalite incelemesi](terminal-quality.md).
+- [Platform compatibility review](platform-compatibility.md).
+- [Terminal quality review](terminal-quality.md).
 
-Bu iki inceleme, yapıldıkları zamandaki sorunları ve sonuçları anlatır.
-Güncel dosya sahipliği için kod haritasını kullanın.
+These reviews describe findings and results at the time of each review.
+Use the code map for current file ownership and responsibilities.

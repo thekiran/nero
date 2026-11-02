@@ -68,10 +68,10 @@ Environment: Darwin arm64, Apple Clang 21.0.0 (clang-2100.4.1.1).
 | Mock getifaddrs | Duplicates, missing address/name, oversized name, empty list, API failure, capacity boundary and cleanup checked. |
 | PTY terminal behavior | Raw mode and restoration after clear/exit checked. BSD's transient PENDIN bit is excluded from attribute equality. |
 | Linux engine, scanner, interface source integrity | Unchanged from initial checkout. |
-| Linux build/runtime regression | TEST EDİLMEDİ: local Docker API access denied. Source preservation alone is not a Linux runtime result. |
-| GitHub Actions | Configured for Linux/GCC and macOS/Clang; TEST EDİLMEDİ remotely. No commit/push performed. |
-| Actual load, scan, packet transmission | TEST EDİLMEDİ intentionally; no real traffic tests performed. |
-| Intel macOS, other SDK versions, Linux Clang full build | TEST EDİLMEDİ. |
+| Linux build/runtime regression | NOT TESTED: local Docker API access denied. Source preservation alone is not a Linux runtime result. |
+| GitHub Actions | Configured for Linux/GCC and macOS/Clang; NOT TESTED remotely. No commit/push performed. |
+| Actual load, scan, packet transmission | NOT TESTED intentionally; no real traffic tests performed. |
+| Intel macOS, other SDK versions, Linux Clang full build | NOT TESTED. |
 | cJSON sanitizer validation | NOT COMPLETED: SDK deprecation errors for existing sprintf calls with sanitizer flags. cJSON is compiled in the normal build but omitted from CLI test/analysis sources because the CLI does not call it. |
 
 Initial PTY test attempts timed out when sending commands across clear without

@@ -7,7 +7,7 @@ int main(void)
     puts("N E R O - Development platform report");
     puts("EXPERIMENTAL SOFTWARE - LABORATORY USE ONLY");
     puts("Not intended for public use or production deployment.");
-    puts("DENEYSEL YAZILIM - YALNIZCA LABORATUVAR KULLANIMI");
+    puts("EXPERIMENTAL SOFTWARE - RESTRICTED TO LABORATORY USE");
     printf("Platform: %s\nArchitecture: %s\n", info->os, info->architecture);
     printf("Development CLI: %s\n", info->development_cli ? "Available (POSIX)" : "Unsupported");
     printf("Interface listing: %s\n", info->interface_listing ? "Available (local only)" : "Unsupported");

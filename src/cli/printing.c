@@ -18,16 +18,16 @@
 /*---------------------------*/
 
 //monitor_mode_scan.h 
-#define RF_KILL_ERROR "RF-kill komutu başarısız.\n"
-#define ADAPTER_CLOSE_ERROR "Adapter kapatılamadı: %s\n"
-#define MONITOR_MODE_ERROR "Monitor moda geçiş başarısız: %s\n"
-#define ADAPTER_OPEN_ERROR "Adapter açma başarısız: %s\n"
-#define MEMORY_ALLOCATION_ERROR "Bellek tahsisi başarısız"
-#define CHANNEL_CHANGE_ERROR "Kanal değiştirme hatası: %s\n"
-#define CHANNEL_CHANGE_STOPPED "Kanal değiştirme işlemi durduruldu.\n"
-#define ADAPTER_NAME_ERROR "Ağ adaptör adı alınamadı"
-#define THREAD_CREATION_ERROR "Channel hopping thread oluşturulamadı.\n"
-#define PACKET_CAPTURE_ERROR "Paket yakalama sırasında hata oluştu: %s\n"
+#define RF_KILL_ERROR "RF-kill command failed.\n"
+#define ADAPTER_CLOSE_ERROR "Failed to close adapter: %s\n"
+#define MONITOR_MODE_ERROR "Failed to enable monitor mode: %s\n"
+#define ADAPTER_OPEN_ERROR "Failed to open adapter: %s\n"
+#define MEMORY_ALLOCATION_ERROR "Memory allocation failed"
+#define CHANNEL_CHANGE_ERROR "Channel change failed: %s\n"
+#define CHANNEL_CHANGE_STOPPED "Channel switching stopped.\n"
+#define ADAPTER_NAME_ERROR "Failed to retrieve network adapter name"
+#define THREAD_CREATION_ERROR "Failed to create channel hopping thread.\n"
+#define PACKET_CAPTURE_ERROR "Packet capture failed: %s\n"
 
 //terminal.h +
 #define EXIT_MESSAGE "\n\x1B[35mExiting...\x1B[0m\n"
@@ -38,9 +38,9 @@
 #define CURL_INIT_WARNING "[\x1B[33mWARNING\x1B[0m] curl could not be initialized. Continuing without network request!\n"
 
 //network_scan.h +
-#define FILE_OPEN_ERROR "Dosya açılamadı"
-#define CURL_ERROR "CURL hatası: %s\n"
-#define CURL_INIT_FAILED "CURL başlatılamadı.\n"
+#define FILE_OPEN_ERROR "Failed to open file"
+#define CURL_ERROR "CURL error: %s\n"
+#define CURL_INIT_FAILED "Failed to initialize CURL.\n"
 #define POPEN_FAILED "popen failed\n"
 #define NETWORK_SC_ERROR "\033[1;31m[ERROR]\033[0m : <network IP> -Sc\n"
 

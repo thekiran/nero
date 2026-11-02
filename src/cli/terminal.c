@@ -67,7 +67,7 @@ static void terminal_cleanup(void)
     }
 }
 
-// Terminal girişini anlık okumaya ayarlama
+// Enable immediate terminal input
 void disableBuffering(struct termios *old)
 {
     struct termios new;
@@ -84,7 +84,7 @@ void disableBuffering(struct termios *old)
         return;
     }
     new = *old;
-    new.c_lflag &= ~(ICANON | ECHO); // Canonical mode ve echo'yu kapat
+    new.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
     new.c_cc[VMIN] = 1;
     new.c_cc[VTIME] = 0;
     saved_terminal = *old;
@@ -95,7 +95,7 @@ void disableBuffering(struct termios *old)
         terminal_error = 1;
     }
 }
-// Terminal ayarlarını geri yükleme
+// Restore terminal settings
 void restoreBuffering(struct termios *old)
 {
     (void)old; /* Restore the snapshot owned by this terminal session. */

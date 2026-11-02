@@ -1,28 +1,28 @@
-# Geliştirme ve doğrulama
+# Development and validation
 
-[Proje](../README.md) · [Kod haritası](code-map.md) · [Belgeler](README.md)
+[Project](../README.md) · [Code map](code-map.md) · [Documentation](README.md)
 
-Tüm komutları depo kökünde çalıştırın.
+Run all commands from the repository root.
 
 ## Make
 
-| Komut | Sonuç |
+| Command | Result |
 | --- | --- |
-| `make` | Platforma göre `nero` oluşturur |
-| `make test` | 9 temel ve 19 terminal regresyon testini çalıştırır |
-| `make test-sanitize` | Aynı çevrimdışı testleri ASan/UBSan ile çalıştırır |
-| `make analyze` | CLI ve seçilen macOS adaptörünü Clang ile analiz eder |
-| `make help` | Kullanılabilir geliştirme komutlarını gösterir |
-| `make clean` | Üretilen uygulamayı ve `.build/` dizinini temizler |
+| `make` | Build the platform-specific `nero` executable |
+| `make test` | Run 9 core and 19 terminal regression tests |
+| `make test-sanitize` | Run the same offline tests with ASan/UBSan |
+| `make analyze` | Analyze the CLI and selected macOS adapter with Clang |
+| `make help` | List development commands |
+| `make clean` | Remove the generated executable and `.build/` directory |
 
-Gereksinimler: C11 derleyicisi, Make ve testler için Python 3.
-macOS için Xcode Command Line Tools / SDK yeterlidir.
-Linux'un mevcut Make hedefi ayrıca curl, cJSON, ldns ve ncurses geliştirme
-kitaplıklarını kullanır; çevrimdışı testler ağ modüllerini bağlamaz.
+Requirements: a C11 compiler, Make, and Python 3 for tests.
+On macOS, the Xcode Command Line Tools / SDK are sufficient.
+The existing Linux Make target also uses the curl, cJSON, ldns and ncurses
+development libraries. Offline tests do not link the network modules.
 
 ## CMake
 
-CMake 3.21+ gerekir. Platformunuza göre `macos`, `linux` veya `windows` preset'ini seçin.
+CMake 3.21+ is required. Select the `macos`, `linux` or `windows` preset for your host.
 
 ```sh
 cmake --preset macos
@@ -30,41 +30,43 @@ cmake --build --preset macos
 ctest --preset macos
 ```
 
-POSIX sanitizer preset'leri `macos-sanitize` ve `linux-sanitize` adlarını taşır.
-Windows için Visual Studio 2022 C araçları gerekir; yalnızca platform temel
-bileşenleri derlenir. Windows CLI desteği yoktur.
+POSIX sanitizer presets are named `macos-sanitize` and `linux-sanitize`.
+Windows requires the Visual Studio 2022 C tools and builds only the platform
+foundation. The Windows CLI is not implemented.
 
-## Çıktılar
+## Generated files
 
 ```text
 .build/
-├── obj/          Make nesneleri ve bağımlılık dosyaları
-├── tests/        Çevrimdışı test uygulamaları
-├── sanitize/     Sanitizer test uygulamaları
-├── analysis/     Clang analiz raporları
-└── cmake/        Platform preset'lerinin derleme dizinleri
+├── obj/          Make object and dependency files
+├── tests/        Offline test executables
+├── sanitize/     Sanitizer test executables
+├── analysis/     Clang analysis reports
+└── cmake/        Platform preset build directories
 ```
 
-Kökteki `nero` ve `.build/` Git dışında kalır. Kaynak dizinlerine derleme çıktısı eklemeyin.
+The root `nero` executable and `.build/` are excluded from Git.
+Do not add build outputs to source directories.
 
-## Kod biçimi
+## Code style
 
-`.editorconfig` girinti ve satır sonlarını, `.clang-format` C biçimini tanımlar.
-CLI kodunda dört boşluk, 100 sütun ve ayrı satırda fonksiyon açılış süslü parantezi
-kullanılır. `clang-format` geliştirme aracıdır; derleme için gerekli değildir.
+`.editorconfig` defines indentation and line endings; `.clang-format` defines C style.
+CLI code uses four spaces, a 100-column limit and opening function braces on a
+separate line. `clang-format` is a development tool, not a build dependency.
 
 ```sh
 clang-format --dry-run --Werror src/cli/terminal.c src/cli/input.c \
   src/cli/render.c src/cli/commands.c src/cli/ascii.c src/cli/cli_internal.h
 ```
 
-Üçüncü taraf kodunu veya eski modülleri topluca biçimlendirmeyin.
-İşlevsel değişiklikleri biçim değişikliklerinden ayrı inceleyin.
+Do not bulk-format third-party code or legacy modules.
+Review functional changes separately from formatting changes.
 
-## Bütünlük kayıtları
+## Integrity records
 
-`baseline.json` tarihsel durumu, `layout-baseline.json` dosya taşıma durumunu korur.
-`readability-baseline.json` CLI'nin sorumluluklara ayrılması ve derleme düzeni için
-önceki/sonraki hash'leri ve yeni dosyaları kaydeder. Test, bu zinciri ve mevcut
-kaynakları doğrular. Yeni bir değişiklikte kayıtları otomatik yenileyerek hatayı
-örtmeyin; farkı inceleyin, ilgili davranış testlerini çalıştırın ve nedeni kaydedin.
+`baseline.json` preserves the historical snapshot; `layout-baseline.json` records
+source relocation. `readability-baseline.json` records before/after hashes and new
+files from the CLI extraction and build reorganization. `english-baseline.json`
+records the subsequent text-only translation. Tests verify this chain and current
+source contents. Do not automatically regenerate records to hide a failure:
+review the change, run relevant behavior tests and document the reason.
