@@ -205,6 +205,12 @@ Please include the operating system, compiler version, and relevant test results
 
 The project is experimental. Security, reliability, and production readiness are not guaranteed.
 
+## License
+
+Nero is open-source software licensed under the [MIT License](LICENSE).
+
+Copyright © 2025–2026 Muhammed Emin Kıran.
+
 ---
 
 <div align="center">
