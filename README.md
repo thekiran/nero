@@ -1,5 +1,57 @@
 # Nero - SYN Flood Testing Tool
 
+> **EXPERIMENTAL SOFTWARE — LABORATORY USE ONLY**
+>
+> Nero is an experimental network testing and research project. It is not intended for general public use, production deployment, or unauthorized network activity.
+>
+> All testing must be performed exclusively in isolated environments or on systems for which explicit authorization has been granted.
+>
+> This software is provided for controlled development, education, research, and testing purposes only.
+
+> **DENEYSEL YAZILIM — YALNIZCA LABORATUVAR KULLANIMI**
+>
+> Nero, ağ testleri ve araştırmaları için geliştirilen deneysel bir projedir. Genel kullanıcı kullanımına, üretim ortamlarında dağıtıma veya izinsiz ağ faaliyetlerine yönelik değildir.
+>
+> Bütün testler yalnızca izole ortamlarda veya açıkça test yetkisi verilmiş sistemlerde gerçekleştirilmelidir.
+>
+> Proje yalnızca kontrollü geliştirme, eğitim, araştırma ve test amaçlarına yöneliktir.
+
+## macOS development and safe validation
+
+On macOS, `make` builds the experimental development CLI with the system C
+compiler and SDK. No Homebrew paths or third-party libraries are needed.
+Use `make CC=clang` to select Clang explicitly. No administrator privileges
+or system-wide installation are needed for these development steps:
+
+```sh
+make
+make test
+make test-sanitize
+make analyze
+```
+
+macOS supports the existing terminal commands, ANSI colors, ASCII graphics,
+and in-memory history. The interface module uses `getifaddrs()`; its standalone
+test harness lists local interfaces without probing the network. It is not a
+new CLI command. Loopback is identified; other interfaces are labelled Unknown
+because this API does not reliably distinguish Wi-Fi from Ethernet.
+
+**`-Syn` is unavailable on macOS.** Its adapter reports that no network traffic
+is generated. Neither the Linux load engine nor the port scanner is linked into
+the macOS executable. This is intentionally partial development compatibility.
+
+On Linux, the existing default source list and library dependencies are retained.
+The tests build a separate executable with the same no-network adapter, so
+`make test` and `make test-sanitize` never execute the Linux load engine.
+Python 3 is required for tests; Clang is required for `make analyze`.
+Existing Linux build/run/install instructions below are retained as historical
+project documentation, not as a recommendation for public or production use.
+Do not run the network engine as part of compatibility validation.
+
+See [platform analysis and validation](docs/platform-compatibility.md) for scope,
+known risks, test results, and untested functionality.
+
+
 ⚠️ **Legal Notice**  
 This software is intended **only for educational, research, and testing purposes on your own systems**. Unauthorized use is illegal. The developer assumes no responsibility for misuse.
 
