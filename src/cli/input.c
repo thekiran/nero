@@ -26,19 +26,33 @@ static void copy_line(cli_line *line, const char *text)
 /* Timeout is used only for escape continuation, never for a whole command. */
 static int read_byte(char *ch, int timeout_ms)
 {
+    if (timeout_ms < 0) {
+        ssize_t count;
+        do {
+            if (cli_termination_signal)
+                return 0;
+            count = read(STDIN_FILENO, ch, 1);
+        } while (count < 0 && errno == EINTR && !cli_termination_signal);
+        return count == 1 ? 1 : (count == 0 ? 0 : -1);
+    }
+
     struct pollfd input = {STDIN_FILENO, POLLIN, 0};
     int ready;
     do {
         if (cli_termination_signal)
             return 0;
-        ready = poll(&input, 1, timeout_ms < 0 ? 100 : timeout_ms);
-    } while ((ready < 0 && errno == EINTR) || (ready == 0 && timeout_ms < 0));
+        ready = poll(&input, 1, timeout_ms);
+    } while (ready < 0 && errno == EINTR);
     if (cli_termination_signal)
         return 0;
     if (ready == 0)
         return -2;
     if (ready < 0)
         return -1;
+    if ((input.revents & POLLNVAL) != 0)
+        return -1;
+    if ((input.revents & (POLLERR | POLLHUP)) != 0)
+        return 0;
     ssize_t count;
     do {
         count = read(STDIN_FILENO, ch, 1);
