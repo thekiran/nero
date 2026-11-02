@@ -12,14 +12,14 @@ No existing project-specific AGENTS.md was found.
 
 | Files | Classification and dependencies |
 | --- | --- |
-| `main.c`, `include/terminal.h` | Portable entry point: main → terminal_code. |
-| `terminal.c` | POSIX termios/read/write; ANSI terminal UI, history, ascii_function and SYN_Flood. Needed bounded input, EOF handling and nonrecursive clear. |
-| `ascii.c`, `include/ascii.h` | POSIX pthread mutex, ANSI/UTF-8 display, system("clear"); no Linux-only API. Graphics retained. |
-| `include/printing.h`, `include/printing.c` | Portable string macros; printing.c is a legacy duplicate not compiled by Makefile. |
-| `select_interface.c`, `include/select_interface.h` | Linux sysfs enumeration and numeric type mapping. Implementation retained byte-for-byte; standalone function is not called by the current CLI. |
-| `syn_flood_powered.c`, `include/syn_flood_powered.h` | Linux TCP/IP layouts (`linux/tcp.h`, `struct iphdr`), raw sockets, IP_HDRINCL, Linux ping options, pthreads/signals. Engine source retained byte-for-byte; deliberately excluded on macOS. |
-| `portscanner.c`, `include/portscanner.h` | POSIX socket/connect/select/fcntl/pthreads; active network scanning. Excluded on macOS and in tests; both files retained unchanged. |
-| `cJSON.c`, `include/cJSON.h` | Bundled portable cJSON 1.7.18; only standard C dependencies; no current CLI callers. Retained unchanged. |
+| `src/main.c`, `include/nero/terminal.h` | Portable entry point: main → terminal_code. |
+| `src/cli/terminal.c` | POSIX termios/read/write; ANSI terminal UI, history, ascii_function and SYN_Flood. Needed bounded input, EOF handling and nonrecursive clear. |
+| `src/cli/ascii.c`, `include/nero/ascii.h` | POSIX pthread mutex, ANSI/UTF-8 display, system("clear"); no Linux-only API. Graphics retained. |
+| `include/nero/printing.h`, `src/cli/printing.c` | Portable string macros; printing.c is a legacy duplicate not compiled by Makefile. |
+| `src/platform/linux/select_interface.c`, `include/nero/select_interface.h` | Linux sysfs enumeration and numeric type mapping. Implementation retained byte-for-byte; standalone function is not called by the current CLI. |
+| `src/modules/syn_flood_powered.c`, `include/nero/syn_flood_powered.h` | Linux TCP/IP layouts (`linux/tcp.h`, `struct iphdr`), raw sockets, IP_HDRINCL, Linux ping options, pthreads/signals. Engine behavior retained; project include paths now use the nero/ prefix. Deliberately excluded on macOS. |
+| `src/modules/portscanner.c`, `include/nero/portscanner.h` | POSIX socket/connect/select/fcntl/pthreads; active network scanning. Excluded on macOS and in tests; both files retained unchanged. |
+| `third_party/cjson/cJSON.c`, `third_party/cjson/cJSON.h` | Bundled portable cJSON 1.7.18; only standard C dependencies; no current CLI callers. Retained unchanged. |
 
 Linux call graph: main → terminal_code → ascii_function / SYN_Flood;
 SYN_Flood → port_get → portscanner → scan_ports_thread / select_port_menu;

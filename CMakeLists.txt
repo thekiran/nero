@@ -1,0 +1,77 @@
+cmake_minimum_required(VERSION 3.21)
+project(nero_development LANGUAGES C)
+
+# Additive, offline targets only. The legacy Linux Makefile remains authoritative.
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+option(NERO_SANITIZERS "Enable ASan and UBSan for offline development targets" OFF)
+option(NERO_STATIC_ANALYSIS "Enable MSVC code analysis for foundation targets" OFF)
+include(CTest)
+
+include(cmake/NeroTargets.cmake)
+
+set(NERO_CLI_SUPPORT_SOURCES
+    src/cli/input.c
+    src/cli/render.c
+    src/cli/commands.c
+    src/cli/ascii.c
+)
+
+add_executable(nero-platform-info src/modules/platform_info.c src/core/platform.c)
+nero_target(nero-platform-info)
+
+if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(test-network-unavailable tests/unit/test_network_unavailable.c src/platform/macos/network_unavailable.c)
+    nero_target(test-network-unavailable)
+    add_test(NAME network-unavailable COMMAND test-network-unavailable)
+    add_test(NAME foundation COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/integration/test_foundation.py" $<TARGET_FILE:nero-platform-info>)
+endif()
+
+if(WIN32)
+    message(STATUS "Windows foundation only: Nero CLI and interface listing are Unsupported")
+elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+    add_executable(nero-safe src/main.c src/cli/terminal.c ${NERO_CLI_SUPPORT_SOURCES} src/platform/macos/network_unavailable.c)
+    nero_target(nero-safe)
+    target_compile_definitions(nero-safe PRIVATE UNICODE_SUPPORT NERO_SAFE_TEST)
+    target_link_libraries(nero-safe PRIVATE Threads::Threads)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(nero-safe PRIVATE _POSIX_C_SOURCE=200809L)
+        set(interface_source src/platform/linux/select_interface.c)
+    else()
+        set(interface_source src/platform/macos/select_interface_macos.c)
+    endif()
+    if(BUILD_TESTING)
+        add_executable(interfaces tests/interfaces.c ${interface_source})
+        nero_target(interfaces)
+        if(APPLE)
+            add_executable(interfaces-mock tests/interfaces_mock_macos.c)
+            nero_target(interfaces-mock)
+        endif()
+        foreach(mock_target nero-mock nero-faults)
+            if(mock_target STREQUAL "nero-faults")
+                set(terminal_source tests/mocks/terminal_faults.c)
+            else()
+                set(terminal_source src/cli/terminal.c)
+            endif()
+            add_executable(${mock_target} src/main.c ${terminal_source} ${NERO_CLI_SUPPORT_SOURCES} tests/mocks/network_handler.c)
+            nero_target(${mock_target})
+            target_compile_definitions(${mock_target} PRIVATE UNICODE_SUPPORT NERO_SAFE_TEST)
+            if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+                target_compile_definitions(${mock_target} PRIVATE _POSIX_C_SOURCE=200809L)
+            endif()
+            target_link_libraries(${mock_target} PRIVATE Threads::Threads)
+        endforeach()
+        add_test(NAME terminal-quality COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/tests/test_terminal_quality.py" $<TARGET_FILE:nero-mock>)
+        set_tests_properties(terminal-quality PROPERTIES TIMEOUT 120)
+        add_test(NAME legacy-safe-regression COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/tests/test_safe.py" $<TARGET_FILE_DIR:nero-safe>)
+        set_tests_properties(legacy-safe-regression PROPERTIES TIMEOUT 120)
+    endif()
+else()
+    message(FATAL_ERROR "Unsupported operating system")
+endif()

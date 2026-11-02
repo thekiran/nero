@@ -1,0 +1,33 @@
+name: Offline static analysis
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  clang:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Existing portable CLI analysis
+        run: make analyze
+      - name: New foundation analysis
+        run: |
+          mkdir -p .build/analysis
+          for source in src/core/platform.c src/modules/platform_info.c tests/unit/test_network_unavailable.c; do
+            clang --analyze -std=c11 -Iinclude -Wall -Wextra -Werror -pedantic -Xanalyzer -analyzer-werror "$source" -o ".build/analysis/$(basename "$source").plist"
+          done
+  msvc:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake --preset windows-analysis
+      - run: cmake --build --preset windows-analysis
+      - run: ctest --preset windows-analysis

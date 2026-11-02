@@ -12,9 +12,9 @@
 #include <signal.h>//--
 #include <netinet/udp.h>  // struct udphdr  
 
-#include "ascii.h"
-#include "terminal.h"
-#include "portscanner.h"
+#include "nero/ascii.h"
+#include "nero/terminal.h"
+#include "nero/portscanner.h"
 
 #define PACKET_SIZE  4096
 #define THREAD_COUNT 512

@@ -3,7 +3,7 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <sys/socket.h>
-#include "select_interface.h"
+#include "nero/select_interface.h"
 #include <string.h>
 
 #define MAX_INTERFACES 128

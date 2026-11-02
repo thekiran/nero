@@ -1,0 +1,179 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "linux",
+      "binaryDir": "${sourceDir}/.build/cmake/linux",
+      "generator": "Unix Makefiles",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc"
+      }
+    },
+    {
+      "name": "macos",
+      "binaryDir": "${sourceDir}/.build/cmake/macos",
+      "generator": "Unix Makefiles",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang"
+      }
+    },
+    {
+      "name": "windows",
+      "binaryDir": "${sourceDir}/.build/cmake/windows",
+      "generator": "Visual Studio 17 2022",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Debug"
+      },
+      "architecture": "x64"
+    },
+    {
+      "name": "macos-sanitize",
+      "inherits": "macos",
+      "binaryDir": "${sourceDir}/.build/cmake/macos-sanitize",
+      "cacheVariables": {
+        "NERO_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "linux-sanitize",
+      "inherits": "linux",
+      "binaryDir": "${sourceDir}/.build/cmake/linux-sanitize",
+      "cacheVariables": {
+        "NERO_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "windows-analysis",
+      "inherits": "windows",
+      "binaryDir": "${sourceDir}/.build/cmake/windows-analysis",
+      "cacheVariables": {
+        "NERO_STATIC_ANALYSIS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "linux",
+      "configurePreset": "linux",
+      "configuration": "Debug"
+    },
+    {
+      "name": "macos",
+      "configurePreset": "macos",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows",
+      "configuration": "Debug"
+    },
+    {
+      "name": "macos-sanitize",
+      "configurePreset": "macos-sanitize",
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-sanitize",
+      "configurePreset": "linux-sanitize",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-analysis",
+      "configurePreset": "windows-analysis",
+      "configuration": "Debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "linux",
+      "configurePreset": "linux",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "macos",
+      "configurePreset": "macos",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "macos-sanitize",
+      "configurePreset": "macos-sanitize",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-sanitize",
+      "configurePreset": "linux-sanitize",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-analysis",
+      "configurePreset": "windows-analysis",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ]
+}

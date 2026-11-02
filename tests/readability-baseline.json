@@ -1,0 +1,43 @@
+{
+  "description": "Reviewed responsibility extraction after layout migration. Historical/layout manifests remain unchanged. Verified with existing CLI regression tests and byte-for-byte output comparisons against the pre-extraction mock binary.",
+  "changes": {
+    "src/main.c": {
+      "before": "58c992394f5db14414d324c5de60d3ff0c4ccb4576c37b935b42cd351876be25",
+      "after": "b05bef5660b0086004e7075f1944c77135734e2f0e232710a25a94b31f2e0ac2",
+      "reason": "Apply consistent C formatting; preserve entry point."
+    },
+    "src/cli/terminal.c": {
+      "before": "fa6ea0180b56db278c2675f98f7e8586318b69e7f1c59e3864b25de75290318d",
+      "after": "890e95e018686e3baf9f7bac52b6ab7ebe7360ae1adf142074735e7943804b89",
+      "reason": "Extract input, rendering and dispatch into dedicated translation units; retain session ownership."
+    },
+    "src/cli/ascii.c": {
+      "before": "7edcfc99f353a7efda780bc4c1c323c963f520e666849ec769910e98c5894206",
+      "after": "8ccb78de810273e636a07f9da5b9b904f92c1511183697a1a1ad0d4ead43cc83",
+      "reason": "Remove unused declarations and includes; format presentation code."
+    },
+    "include/nero/terminal.h": {
+      "before": "b301a5622ba627e1ff05af23b556ded8ae14a3add00e5bc88e77d55825b5aa54",
+      "after": "e9345a14972a6fc1f8230f4dc583c95e3fdf3c666e52acff5439b8748e9e9566",
+      "reason": "Document public API responsibilities."
+    },
+    "Makefile": {
+      "before": "ace14ae5deb45e37e326a3f3e6d188ee5ec1a5231f0e82a21fd09d3371b6d36e",
+      "after": "1b047a513b4cd07586d978373403b9e63276e46596f57bd1953b7f7149879f82",
+      "reason": "Share CLI source groups and move object/dependency files into .build/obj; add help."
+    },
+    "CMakeLists.txt": {
+      "before": "d1aac05a0f1f8d36d3fc0cac35593a779c9b105ed3bdcee8626c3c6ba715a461",
+      "after": "21da1e16528792e6b66c80f94c75c189fd9ea408d4cd85820b95dab014eb6582",
+      "reason": "Link extracted CLI modules into production and mock targets."
+    }
+  },
+  "added": {
+    "src/cli/input.c": "23aacfd55421d126bd242aee6953d58613db381aaaeea9bba518ebaa6412d367",
+    "src/cli/render.c": "d946c72cf6f16d45fb7468cc7deccec656c92a0aa99dca969d7b0fae0f11476c",
+    "src/cli/commands.c": "8c0d402725e7a6c2953634382e4a4e36884c13fe36c4946d65105654e145b285",
+    "src/cli/cli_internal.h": "4154b5ac820da04f149c88b211b2bd5f7363a18fe4fdb1597a973f503b84d4a1",
+    ".clang-format": "6098e34f1ebabf5682a111f0c6d936063a5de9f9cd3b3ec68d884b189c0c7184",
+    ".editorconfig": "8f617694f17b348d28ca56aea2d9c9e7e8817aef97fc089e2f3196a69c331dea"
+  }
+}

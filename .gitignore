@@ -3,3 +3,26 @@
 /nero
 /.build/
 __pycache__/
+
+# Build directories
+/build/
+
+# C/C++ generated files
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+CMakeUserPresets.json
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

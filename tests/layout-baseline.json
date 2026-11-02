@@ -1,0 +1,125 @@
+{
+  "description": "Historical hashes are preserved in baseline.json. before_layout records the existing working tree, including prior user edits; after records path/include/build changes only.",
+  "files": {
+    "Makefile": {
+      "path": "Makefile",
+      "original": "90d721d9c41d02ec7d0e3e7968a0dac8a2311f133909963d59c0f2df8ed8479c",
+      "before_layout": "1c15b5990125896161382774c0a9bb71fdd33b80cb989bbb78510835e3a0d153",
+      "after": "ace14ae5deb45e37e326a3f3e6d188ee5ec1a5231f0e82a21fd09d3371b6d36e"
+    },
+    "ascii.c": {
+      "path": "src/cli/ascii.c",
+      "original": "d0d4a55eac7713e74ad66b4618d52d74ab4155e24314b11f4cd34dc46bb2fdfc",
+      "before_layout": "978308e4887da483852978cba5c5bb6bddbf9e051e742b8c321a15b6efc8d49c",
+      "after": "7edcfc99f353a7efda780bc4c1c323c963f520e666849ec769910e98c5894206"
+    },
+    "cJSON.c": {
+      "path": "third_party/cjson/cJSON.c",
+      "original": "f892717f26cf3d21b7108de50cea95b6e48092950427615fe1d8d9c46ea09cca",
+      "before_layout": "f892717f26cf3d21b7108de50cea95b6e48092950427615fe1d8d9c46ea09cca",
+      "after": "f892717f26cf3d21b7108de50cea95b6e48092950427615fe1d8d9c46ea09cca"
+    },
+    "include/ascii.h": {
+      "path": "include/nero/ascii.h",
+      "original": "33098f170c02b1aaafbb401fcbbb877d2c862a2e979480524217249e1a0dbd9b",
+      "before_layout": "33098f170c02b1aaafbb401fcbbb877d2c862a2e979480524217249e1a0dbd9b",
+      "after": "33098f170c02b1aaafbb401fcbbb877d2c862a2e979480524217249e1a0dbd9b"
+    },
+    "include/cJSON.h": {
+      "path": "third_party/cjson/cJSON.h",
+      "original": "fda63720ffad1d007802f62204831018d167084c26e2ce08ad36f11529a90682",
+      "before_layout": "fda63720ffad1d007802f62204831018d167084c26e2ce08ad36f11529a90682",
+      "after": "fda63720ffad1d007802f62204831018d167084c26e2ce08ad36f11529a90682"
+    },
+    "include/portscanner.h": {
+      "path": "include/nero/portscanner.h",
+      "original": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583",
+      "before_layout": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583",
+      "after": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583"
+    },
+    "src/cli/printing.c": {
+      "path": "src/cli/printing.c",
+      "original": "00fe519c35c8be5df3e18cc4f704381bd951b6f34f8c2b70ca0ee09565947a35",
+      "before_layout": "00fe519c35c8be5df3e18cc4f704381bd951b6f34f8c2b70ca0ee09565947a35",
+      "after": "00fe519c35c8be5df3e18cc4f704381bd951b6f34f8c2b70ca0ee09565947a35"
+    },
+    "include/printing.h": {
+      "path": "include/nero/printing.h",
+      "original": "4baef73f34c07eac23f1f053f867c0a28e70fc6c5836215a4b04bb49dd55222d",
+      "before_layout": "4baef73f34c07eac23f1f053f867c0a28e70fc6c5836215a4b04bb49dd55222d",
+      "after": "4baef73f34c07eac23f1f053f867c0a28e70fc6c5836215a4b04bb49dd55222d"
+    },
+    "include/select_interface.h": {
+      "path": "include/nero/select_interface.h",
+      "original": "f9a458523b279d1a34e80cbe78908c500049c0a3b3a200434c89e31a5c33e589",
+      "before_layout": "f9a458523b279d1a34e80cbe78908c500049c0a3b3a200434c89e31a5c33e589",
+      "after": "f9a458523b279d1a34e80cbe78908c500049c0a3b3a200434c89e31a5c33e589"
+    },
+    "include/syn_flood_powered.h": {
+      "path": "include/nero/syn_flood_powered.h",
+      "original": "71fc60fc3592a591615cc301f43f82b92d0e4fa56beebdb1bdf6c7ffd1699c80",
+      "before_layout": "71fc60fc3592a591615cc301f43f82b92d0e4fa56beebdb1bdf6c7ffd1699c80",
+      "after": "71fc60fc3592a591615cc301f43f82b92d0e4fa56beebdb1bdf6c7ffd1699c80"
+    },
+    "include/terminal.h": {
+      "path": "include/nero/terminal.h",
+      "original": "c57bb20d6e42403da950fc49439a94bf83b0589907c399c199ef4f0b36c20fd8",
+      "before_layout": "b301a5622ba627e1ff05af23b556ded8ae14a3add00e5bc88e77d55825b5aa54",
+      "after": "b301a5622ba627e1ff05af23b556ded8ae14a3add00e5bc88e77d55825b5aa54"
+    },
+    "main.c": {
+      "path": "src/main.c",
+      "original": "d9f87e083842590e6d39330fb967e2f03631e8e6d6cca13a34f51a8de3bf56ad",
+      "before_layout": "d9f87e083842590e6d39330fb967e2f03631e8e6d6cca13a34f51a8de3bf56ad",
+      "after": "58c992394f5db14414d324c5de60d3ff0c4ccb4576c37b935b42cd351876be25"
+    },
+    "platform/network_unavailable.c": {
+      "path": "src/platform/macos/network_unavailable.c",
+      "original": "aeeb662a06158a58c71bf7b1e2399b18ab1ebf4f085d06246a85cab32cca0c1c",
+      "before_layout": "aeeb662a06158a58c71bf7b1e2399b18ab1ebf4f085d06246a85cab32cca0c1c",
+      "after": "932663ef68a8f31e0463b5334b97eb6d90fb9264a90aef6fe1cc5c55c9be4bc2"
+    },
+    "platform/select_interface_macos.c": {
+      "path": "src/platform/macos/select_interface_macos.c",
+      "original": "93053796006072bea1f6b7a7e1046b91f7f563afee00e1e1799add4c4018e942",
+      "before_layout": "93053796006072bea1f6b7a7e1046b91f7f563afee00e1e1799add4c4018e942",
+      "after": "54138a31949627f83cef93f2373ac6fdf17008c5282c785990008ed1965cb6ab"
+    },
+    "portscanner.c": {
+      "path": "src/modules/portscanner.c",
+      "original": "3a9f002cae925347ab661d3f1402a991612698a8678ce2ce896c0fd323a96014",
+      "before_layout": "3a9f002cae925347ab661d3f1402a991612698a8678ce2ce896c0fd323a96014",
+      "after": "3a9f002cae925347ab661d3f1402a991612698a8678ce2ce896c0fd323a96014"
+    },
+    "select_interface.c": {
+      "path": "src/platform/linux/select_interface.c",
+      "original": "7276052e50162d9acdd441907b60c7b18685a10bde4ed8c82ff7e614bffc7859",
+      "before_layout": "7276052e50162d9acdd441907b60c7b18685a10bde4ed8c82ff7e614bffc7859",
+      "after": "7276052e50162d9acdd441907b60c7b18685a10bde4ed8c82ff7e614bffc7859"
+    },
+    "syn_flood_powered.c": {
+      "path": "src/modules/syn_flood_powered.c",
+      "original": "915932b6065646d09b961071131ec632e891d2538e932193ed55a18431d67d19",
+      "before_layout": "915932b6065646d09b961071131ec632e891d2538e932193ed55a18431d67d19",
+      "after": "76898565c7ca3f850d3a5ed82cf718552e74b46bd440047a1846903cb4707b7c"
+    },
+    "terminal.c": {
+      "path": "src/cli/terminal.c",
+      "original": "24c34272e3b478e39b82ea23ca4af1229863a823ece20e6fe349a5f62f94a701",
+      "before_layout": "b149b43ac067a8d750b93073d6efc7b7b1d2288455796bae19634704341ae210",
+      "after": "fa6ea0180b56db278c2675f98f7e8586318b69e7f1c59e3864b25de75290318d"
+    },
+    "tests/interfaces.c": {
+      "path": "tests/interfaces.c",
+      "original": "db2b630f37f426de7f8e8698b02198de7ac06384e6e2cf407f483c550db71860",
+      "before_layout": "db2b630f37f426de7f8e8698b02198de7ac06384e6e2cf407f483c550db71860",
+      "after": "51f45312cc241344d61567b51dbd7797744ee157d96eeac63122631e66bf21b7"
+    },
+    "tests/interfaces_mock_macos.c": {
+      "path": "tests/interfaces_mock_macos.c",
+      "original": "8c33c3ef811609f47ecb80feea4bac5e596d4f6d841b2dff4b7ae5aae9784861",
+      "before_layout": "8c33c3ef811609f47ecb80feea4bac5e596d4f6d841b2dff4b7ae5aae9784861",
+      "after": "ead7b9987887b980945e5b2b3bfc5e6f5cdfe353397ed05b944a554ff357251e"
+    }
+  }
+}
