@@ -1,73 +1,272 @@
+
+<div align="center">
+
+<br />
+
 # NERO
 
-**Experimental Network Testing & Terminal Research Framework**
+### Network Engineering & Research Operations
 
-A C-based experimental project focused on authorized network testing, terminal interface development, and cross-platform systems programming.
+**An experimental, cross-platform C project for systems programming, terminal development, and authorized network research.**
 
-[Repository](https://github.com/thekiran/nero) · [Platform Compatibility](https://github.com/thekiran/nero/blob/main/docs/platform-compatibility.md) · [Demonstration](https://www.youtube.com/watch?v=2HGtMkmqwpU)
+<br />
+
+[![Language](https://img.shields.io/badge/Language-C-24292f?style=flat-square&logo=c&logoColor=white)](https://en.cppreference.com/w/c)
+[![macOS](https://img.shields.io/badge/macOS-Development-24292f?style=flat-square&logo=apple&logoColor=white)](docs/platform-compatibility.md)
+[![Linux](https://img.shields.io/badge/Linux-Platform_Target-24292f?style=flat-square&logo=linux&logoColor=white)](docs/platform-compatibility.md)
+![Status](https://img.shields.io/badge/Status-Experimental-d97706?style=flat-square)
+![Research](https://img.shields.io/badge/Use-Authorized_Research-0969da?style=flat-square)
+
+<br />
+
+[**Overview**](#overview) ·
+[**Features**](#features) ·
+[**Architecture**](#architecture) ·
+[**Installation**](#installation) ·
+[**Documentation**](#documentation)
+
+<br />
 
 ---
+
+<sub>
+Built for systems research, controlled experimentation, and cross-platform development.
+</sub>
+
+</div>
+
+<br />
 
 ## Overview
 
-**Nero** is an experimental systems programming project written in C, designed to explore network resilience, terminal interaction, and operating system compatibility within controlled research environments.
+**Nero** is an experimental systems-level project developed in C, exploring the intersection of network engineering, terminal interfaces, and platform-specific programming.
 
-The project emphasizes low-level development, platform-specific implementations, and reproducible validation.
+It provides a development environment for studying low-level software behavior, validating terminal functionality, and researching network resilience within explicitly authorized environments.
 
-> **Important:** Nero is intended exclusively for authorized research and isolated laboratory environments. Network testing must never be conducted against systems without explicit permission.
+The project is structured around platform-dependent capabilities, allowing development and validation workflows to remain separated from restricted network-testing functionality.
 
-## Features
+### Design principles
 
-| Component | Description |
-|---|---|
-| Network Research | Evaluate network behavior and resilience in controlled environments |
-| Terminal Interface | ANSI colors, ASCII graphics, command history, and interactive terminal behavior |
-| Platform Compatibility | Develop and validate platform-specific C implementations |
-| Defensive Testing | Support authorized firewall and IDS/IPS validation |
-| Quality Assurance | Offline testing, sanitizers, and static analysis |
+| Principle | Description |
+|:---|:---|
+| **Systems-oriented** | Native C development with an emphasis on operating system behavior and low-level interfaces. |
+| **Cross-platform development** | Platform-specific build configurations for macOS and Linux. |
+| **Controlled execution** | Network functionality is constrained by platform and build configuration. |
+| **Testability** | Offline validation, sanitizer-enabled testing, and static analysis. |
+| **Research-focused** | Designed for experimentation and authorized defensive research rather than production deployment. |
 
-## Platform Support
+> [!IMPORTANT]
+> **Authorized environments only.**
+>
+> Nero must only be used in isolated laboratories or on systems for which explicit authorization has been obtained.
+>
+> The project is not intended for public, production, or unauthorized network testing.
 
-Nero uses platform-specific build configurations to separate development features from network-related functionality.
-
-| Capability | macOS | Linux |
-|---|:---:|:---:|
-| Terminal interface | Supported | Supported |
-| ANSI rendering | Supported | Supported |
-| ASCII graphics | Supported | Supported |
-| Command history | Supported | Supported |
-| Network interface enumeration | Supported | Platform-dependent |
-| Linux load engine | Unavailable | Build-dependent |
-| Port scanner | Unavailable | Build-dependent |
-| Offline validation | Supported | Supported |
-
-Network-related components are intentionally restricted by platform and build configuration.
-
-For detailed information, refer to the [Platform Compatibility Documentation](docs/platform-compatibility.md).
+<br />
 
 ---
 
-## Getting Started
+## Features
 
-### macOS
+Nero combines terminal development, platform compatibility research, and controlled network experimentation within a native C codebase.
 
-The macOS development target uses the system compiler and SDK. No additional Homebrew libraries are required.
+<table>
+<tr>
+<td width="50%" valign="top">
 
-**Build**
+### Terminal Environment
+
+Interactive terminal development with support for:
+
+- ANSI escape sequences and color rendering
+- ASCII-based visual elements
+- In-memory command history
+- Terminal input processing
+- Terminal and PTY behavior research
+
+</td>
+<td width="50%" valign="top">
+
+### Network Research
+
+Controlled network testing capabilities for:
+
+- Authorized resilience evaluation
+- Network behavior experimentation
+- Firewall testing
+- IDS/IPS validation
+- Laboratory-based research
+
+Network functionality is subject to platform and build restrictions.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Platform Engineering
+
+Development and compatibility testing across supported environments.
+
+- Native C compilation
+- macOS system compiler support
+- Linux-specific implementations
+- Platform-dependent source selection
+- Build configuration validation
+
+</td>
+<td width="50%" valign="top">
+
+### Quality & Validation
+
+Development workflows focused on correctness and reproducibility.
+
+- Offline test execution
+- No-network test adapters
+- Sanitizer-enabled testing
+- Static code analysis
+- Platform compatibility documentation
+
+</td>
+</tr>
+</table>
+
+<br />
+
+---
+
+## Architecture
+
+Nero separates its development interface, platform-specific implementations, and network-related capabilities through build-time configuration.
+
+The following diagram illustrates the project's **conceptual capability boundaries**, rather than an exact source-directory or module dependency map.
+
+```text
+                       NERO
+              Experimental C Project
+                          |
+          +---------------+---------------+
+          |                               |
+          v                               v
+   TERMINAL DEVELOPMENT           PLATFORM SUPPORT
+          |                               |
+   +------+------+                  +-----+-----+
+   |      |      |                  |           |
+   v      v      v                  v           v
+ Input   ANSI   History            macOS       Linux
+   |      |      |                  |           |
+   +------+------+                  |           |
+          |                         |           |
+          v                         v           v
+   Interactive CLI             Development   Linux-specific
+                                Interface    Components
+                                    |           |
+                                    v           v
+                              Offline Tests  Restricted
+                              & Validation   Network Engine
+                                    |           |
+                                    +-----+-----+
+                                          |
+                                          v
+                                  Build Configuration
+                                  & Platform Controls
+```
+
+### Platform boundaries
+
+**macOS development target**
+
+The macOS executable provides terminal development functionality without linking the Linux load engine or port scanner.
+
+**Linux target**
+
+Linux retains its existing source selection and library dependencies. Network-related functionality must be reviewed before execution and restricted to approved environments.
+
+**Offline validation**
+
+Offline testing uses a no-network adapter, ensuring that tests do not invoke the Linux load engine.
+
+> [!NOTE]
+> The diagram describes the separation of capabilities. For implementation-specific behavior and known limitations, consult the platform compatibility documentation.
+
+<br />
+
+---
+
+## Platform Compatibility
+
+Nero supports different capabilities depending on the target operating system and build configuration.
+
+| Capability | macOS | Linux |
+|:---|:---:|:---:|
+| Native C development | Yes | Yes |
+| Terminal interface | Yes | Yes |
+| ANSI rendering | Yes | Yes |
+| ASCII graphics | Yes | Yes |
+| Command history | Yes | Yes |
+| Local interface enumeration harness | Yes | Platform-dependent |
+| Offline tests | Yes | Yes |
+| Linux load engine | Not linked | Build-dependent |
+| Port scanner | Not linked | Build-dependent |
+| Sanitizer validation | Available target | Available target |
+| Static analysis | Clang | Clang |
+
+**Compatibility notes**
+
+- macOS builds use the native system compiler and SDK.
+- No Homebrew-specific paths or third-party libraries are required for the macOS development target.
+- The `-Syn` operation is unavailable in the macOS executable.
+- The macOS interface test harness enumerates local interfaces without generating network probes.
+- Linux retains its existing library dependencies.
+- Availability of network-related components does not imply authorization to execute them.
+
+Full details are available in the [Platform Compatibility Guide](docs/platform-compatibility.md).
+
+<br />
+
+---
+
+## Installation
+
+### Prerequisites
+
+Development requirements depend on the target operating system.
+
+| Requirement | macOS | Linux |
+|:---|:---|:---|
+| C compiler | Apple Clang | GCC or compatible compiler |
+| Build system | Make | Make |
+| Python 3 | For tests | For tests |
+| Clang | For analysis | For analysis |
+| Platform libraries | System SDK | Linux development dependencies |
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/thekiran/nero.git
 cd nero
+```
+
+### 2. Select your platform
+
+<details open>
+<summary><strong>macOS — Native development build</strong></summary>
+
+<br />
+
+Build Nero using the system C compiler:
+
+```bash
 make
 ```
 
-To explicitly select Clang:
+To explicitly use Clang:
 
 ```bash
 make CC=clang
 ```
 
-**Validation**
+Run the available validation targets:
 
 ```bash
 make test
@@ -75,13 +274,16 @@ make test-sanitize
 make analyze
 ```
 
-The macOS build provides the terminal development interface without linking the Linux load engine or port scanner.
+The macOS development target supports terminal functionality while excluding the Linux load engine and port scanner.
 
-The `-Syn` operation is unavailable on macOS. Interface enumeration tests do not generate network probes.
+</details>
 
-### Linux
+<details>
+<summary><strong>Linux — Development build</strong></summary>
 
-Install the required development dependencies on Debian or Ubuntu-based systems:
+<br />
+
+Install the required dependencies on Debian or Ubuntu-based distributions:
 
 ```bash
 sudo apt update
@@ -95,90 +297,269 @@ sudo apt install \
   clang
 ```
 
-Clone and build the project:
+Build the project:
 
 ```bash
-git clone https://github.com/thekiran/nero.git
-cd nero
 make
 ```
 
-**Legacy installation**
+Run offline validation where supported:
 
-The following commands are retained for development reference. Review the build configuration and executable behavior before installation.
+```bash
+make test
+```
+
+The legacy installation workflow also includes:
 
 ```bash
 make install
 sudo nero
 ```
 
-Linux offline validation uses a no-network adapter and does not execute the load engine.
+**Warning:** Review the executable, build configuration, and network-related capabilities before using the legacy installation workflow.
+
+Do not run network functionality outside an authorized laboratory.
+
+</details>
+
+<br />
 
 ---
 
-## Development & Validation
+## Development
 
-Nero provides a set of development commands for building, testing, and analyzing the codebase.
+The project provides Make-based development workflows for compilation, testing, and static analysis.
 
-| Command | Purpose |
-|---|---|
-| `make` | Build the platform-specific executable |
-| `make test` | Run the available tests |
-| `make test-sanitize` | Execute sanitizer-enabled validation |
-| `make analyze` | Perform static analysis using Clang |
+### Build commands
 
-These commands should be executed in an appropriate development environment. Available targets and behavior may vary by platform.
+| Command | Description |
+|:---|:---|
+| `make` | Compile the platform-specific development target. |
+| `make CC=clang` | Explicitly select Clang as the compiler. |
+| `make test` | Execute the available test suite. |
+| `make test-sanitize` | Run sanitizer-enabled validation. |
+| `make analyze` | Execute Clang-based static analysis. |
+
+### Recommended validation workflow
+
+```bash
+# Build the target
+make
+
+# Run the offline tests
+make test
+
+# Validate with sanitizers
+make test-sanitize
+
+# Run static analysis
+make analyze
+```
+
+### Validation boundaries
+
+The current validation workflow is intended to evaluate development functionality without executing network load operations.
+
+| Validation area | Scope |
+|:---|:---|
+| Terminal behavior | Terminal functionality and related interfaces |
+| Interface enumeration | Local enumeration without active network probing on macOS |
+| Offline testing | No-network adapter |
+| Memory safety | Sanitizer-enabled validation |
+| Static analysis | Clang-based source analysis |
+| Network engine | Excluded from offline tests |
+
+Successful validation does not establish that all platform-specific behavior has been tested or that the project is ready for production.
+
+<br />
+
+---
 
 ## Demonstration
 
-### Terminal Interface
+### Terminal Preview
 
-![Nero terminal demonstration](https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084)
+A look at Nero's terminal-based interface and visual presentation.
 
-![Nero terminal screenshot](https://github.com/user-attachments/assets/60ef735b-c908-48c2-a8c1-99245a935e03)
+<div align="center">
+
+<img
+  src="https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084"
+  alt="Nero terminal demonstration"
+  width="90%"
+/>
+
+<br /><br />
+
+<img
+  src="https://github.com/user-attachments/assets/60ef735b-c908-48c2-a8c1-99245a935e03"
+  alt="Nero terminal interface"
+  width="90%"
+/>
+
+</div>
 
 ### Video Demonstration
 
-[![Watch Nero demonstration](https://img.youtube.com/vi/2HGtMkmqwpU/hqdefault.jpg)](https://www.youtube.com/watch?v=2HGtMkmqwpU)
+<div align="center">
 
-[Watch the demonstration on YouTube](https://www.youtube.com/watch?v=2HGtMkmqwpU)
+<a href="https://www.youtube.com/watch?v=2HGtMkmqwpU">
+  <img
+    src="https://img.youtube.com/vi/2HGtMkmqwpU/hqdefault.jpg"
+    alt="Watch the Nero project demonstration"
+    width="75%"
+  />
+</a>
+
+<br />
+
+**[Watch the demonstration on YouTube](https://www.youtube.com/watch?v=2HGtMkmqwpU)**
+
+</div>
+
+<br />
 
 ---
 
-## Security & Responsible Use
+## Documentation
 
-Nero is provided strictly for educational, experimental, and defensive security research.
+Technical documentation is maintained alongside the source code.
 
-All use must comply with the following principles:
+| Resource | Description |
+|:---|:---|
+| [Platform Compatibility](docs/platform-compatibility.md) | Supported environments, platform restrictions, validation scope, and known risks. |
+| [Source Repository](https://github.com/thekiran/nero) | Project source code and development history. |
+| [Issue Tracker](https://github.com/thekiran/nero/issues) | Bug reports, compatibility issues, and development discussions. |
+| [Commit History](https://github.com/thekiran/nero/commits) | Historical changes and development activity. |
 
-- Obtain explicit authorization before testing any system.
-- Conduct network experiments only in approved, isolated environments.
-- Do not target public infrastructure or third-party services without permission.
-- Review platform restrictions and build configurations before execution.
-- Comply with applicable laws, policies, and organizational requirements.
+### Known limitations
 
-The maintainers do not endorse unauthorized testing, service disruption, or malicious use.
+Nero is an experimental project with platform-dependent behavior.
+
+Current limitations include:
+
+- The Linux load engine is not linked into the macOS executable.
+- The port scanner is not linked into the macOS executable.
+- The `-Syn` operation is not available on macOS.
+- Platform-specific behavior may remain untested.
+- Network functionality is not included in offline validation.
+- Production readiness is neither established nor guaranteed.
+
+Refer to the compatibility documentation for more information.
+
+<br />
+
+---
+
+## Contributing
+
+Contributions that improve code quality, platform compatibility, documentation, testing, and defensive research are welcome.
+
+Areas of particular interest include:
+
+- **Portability:** Improvements to platform-specific C implementations.
+- **Terminal development:** Input handling, rendering, and interactive terminal behavior.
+- **Testing:** Additional offline test coverage and regression prevention.
+- **Code quality:** Memory safety, static analysis, and error handling.
+- **Documentation:** Clearer technical documentation and reproducible development procedures.
+
+### Development workflow
+
+1. Fork the repository.
+2. Create a descriptive development branch.
+3. Implement and validate your changes.
+4. Run the relevant tests and analysis tools.
+5. Open a pull request describing the changes and validation performed.
+
+Example branch naming:
+
+```text
+feat/terminal-improvements
+fix/platform-compatibility
+test/offline-validation
+docs/development-guide
+refactor/terminal-core
+```
+
+All contributions must respect the project's authorization requirements and network-testing restrictions.
+
+<br />
+
+---
+
+## Security Policy
+
+Nero is intended for authorized education, experimental research, and defensive security validation.
+
+### Responsible use
+
+Users are responsible for ensuring that all testing complies with applicable laws, regulations, organizational policies, and written authorization requirements.
+
+**Permitted research contexts include:**
+
+- Isolated development laboratories
+- Personally owned and controlled test systems
+- Explicitly authorized research infrastructure
+- Approved defensive security environments
+
+**Prohibited uses include:**
+
+- Unauthorized testing of third-party systems
+- Disruption of public or production services
+- Network activity outside approved environments
+- Any activity that violates applicable legal or organizational requirements
+
+> [!CAUTION]
+> **Network testing can affect system availability.**
+>
+> Never assume that an accessible system is an authorized testing target. Obtain explicit permission, verify the intended scope, and use an isolated environment whenever possible.
+
+The maintainers do not endorse malicious activity, unauthorized testing, or disruption of services.
+
+<br />
+
+---
 
 ## Project Status
 
-**Experimental / Research & Development**
+**Nero is under experimental development.**
 
-Nero is an evolving project. Interfaces, internal architecture, platform compatibility, and available capabilities may change during development.
+The project is intended as a research and development environment. Its interfaces, internal implementations, and platform-specific capabilities may change as development progresses.
 
-Production deployment is not recommended.
+| Area | Status |
+|:---|:---|
+| Project maturity | Experimental |
+| Primary language | C |
+| macOS development target | Available |
+| Linux development target | Available |
+| Offline validation | Available |
+| Production deployment | Not recommended |
+
+No production stability or comprehensive platform compatibility guarantees are provided.
+
+<br />
 
 ---
 
-<p align="center">
-  <strong>NERO</strong>
-</p>
+<div align="center">
 
-<p align="center">
-  Written in C · Systems Programming · Authorized Security Research
-</p>
+### NERO
 
-<p align="center">
-  <a href="https://github.com/thekiran/nero">GitHub Repository</a>
-  ·
-  <a href="https://github.com/thekiran/nero/blob/main/docs/platform-compatibility.md">Documentation</a>
-</p>
+**Systems Programming · Terminal Engineering · Authorized Network Research**
+
+<br />
+
+[Repository](https://github.com/thekiran/nero) ·
+[Documentation](docs/platform-compatibility.md) ·
+[Issues](https://github.com/thekiran/nero/issues) ·
+[Contributions](https://github.com/thekiran/nero/pulls)
+
+<br />
+
+<sub>
+Experimental software for controlled research and development.
+</sub>
+
+<br /><br />
+
+</div>
