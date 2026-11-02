@@ -29,7 +29,7 @@ class SafeTests(unittest.TestCase):
 
     def test_commands_and_notice(self):
         output = self.cli(b"help\nhelp -All\nversion\nhistory\nunknown\nexit\n")
-        for expected in (b"LABORATORY USE ONLY", b"LABORATUVAR KULLANIMI", b"Available Commands",
+        for expected in (b"LABORATORY USE ONLY", b"RESTRICTED TO LABORATORY USE", b"Available Commands",
                          b"version 1.0", b"Unknown command", b"Exiting"):
             self.assertIn(expected, output)
         self.assertIn(b"help\nhelp -All\nversion\nhistory", output)
@@ -39,7 +39,7 @@ class SafeTests(unittest.TestCase):
         self.assertIsNone(re.search(
             rb"\b_?(socket|connect|sendto|sendmsg|getaddrinfo|gethostbyname)(?:@[^\s]+)?$",
             symbols, re.M), symbols)
-        self.assertIn(b"unsupported in this build", self.cli(b"not-a-target -Syn\nexit\n"))
+        self.assertIn(b"unsupported in this build", self.cli(b"192.0.2.1 -Syn\nexit\n"))
 
     def test_eof_and_incomplete_escape(self):
         for data in (b"", b"unfinished", b"\x1b", b"\x1b["):
@@ -64,12 +64,16 @@ class SafeTests(unittest.TestCase):
         result = run("interfaces", b"1\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         output = ANSI.sub(b"", result.stdout)
+        self.assertIn(b"Available Network Interfaces:", output)
+        self.assertIn(b"Select an interface [1-", output)
         names = re.findall(rb"^\s*\d+\) (\S+)", output, re.M)
         self.assertTrue(names)
         self.assertEqual(len(names), len(set(names)))
         self.assertIn(b"SELECTED:" + names[0], output)
         for data in (b"0\n", b"-1\n", b"999\n", b"invalid\n", b""):
-            self.assertEqual(run("interfaces", data).returncode, 1)
+            invalid = run("interfaces", data)
+            self.assertEqual(invalid.returncode, 1)
+            self.assertIn(b"Invalid selection.", invalid.stderr)
 
     @unittest.skipUnless(sys.platform == "darwin", "Darwin adapter fixtures")
     def test_interface_fixtures(self):
