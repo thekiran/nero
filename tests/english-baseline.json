@@ -1,0 +1,55 @@
+{
+  "description": "English text-only migration after CLI extraction. Verified source tokens, string counts, ANSI/control escapes and printf placeholders against the pre-translation snapshot.",
+  "changes": {
+    "src/platform/macos/select_interface_macos.c": {
+      "before": "54138a31949627f83cef93f2373ac6fdf17008c5282c785990008ed1965cb6ab",
+      "after": "19d26806270b943178b2ddf7c6fad2f855f89148792b0d5834c59557cc6ab380",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/platform/linux/select_interface.c": {
+      "before": "7276052e50162d9acdd441907b60c7b18685a10bde4ed8c82ff7e614bffc7859",
+      "after": "736967aadb5c844444d778b23f45513a3b11b4f09fbbd20f135157c8effe09d1",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/cli/ascii.c": {
+      "before": "8ccb78de810273e636a07f9da5b9b904f92c1511183697a1a1ad0d4ead43cc83",
+      "after": "76e52700feaacc2f1935f341b6d540dc5a9c4ef2146425400cb04183295a4105",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/cli/terminal.c": {
+      "before": "890e95e018686e3baf9f7bac52b6ab7ebe7360ae1adf142074735e7943804b89",
+      "after": "7b223fc1420d45914698dfe763bddc66358a88959cba77f31795d59b63a2173d",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/cli/printing.c": {
+      "before": "00fe519c35c8be5df3e18cc4f704381bd951b6f34f8c2b70ca0ee09565947a35",
+      "after": "b8f6506895450a4c7b4c15d35b5063f1df71d79a19cf630f5658c40e78e22152",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/cli/render.c": {
+      "before": "d946c72cf6f16d45fb7468cc7deccec656c92a0aa99dca969d7b0fae0f11476c",
+      "after": "0d4f974086bcf246cecaba99255bea6977eb5601b823e7a2e08439797fd57887",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/modules/portscanner.c": {
+      "before": "3a9f002cae925347ab661d3f1402a991612698a8678ce2ce896c0fd323a96014",
+      "after": "c067450c59288109bf6fb54f1143818ced60954539cd1d952d31e311599f1cc4",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/modules/syn_flood_powered.c": {
+      "before": "76898565c7ca3f850d3a5ed82cf718552e74b46bd440047a1846903cb4707b7c",
+      "after": "8847df4a96caf14455fa8485948614eabbe8c9f723b7c05ab88b32109cedc4e6",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "src/modules/platform_info.c": {
+      "before": "5f054420dd2ac6f8ab8db157b6c3d9918ce40d098de919530a228ce13dc11c09",
+      "after": "c08a1bdec4ee35dab7445e40a1e533251e950fc9af2d7491505d04f486316d19",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    },
+    "include/nero/printing.h": {
+      "before": "4baef73f34c07eac23f1f053f867c0a28e70fc6c5836215a4b04bb49dd55222d",
+      "after": "1f1f1cbb07e8d3325230cf725739c81e8ce3781722c2ac3b02c684837d4886d4",
+      "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
+    }
+  }
+}

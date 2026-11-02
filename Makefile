@@ -1,11 +1,11 @@
-# Professional Makefile for "nero" project
+# Nero: production build, offline tests and analysis
 
 # Compiler and flags
 CC           ?= cc
 CFLAGS       := -Wall -Wextra -Werror -pedantic -std=c11 \
                  -D_POSIX_C_SOURCE=199309L \
                  -g \
-                 -I include \
+                 -I include -I third_party/cjson \
                  -I /usr/include/ldns \
                  -DUNICODE_SUPPORT
 LDFLAGS      := \
@@ -13,36 +13,46 @@ LDFLAGS      := \
                  -lcjson \
                  -lldns \
                  -pthread \
-                 -lncurses 
+                 -lncurses
 
-# Project files
+# Source groups
+CLI_SUPPORT_SOURCES := \
+    src/cli/input.c \
+    src/cli/render.c \
+    src/cli/commands.c \
+    src/cli/ascii.c
+CLI_SOURCES := src/cli/terminal.c $(CLI_SUPPORT_SOURCES)
+CLI_HEADERS := $(wildcard include/nero/*.h src/cli/*.h)
+
+# Production sources
 SRCS         := \
-                 main.c \
-                 syn_flood_powered.c \
-                 cJSON.c \
-                 ascii.c \
-                 terminal.c \
-                 select_interface.c \
-                 portscanner.c
+                 src/main.c \
+                 src/modules/syn_flood_powered.c \
+                 third_party/cjson/cJSON.c \
+                 $(CLI_SOURCES) \
+                 src/platform/linux/select_interface.c \
+                 src/modules/portscanner.c
 
 # Darwin builds only the development CLI and read-only interface adapter.
 # Linux keeps its original source list and link dependencies.
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-SRCS := main.c cJSON.c ascii.c terminal.c platform/select_interface_macos.c platform/network_unavailable.c
-CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 -g -I include -DUNICODE_SUPPORT
+SRCS := src/main.c third_party/cjson/cJSON.c $(CLI_SOURCES) src/platform/macos/select_interface_macos.c src/platform/macos/network_unavailable.c
+CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 -g -I include -I third_party/cjson -DUNICODE_SUPPORT
 LDFLAGS :=
 LDLIBS += -pthread
 else ifneq ($(UNAME_S),Linux)
 $(error Unsupported platform: $(UNAME_S))
 endif
 
-OBJS         := $(SRCS:.c=.o)
+BUILD_DIR    := .build
+OBJS         := $(addprefix $(BUILD_DIR)/obj/,$(SRCS:.c=.o))
 TARGET       := nero
 INSTALL_DIR  := /usr/local/bin
 
 # Phony targets
-.PHONY: all clean install run run_default
+.PHONY: all clean install run run_default help
+.DEFAULT_GOAL := all
 
 # Default target: build the executable
 all: $(TARGET)
@@ -54,7 +64,8 @@ $(TARGET): $(OBJS)
 	@echo "[INFO] Linked $(TARGET) successfully"
 
 # Compile .c sources to .o object files
-%.o: %.c
+$(BUILD_DIR)/obj/%.o: %.c
+	@mkdir -p $(dir $@)
 	@echo "[CC] Compiling $<"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
@@ -90,37 +101,55 @@ clean:
 SAFE_FLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -g -Iinclude -DUNICODE_SUPPORT -DNERO_SAFE_TEST
 ifeq ($(UNAME_S),Linux)
 SAFE_FLAGS += -D_POSIX_C_SOURCE=200809L
-INTERFACE_SOURCE = select_interface.c
+INTERFACE_SOURCE = src/platform/linux/select_interface.c
 else
-INTERFACE_SOURCE = platform/select_interface_macos.c
+INTERFACE_SOURCE = src/platform/macos/select_interface_macos.c
 endif
-SAFE_SOURCES = main.c terminal.c ascii.c platform/network_unavailable.c
+SAFE_SOURCES = src/main.c $(CLI_SOURCES) src/platform/macos/network_unavailable.c
+MOCK_SOURCES = src/main.c $(CLI_SOURCES) tests/mocks/network_handler.c
+FAULT_SOURCES = src/main.c tests/mocks/terminal_faults.c $(CLI_SUPPORT_SOURCES) tests/mocks/network_handler.c
 TEST_DIR ?= .build/tests
 SANITIZERS ?=
 .PHONY: test test-sanitize analyze
 $(TEST_DIR):
 	mkdir -p $@
 
-$(TEST_DIR)/nero-safe: $(SAFE_SOURCES) $(wildcard include/*.h) Makefile | $(TEST_DIR)
+$(TEST_DIR)/nero-safe: $(SAFE_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(SAFE_SOURCES) -o $@ -pthread -lm
 
-$(TEST_DIR)/interfaces: tests/interfaces.c $(INTERFACE_SOURCE) include/select_interface.h Makefile | $(TEST_DIR)
+$(TEST_DIR)/interfaces: tests/interfaces.c $(INTERFACE_SOURCE) include/nero/select_interface.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/interfaces.c $(INTERFACE_SOURCE) -o $@
 
-test: $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces
+$(TEST_DIR)/nero-mock: $(MOCK_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(MOCK_SOURCES) -o $@ -pthread
+
+$(TEST_DIR)/nero-faults: $(FAULT_SOURCES) src/cli/terminal.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(FAULT_SOURCES) -o $@ -pthread
+
+test: $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults
 	python3 tests/test_safe.py $(TEST_DIR)
+	python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
 
 test-sanitize:
 	$(MAKE) test TEST_DIR=.build/sanitize SANITIZERS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 
 analyze:
 	@mkdir -p .build/analysis
-	@set -e; for source in $(SAFE_SOURCES) $(filter platform/%,$(INTERFACE_SOURCE)); do \
+	@set -e; for source in $(SAFE_SOURCES) $(filter src/platform/macos/%,$(INTERFACE_SOURCE)); do \
 		clang --analyze $(SAFE_FLAGS) -Xanalyzer -analyzer-werror $$source -o .build/analysis/$$(basename $$source).plist; \
 	done
 
 ifeq ($(UNAME_S),Darwin)
-$(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c platform/select_interface_macos.c Makefile | $(TEST_DIR)
+$(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $< -o $@
 test: $(TEST_DIR)/interfaces-mock
 endif
+
+# Discoverable entry point for local development.
+help:
+	@echo "make                 Build the platform-specific executable"
+	@echo "make test            Run offline CLI regression tests"
+	@echo "make test-sanitize   Run offline tests with ASan/UBSan"
+	@echo "make analyze         Run Clang static analysis"
+	@echo "make clean           Remove generated build files"
+	@echo "Code map: docs/code-map.md"

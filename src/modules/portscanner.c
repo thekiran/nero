@@ -34,26 +34,26 @@ void enable_raw_mode() {
 }
 
 // --- Port Menu (unchanged logic) ---
-// qsort için gerekli olan karşılaştırma fonksiyonu (büyükten küçüğe)
+// Comparison function used by qsort
 int compare_desc(const void *a, const void *b) {
     return (*(int*)a - *(int*)b);
 }
 
-// --- Port Menu (Sıralama eklenmiş hali) ---
+// --- Port Menu (sorted entries) ---
 int select_port_menu(int *open_ports, int count) {
     if (count == 0) {
         printf("[!] No open ports found to select.\n");
         return 0;
     }
 
-    // *** YENİ EKLENEN SATIR: Portları büyükten küçüğe sırala ***
+    // Sort ports before displaying the menu
     qsort(open_ports, count, sizeof(int), compare_desc);
 
     enable_raw_mode();
     int current_selection = 0;
     char c;
 
-    // Draw the menu for the first time (artık sıralı liste ile)
+    // Draw the menu for the first time (using the sorted list)
     for (int i = 0; i < count; i++) {
         if (i == 0) printf(" > \033[7m%d\033[0m\n", open_ports[i]);
         else printf("   %d\n", open_ports[i]);
