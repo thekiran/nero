@@ -3,8 +3,8 @@
 
 extern const char *windows[];
 
-int ascii_function();
-void flood_animation_a();
+int ascii_function(void);
+void flood_animation_a(void);
 
 #endif
 

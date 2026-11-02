@@ -1,0 +1,35 @@
+name: Laboratory compatibility checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safe-validation:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cc: gcc
+          - os: macos-15
+            cc: clang
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # Dependencies are installed only on the disposable Linux CI runner.
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev
+      - name: Compile and link (never run the Linux executable)
+        run: make CC=${{ matrix.cc }}
+      - name: No-network regression tests
+        run: make test CC=${{ matrix.cc }}
+      - name: No-network memory safety tests
+        run: make test-sanitize CC=${{ matrix.cc }}
+      - name: Portable CLI and macOS adapter static analysis
+        run: make analyze
