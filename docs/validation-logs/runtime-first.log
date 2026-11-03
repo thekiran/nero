@@ -1,0 +1,12 @@
+PASS TCP EOF, UDP bidirectional, UDP receive timeout: 25 cycles
+Traceback (most recent call last):
+  File "/Users/kiran/Desktop/nero/nero/tests/real_network_validation.py", line 31, in <module>
+    try: client.connect(reserved.getsockname()); raise AssertionError('connected')
+socket.timeout: timed out
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiran/Desktop/nero/nero/tests/real_network_validation.py", line 32, in <module>
+    except OSError as e: assert e.errno == errno.ECONNREFUSED; print('PASS refusal errno', e.errno)
+AssertionError

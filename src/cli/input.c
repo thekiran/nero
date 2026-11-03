@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 /* Legacy symbols retained; this module owns history writes. */
-char history[CLI_HISTORY_CAPACITY][CLI_LINE_CAPACITY];
+char history[CLI_HISTORY_CAPACITY][CLI_LINE_CAPACITY] = {{0}};
 int history_index = 0;
 int history_count = 0;
 

@@ -92,6 +92,22 @@ class SafeTests(unittest.TestCase):
             self.assertIn(expected, result.stdout + result.stderr)
             self.assertNotIn(b"Sanitizer", result.stderr)
 
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin adapter fixtures")
+    def test_interface_selection_requires_complete_bounded_integer(self):
+        for data in (b"1junk\n", b"1 2\n", b"4294967297\n",
+                     b"9" * 100 + b"\n", b"1" + b" " * 200 + b"\n",
+                     b"\n", b" \t\n"):
+            with self.subTest(data=data):
+                result = run("interfaces-mock", data)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(b"Invalid selection.", result.stderr)
+                self.assertNotIn(b"SELECTED:", result.stdout)
+        for data in (b"1\n", b" 1 \t\n", b"1"):
+            with self.subTest(data=data):
+                result = run("interfaces-mock", data)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(b"SELECTED:fixture0", result.stdout)
+
     def test_pty_restores_terminal(self):
         master, slave = pty.openpty()
         before = termios.tcgetattr(slave)

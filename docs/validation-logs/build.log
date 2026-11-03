@@ -1,0 +1,21 @@
+[INFO] Built nero
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/kiran/Desktop/nero/nero/.build/cmake/macos
+[  8%] Built target nero-platform-info
+[ 17%] Built target test-network-unavailable
+[ 40%] Built target nero-safe
+[ 48%] Built target interfaces
+[ 54%] Built target interfaces-mock
+[ 77%] Built target nero-mock
+[100%] Built target nero-faults
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/kiran/Desktop/nero/nero/.build/cmake/macos-sanitize
+[  8%] Built target nero-platform-info
+[ 17%] Built target test-network-unavailable
+[ 40%] Built target nero-safe
+[ 48%] Built target interfaces
+[ 54%] Built target interfaces-mock
+[ 77%] Built target nero-mock
+[100%] Built target nero-faults

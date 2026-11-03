@@ -1,0 +1,33 @@
+PING 192.168.31.1 (192.168.31.1): 56 data bytes
+64 bytes from 192.168.31.1: icmp_seq=0 ttl=64 time=2.839 ms
+64 bytes from 192.168.31.1: icmp_seq=1 ttl=64 time=3.211 ms
+
+--- 192.168.31.1 ping statistics ---
+2 packets transmitted, 2 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 2.839/3.025/3.211/0.186 ms
+Connection to 192.168.31.1 port 80 [tcp/http] succeeded!
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0  2270    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+HTTP/1.1 200 OK
+Server: nginx
+Date: Tue, 03 Nov 2026 08:15:26 GMT
+Content-Type: text/html
+Content-Length: 2270
+Last-Modified: Thu, 30 Jun 2022 02:13:08 GMT
+Connection: close
+ETag: "62bd06b4-8de"
+Expires: Thu, 01 Jan 1970 00:00:01 GMT
+Cache-Control: no-cache
+MiCGI-Switch: 1 1
+MiCGI-TproxyInfo: 192.168.31.1:80
+MiCGI-Upstream: 192.168.31.1
+MiCGI-Client-Ip: 192.168.31.116
+MiCGI-Host: 192.168.31.1
+MiCGI-Http-Host: 192.168.31.1
+MiCGI-Server-Ip: 192.168.31.1
+MiCGI-Server-Port: 80
+MiCGI-Status: LUAROOT
+MiCGI-Preload: no
+Accept-Ranges: bytes
+

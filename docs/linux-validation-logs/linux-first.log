@@ -1,0 +1,289 @@
+COMMAND: uname -a
+Linux 093acee18785 7.0.12-linuxkit #1 SMP PREEMPT Fri Aug 14 16:27:59 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux
+EXIT: 0
+COMMAND: cat /etc/os-release
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.4 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+EXIT: 0
+COMMAND: gcc --version
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+EXIT: 0
+COMMAND: clang --version
+Ubuntu clang version 18.1.3 (1ubuntu1)
+Target: aarch64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /usr/bin
+EXIT: 0
+COMMAND: cmake --version
+cmake version 3.28.3
+
+CMake suite maintained and supported by Kitware (kitware.com/cmake).
+EXIT: 0
+COMMAND: ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+3: gre0@NONE: <NOARP> mtu 1476 qdisc noop state DOWN group default qlen 1000
+    link/gre 0.0.0.0 brd 0.0.0.0
+4: gretap0@NONE: <BROADCAST,MULTICAST> mtu 1462 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+5: erspan0@NONE: <BROADCAST,MULTICAST> mtu 1450 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+6: ip_vti0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+7: ip6_vti0@NONE: <NOARP> mtu 1428 qdisc noop state DOWN group default qlen 1000
+    link/tunnel6 :: brd :: permaddr ab8:72d1:1f77::
+8: sit0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/sit 0.0.0.0 brd 0.0.0.0
+9: ip6tnl0@NONE: <NOARP> mtu 1452 qdisc noop state DOWN group default qlen 1000
+    link/tunnel6 :: brd :: permaddr 166c:c6e1:6ce2::
+10: ip6gre0@NONE: <NOARP> mtu 1448 qdisc noop state DOWN group default qlen 1000
+    link/gre6 :: brd :: permaddr 7a50:ae35:e5e6::
+EXIT: 0
+COMMAND: make -B CC=gcc BUILD_DIR=/tmp/gcc-build TARGET=/tmp/nero-gcc
+[CC] Compiling src/main.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/main.c -o /tmp/gcc-build/obj/src/main.o
+[CC] Compiling src/modules/syn_flood_powered.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/modules/syn_flood_powered.c -o /tmp/gcc-build/obj/src/modules/syn_flood_powered.o
+[CC] Compiling third_party/cjson/cJSON.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c third_party/cjson/cJSON.c -o /tmp/gcc-build/obj/third_party/cjson/cJSON.o
+[CC] Compiling src/cli/terminal.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/terminal.c -o /tmp/gcc-build/obj/src/cli/terminal.o
+[CC] Compiling src/cli/input.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/input.c -o /tmp/gcc-build/obj/src/cli/input.o
+[CC] Compiling src/cli/render.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/render.c -o /tmp/gcc-build/obj/src/cli/render.o
+[CC] Compiling src/cli/commands.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/commands.c -o /tmp/gcc-build/obj/src/cli/commands.o
+[CC] Compiling src/cli/ascii.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/ascii.c -o /tmp/gcc-build/obj/src/cli/ascii.o
+[CC] Compiling src/platform/linux/select_interface.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/platform/linux/select_interface.c -o /tmp/gcc-build/obj/src/platform/linux/select_interface.o
+[CC] Compiling src/modules/portscanner.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/modules/portscanner.c -o /tmp/gcc-build/obj/src/modules/portscanner.o
+gcc /tmp/gcc-build/obj/src/main.o /tmp/gcc-build/obj/src/modules/syn_flood_powered.o /tmp/gcc-build/obj/third_party/cjson/cJSON.o /tmp/gcc-build/obj/src/cli/terminal.o /tmp/gcc-build/obj/src/cli/input.o /tmp/gcc-build/obj/src/cli/render.o /tmp/gcc-build/obj/src/cli/commands.o /tmp/gcc-build/obj/src/cli/ascii.o /tmp/gcc-build/obj/src/platform/linux/select_interface.o /tmp/gcc-build/obj/src/modules/portscanner.o -o /tmp/nero-gcc -lcurl -lcjson -lldns -pthread -lncurses 
+[INFO] Linked /tmp/nero-gcc successfully
+[INFO] Built /tmp/nero-gcc
+EXIT: 0
+COMMAND: make -B CC=clang BUILD_DIR=/tmp/clang-build TARGET=/tmp/nero-clang
+[CC] Compiling src/main.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/main.c -o /tmp/clang-build/obj/src/main.o
+[CC] Compiling src/modules/syn_flood_powered.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/modules/syn_flood_powered.c -o /tmp/clang-build/obj/src/modules/syn_flood_powered.o
+In file included from src/modules/syn_flood_powered.c:17:
+include/nero/portscanner.h:4:16: error: a function declaration without a prototype is deprecated in all versions of C [-Werror,-Wstrict-prototypes]
+    4 | int portscanner();
+      |                ^
+      |                 void
+src/modules/syn_flood_powered.c:286:30: error: passing arguments to 'portscanner' without a prototype is deprecated in all versions of C and is not supported in C23 [-Werror,-Wdeprecated-non-prototype]
+  286 |     port_select = portscanner(target_ip);
+      |                              ^
+src/modules/syn_flood_powered.c:332:2: error: no newline at end of file [-Werror,-Wnewline-eof]
+  332 | }
+      |  ^
+3 errors generated.
+make: *** [Makefile:70: /tmp/clang-build/obj/src/modules/syn_flood_powered.o] Error 1
+EXIT: 2
+COMMAND: gcc -Wall -Wextra -Werror -pedantic -std=c11 -pthread tests/linux/scanner_runtime.c -o /tmp/scanner-runtime
+EXIT: 0
+COMMAND: timeout 15 strace -f -e trace=socket,connect,getsockopt,close,select,pselect6 /tmp/scanner-runtime
+close(3)                                = 0
+close(3)                                = 0
+close(3)                                = 0
+socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+strace: Process 90 attached
+[pid    90] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    90] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    90] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999998833})
+[pid    90] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    90] close(4)                    = 0
+[pid    90] close(4)                    = 0
+[pid    90] close(4)                    = 0
+[pid    90] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 91 attached
+[pid    91] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    91] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    91] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999250})
+[pid    91] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    91] close(4)                    = 0
+[pid    91] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 92 attached
+[pid    92] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    92] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    92] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999334})
+[pid    92] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    92] close(4)                    = 0
+[pid    92] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 93 attached
+[pid    93] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    93] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    93] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999333})
+[pid    93] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    93] close(4)                    = 0
+[pid    93] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 94 attached
+[pid    94] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    94] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    94] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999500})
+[pid    94] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    94] close(4)                    = 0
+[pid    94] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 95 attached
+[pid    95] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    95] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    95] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999541})
+[pid    95] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    95] close(4)                    = 0
+[pid    95] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 96 attached
+[pid    96] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    96] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    96] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999583})
+[pid    96] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    96] close(4)                    = 0
+[pid    96] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 97 attached
+[pid    97] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    97] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    97] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999583})
+[pid    97] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    97] close(4)                    = 0
+[pid    97] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 98 attached
+[pid    98] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    98] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    98] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999417})
+[pid    98] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    98] close(4)                    = 0
+[pid    98] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 99 attached
+[pid    99] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid    99] connect(4, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid    99] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999998250})
+[pid    99] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid    99] close(4)                    = 0
+[pid    99] +++ exited with 0 +++
+close(4)                                = 0
+close(3)                                = 0
+strace: Process 100 attached
+[pid   100] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+[pid   100] connect(3, {sa_family=AF_INET, sin_port=htons(50547), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   100] pselect6(4, NULL, [3], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [3], left {tv_sec=0, tv_nsec=999999542})
+[pid   100] getsockopt(3, SOL_SOCKET, SO_ERROR, [ECONNREFUSED], [4]) = 0
+[pid   100] close(3)                    = 0
+[pid   100] +++ exited with 0 +++
+strace: Process 101 attached
+[pid   101] +++ exited with 0 +++
+close(3)                                = 0
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+[K[+] [92mOpen Port: 50547[0m
+PASS actual scanner worker: 10 connects/EOF, closed port, invalid IPv4, FD baseline restored
++++ exited with 0 +++
+EXIT: 0
+COMMAND: gcc -g -fsanitize=address,undefined -fno-omit-frame-pointer -pthread tests/linux/scanner_runtime.c -o /tmp/scanner-sanitize
+EXIT: 0
+COMMAND: timeout 15 /tmp/scanner-sanitize
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+[K[+] [92mOpen Port: 35291[0m
+PASS actual scanner worker: 10 connects/EOF, closed port, invalid IPv4, FD baseline restored
+EXIT: 0
+COMMAND: gcc -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude tests/interfaces.c src/platform/linux/select_interface.c -o /tmp/interfaces
+EXIT: 0
+[H[J[1;31mAvailable Network Interfaces:[0m
+
+ 1) [1;31mtunl0          [0m (Unknown)
+ 2) [1;33mlo             [0m (Loopback)
+ 3) [1;31mip6gre0        [0m (Unknown)
+ 4) [1;34mgretap0        [0m (Ethernet)
+ 5) [1;31msit0           [0m (Unknown)
+ 6) [1;34merspan0        [0m (Ethernet)
+ 7) [1;31mip6tnl0        [0m (Unknown)
+ 8) [1;31mip_vti0        [0m (Unknown)
+ 9) [1;31mip6_vti0       [0m (Unknown)
+10) [1;31mgre0           [0m (Unknown)
+
+Select an interface [1-10]: SELECTED:tunl0
+INVALID PREFIX EXIT: 0
+[H[J[1;31mAvailable Network Interfaces:[0m
+
+ 1) [1;31mtunl0          [0m (Unknown)
+ 2) [1;33mlo             [0m (Loopback)
+ 3) [1;31mip6gre0        [0m (Unknown)
+ 4) [1;34mgretap0        [0m (Ethernet)
+ 5) [1;31msit0           [0m (Unknown)
+ 6) [1;34merspan0        [0m (Ethernet)
+ 7) [1;31mip6tnl0        [0m (Unknown)
+ 8) [1;31mip_vti0        [0m (Unknown)
+ 9) [1;31mip6_vti0       [0m (Unknown)
+10) [1;31mgre0           [0m (Unknown)
+
+Select an interface [1-10]: SELECTED:tunl0
+VALID EXIT: 0
+COMMAND: ss -tanup
+Netid State     Recv-Q Send-Q Local Address:Port  Peer Address:Port Process
+tcp   TIME-WAIT 0      0          127.0.0.1:58898    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58910    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58926    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58942    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58950    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58966    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58980    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58986    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:58998    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:59014    127.0.0.1:50547       
+tcp   TIME-WAIT 0      0          127.0.0.1:57544    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57546    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57548    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57550    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57566    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57578    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57590    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57602    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57608    127.0.0.1:35291       
+tcp   TIME-WAIT 0      0          127.0.0.1:57616    127.0.0.1:35291       
+EXIT: 0

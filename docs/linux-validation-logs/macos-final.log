@@ -1,0 +1,55 @@
+cc  -Wall -Wextra -Werror -pedantic -std=c11 -g -Iinclude -DUNICODE_SUPPORT -DNERO_SAFE_TEST  src/main.c src/cli/terminal.c src/cli/input.c src/cli/render.c src/cli/commands.c src/cli/ascii.c src/platform/macos/network_unavailable.c -o .build/tests/nero-safe -pthread -lm
+cc  -Wall -Wextra -Werror -pedantic -std=c11 -g -Iinclude -DUNICODE_SUPPORT -DNERO_SAFE_TEST  src/main.c src/cli/terminal.c src/cli/input.c src/cli/render.c src/cli/commands.c src/cli/ascii.c tests/mocks/network_handler.c -o .build/tests/nero-mock -pthread
+cc  -Wall -Wextra -Werror -pedantic -std=c11 -g -Iinclude -DUNICODE_SUPPORT -DNERO_SAFE_TEST  src/main.c tests/mocks/terminal_faults.c src/cli/input.c src/cli/render.c src/cli/commands.c src/cli/ascii.c tests/mocks/network_handler.c -o .build/tests/nero-faults -pthread
+python3 tests/test_safe.py .build/tests
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.488s
+
+OK
+python3 tests/test_terminal_quality.py .build/tests/nero-mock
+...................
+----------------------------------------------------------------------
+Ran 19 tests in 1.145s
+
+OK
+[ 17%] Built target nero-platform-info
+[ 17%] Built target test-network-unavailable
+[ 25%] Built target interfaces
+[ 48%] Built target nero-safe
+[ 54%] Built target interfaces-mock
+[ 77%] Built target nero-mock
+[100%] Built target nero-faults
+Test project /Users/kiran/Desktop/nero/nero/.build/cmake/macos
+    Start 1: network-unavailable
+1/4 Test #1: network-unavailable ..............   Passed    0.00 sec
+    Start 2: foundation
+2/4 Test #2: foundation .......................   Passed    0.03 sec
+    Start 3: terminal-quality
+3/4 Test #3: terminal-quality .................   Passed    0.81 sec
+    Start 4: legacy-safe-regression
+4/4 Test #4: legacy-safe-regression ...........   Passed    0.27 sec
+
+100% tests passed out of 4
+
+Total Test time (real) =   1.12 sec
+[ 14%] Built target nero-platform-info
+[ 17%] Built target test-network-unavailable
+[ 25%] Built target interfaces
+[ 48%] Built target nero-safe
+[ 54%] Built target interfaces-mock
+[ 77%] Built target nero-mock
+[100%] Built target nero-faults
+Test project /Users/kiran/Desktop/nero/nero/.build/cmake/macos-sanitize
+    Start 1: network-unavailable
+1/4 Test #1: network-unavailable ..............   Passed    0.02 sec
+    Start 2: foundation
+2/4 Test #2: foundation .......................   Passed    0.04 sec
+    Start 3: terminal-quality
+3/4 Test #3: terminal-quality .................   Passed    1.13 sec
+    Start 4: legacy-safe-regression
+4/4 Test #4: legacy-safe-regression ...........   Passed    0.57 sec
+
+100% tests passed out of 4
+
+Total Test time (real) =   1.76 sec

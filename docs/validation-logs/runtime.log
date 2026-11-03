@@ -1,0 +1,12 @@
+PASS TCP EOF, UDP bidirectional, UDP receive timeout: 25 cycles
+PASS TCP connect timeout; BLOCKED refusal: local non-listener timed out
+PASS socket descriptor set unchanged [0, 1, 2]
+PASS local resolver and invalid numeric error 8
+PASS resolver descriptors stable after initialization [0, 1, 2, 3, 4]
+PASS interface b'15\n' exit 0
+PASS interface b'0\n' exit 1
+PASS interface b'999\n' exit 1
+PASS interface b'1junk\n' exit 1
+PASS production CLI unsupported command, exit 0
+PASS production signal Signals.SIGINT exit 130
+PASS production signal Signals.SIGTERM exit 143

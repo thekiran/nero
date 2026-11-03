@@ -1,6 +1,6 @@
 #ifndef PORTSCANNER_H
 #define PORTSCANNER_H
 
-int portscanner();
+int portscanner(const char *target_ip);
 
 #endif

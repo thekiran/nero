@@ -1,0 +1,52 @@
+python3 tests/test_safe.py .build/tests
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.190s
+
+OK
+python3 tests/test_terminal_quality.py .build/tests/nero-mock
+...................
+----------------------------------------------------------------------
+Ran 19 tests in 0.765s
+
+OK
+[  8%] Built target nero-platform-info
+[ 17%] Built target test-network-unavailable
+[ 25%] Built target interfaces
+[ 48%] Built target nero-safe
+[ 54%] Built target interfaces-mock
+[ 77%] Built target nero-mock
+[100%] Built target nero-faults
+Test project /Users/kiran/Desktop/nero/nero/.build/cmake/macos
+    Start 1: network-unavailable
+1/4 Test #1: network-unavailable ..............   Passed    0.00 sec
+    Start 2: foundation
+2/4 Test #2: foundation .......................   Passed    0.04 sec
+    Start 3: terminal-quality
+3/4 Test #3: terminal-quality .................   Passed    0.80 sec
+    Start 4: legacy-safe-regression
+4/4 Test #4: legacy-safe-regression ...........   Passed    0.25 sec
+
+100% tests passed out of 4
+
+Total Test time (real) =   1.10 sec
+[  8%] Built target nero-platform-info
+[ 17%] Built target test-network-unavailable
+[ 25%] Built target interfaces
+[ 48%] Built target nero-safe
+[ 54%] Built target interfaces-mock
+[ 77%] Built target nero-mock
+[100%] Built target nero-faults
+Test project /Users/kiran/Desktop/nero/nero/.build/cmake/macos-sanitize
+    Start 1: network-unavailable
+1/4 Test #1: network-unavailable ..............   Passed    0.01 sec
+    Start 2: foundation
+2/4 Test #2: foundation .......................   Passed    0.04 sec
+    Start 3: terminal-quality
+3/4 Test #3: terminal-quality .................   Passed    1.07 sec
+    Start 4: legacy-safe-regression
+4/4 Test #4: legacy-safe-regression ...........   Passed    0.49 sec
+
+100% tests passed out of 4
+
+Total Test time (real) =   1.62 sec

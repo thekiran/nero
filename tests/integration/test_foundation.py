@@ -18,12 +18,19 @@ class FoundationTests(unittest.TestCase):
         readability = json.loads((ROOT / "tests/readability-baseline.json").read_text())
         changes = readability["changes"]
         english = json.loads((ROOT / "tests/english-baseline.json").read_text())["changes"]
+        fixes = json.loads((ROOT / "tests/local-fixes-baseline.json").read_text())["changes"]
+
+        def fixed_digest(path, expected):
+            if path in fixes:
+                self.assertEqual(fixes[path]["before"], expected)
+                return fixes[path]["after"]
+            return expected
 
         def translated_digest(path, expected):
             if path in english:
                 self.assertEqual(english[path]["before"], expected)
-                return english[path]["after"]
-            return expected
+                expected = english[path]["after"]
+            return fixed_digest(path, expected)
 
         self.assertEqual(set(layout), set(baseline["files"]))
         destinations = [entry["path"] for entry in layout.values()]
@@ -53,6 +60,12 @@ class FoundationTests(unittest.TestCase):
 
         for path, change in english.items():
             with self.subTest(translated=path):
+                self.assertTrue(change["reason"])
+                self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(),
+                                 fixed_digest(path, change["after"]))
+
+        for path, change in fixes.items():
+            with self.subTest(fixed=path):
                 self.assertTrue(change["reason"])
                 self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(),
                                  change["after"])

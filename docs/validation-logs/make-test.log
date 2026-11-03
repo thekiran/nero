@@ -1,0 +1,12 @@
+python3 tests/test_safe.py .build/tests
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.191s
+
+OK
+python3 tests/test_terminal_quality.py .build/tests/nero-mock
+...................
+----------------------------------------------------------------------
+Ran 19 tests in 0.788s
+
+OK

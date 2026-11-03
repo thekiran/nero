@@ -68,13 +68,53 @@ cd nero
 
 ### macOS
 
-Build using the system compiler:
+The macOS version runs the interactive development CLI and offline tests.
+It does not include the Linux network load engine or port scanner.
+
+Install Apple's Command Line Tools if they are not already available:
 
 ```bash
-make CC=clang
+xcode-select --install
 ```
 
-The macOS target focuses on terminal development and offline validation.
+From the repository root, build and launch Nero (no `sudo` required):
+
+```bash
+make CC=clang -j4 && ./nero
+```
+
+At the `►` prompt, try `help`, `version`, `history`, and `exit`.
+In the standard macOS build, an IPv4 address followed by `-Syn` reports
+`unsupported in this build; no network traffic is generated.`
+This is expected platform behavior.
+
+Run the offline checks with Python 3 installed:
+
+```bash
+make test
+make test-sanitize
+```
+
+Alternatively, with CMake 3.21 or newer installed:
+
+```bash
+cmake --preset macos
+cmake --build --preset macos -j4
+ctest --preset macos
+.build/cmake/macos/nero-safe
+```
+
+**Troubleshooting — `Undefined symbols ... "_SYN_Flood"`:**
+The macOS build requires `src/platform/macos/network_unavailable.c` to define
+`int SYN_Flood(const char *target_ip)` as the unavailable-network adapter.
+Interface enumeration belongs in `src/platform/macos/select_interface_macos.c`.
+Replacing the adapter with interface-listing code removes the required function
+and prevents linking; installing additional libraries will not resolve it.
+Restore the unavailable adapter while preserving any interface changes separately,
+then rebuild. The current local checkout exhibited this error during validation;
+the launch commands above require that source issue to be resolved first.
+
+See [build documentation](docs/building.md) for additional details.
 
 ### Linux
 
