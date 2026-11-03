@@ -34,10 +34,12 @@ docker run --rm --network none --cap-drop ALL \
   nero-validation-local sh /source/tests/linux/run.sh
 ```
 
-The run script copies source into disposable `/tmp/nero`; it does not overwrite
-host binaries/build directories. It records COMMAND and EXIT for each operation;
-its wrapper continues after failure, so inspect individual statuses, not just
-Docker exit 0. Both recorded container runs exited 0.
+The run script copies source into a `mktemp -d` directory under `/tmp` and always
+removes it on exit; it does not overwrite host binaries/build directories. It
+records COMMAND and EXIT for each operation and now accumulates failures: the
+script exits non-zero if any check failed, so the Docker exit code is meaningful.
+The reproduction below was re-executed after the code audit fixes with
+`TOTAL FAILURES: 0` (script exit 0).
 
 ## Repository findings and document verification
 

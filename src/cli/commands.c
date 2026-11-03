@@ -37,9 +37,11 @@ int cli_dispatch_command(const char *command)
         /* Do not hold the display mutex or shell handlers across engine calls. */
         if (cli_signal_mode(0) != 0)
             return -1;
-        SYN_Flood(tokens[0]);
+        int status = SYN_Flood(tokens[0]);
         if (cli_signal_mode(1) != 0)
             return -1;
+        if (status != 0)
+            fprintf(stderr, "\n-Syn operation failed (status %d).\n", status);
         return 0;
     }
     if ((count == 1 && strcmp(tokens[0], "-mode") == 0) ||
@@ -51,7 +53,9 @@ int cli_dispatch_command(const char *command)
         cli_show_help();
     } else if (strcmp(tokens[0], "history") == 0) {
         if (count == 2 && strcmp(tokens[1], "-clear") == 0) {
-            printf("done"); /* Compatibility: this command has never erased history. */
+            memset(history, 0, sizeof(history));
+            history_count = 0;
+            printf("\nHistory cleared.\n");
         } else if (count == 1) {
             for (int i = 0; i < history_count; ++i)
                 printf("\n%s", history[i]);

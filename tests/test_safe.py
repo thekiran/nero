@@ -49,7 +49,11 @@ class SafeTests(unittest.TestCase):
 
     def test_disabled_network_command(self):
         self.assert_no_network_symbols("nero-safe")
-        self.assertIn(b"unsupported in this build", self.cli(b"192.0.2.1 -Syn\nexit\n"))
+        output = self.cli(b"192.0.2.1 -Syn\nexit\n")
+        self.assertIn(b"unsupported in this build", output)
+        # The engine failure is reported but the session keeps running.
+        self.assertIn(b"-Syn operation failed (status 1)", output)
+        self.assertIn(b"Exiting", output)
 
     def test_eof_and_incomplete_escape(self):
         for data in (b"", b"unfinished", b"\x1b", b"\x1b["):

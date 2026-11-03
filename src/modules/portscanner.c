@@ -17,6 +17,7 @@
 static struct termios orig_termios;
 int *open_ports_list = NULL;
 int port_counter = 0;
+static int scan_alloc_failed = 0;
 const char *target_ip_global;
 pthread_mutex_t ports_mutex;
 
@@ -49,7 +50,9 @@ int select_port_menu(int *open_ports, int count) {
     // Sort ports before displaying the menu
     qsort(open_ports, count, sizeof(int), compare_desc);
 
-    enable_raw_mode();
+    int raw_mode = isatty(STDIN_FILENO);
+    if (raw_mode)
+        enable_raw_mode();
     int current_selection = 0;
     char c;
 
@@ -69,12 +72,14 @@ int select_port_menu(int *open_ports, int count) {
             else printf("   %d\n", open_ports[i]);
         }
 
-        if (read(STDIN_FILENO, &c, 1) != 1) continue;
+        ssize_t got = read(STDIN_FILENO, &c, 1);
+        if (got != 1)
+            break; /* EOF or read error: leave the menu instead of spinning. */
 
         if (c == '\x1b') { // Arrow keys
             char seq[2];
-            if (read(STDIN_FILENO, &seq[0], 1) != 1) continue;
-            if (read(STDIN_FILENO, &seq[1], 1) != 1) continue;
+            if (read(STDIN_FILENO, &seq[0], 1) != 1) break;
+            if (read(STDIN_FILENO, &seq[1], 1) != 1) break;
             if (seq[0] == '[') {
                 if (seq[1] == 'A' && current_selection > 0) current_selection--;
                 else if (seq[1] == 'B' && current_selection < count - 1) current_selection++;
@@ -85,7 +90,8 @@ int select_port_menu(int *open_ports, int count) {
     }
     printf("\x1b[%dA", count);
     printf("\x1b[0J");
-    disable_raw_mode();
+    if (raw_mode)
+        disable_raw_mode();
     printf("Selected Port: %d\n", open_ports[current_selection]);
     return open_ports[current_selection];
 }
@@ -130,10 +136,10 @@ void *scan_ports_thread(void *args) {
             port_counter++;
             int *tmp = realloc(open_ports_list, port_counter * sizeof(int));
             if (!tmp) {
-                perror("Memory error");
+                scan_alloc_failed = 1;
                 pthread_mutex_unlock(&ports_mutex);
                 close(sockfd);
-                exit(1);
+                pthread_exit(NULL);
             }
             open_ports_list = tmp;
             open_ports_list[port_counter - 1] = port;
@@ -170,10 +176,10 @@ void *scan_ports_thread(void *args) {
                 port_counter++;
                 int *tmp = realloc(open_ports_list, port_counter * sizeof(int));
                 if (!tmp) {
-                    perror("Memory error");
+                    scan_alloc_failed = 1;
                     pthread_mutex_unlock(&ports_mutex);
                     close(sockfd);
-                    exit(1);
+                    pthread_exit(NULL);
                 }
                 open_ports_list = tmp;
                 open_ports_list[port_counter - 1] = port;
@@ -207,6 +213,7 @@ int portscanner(const char *target_ip) {
     // Initial setup
     open_ports_list = NULL;
     port_counter = 0;
+    scan_alloc_failed = 0;
 
     if (pthread_mutex_init(&ports_mutex, NULL) != 0) {
         fprintf(stderr, "[-] Failed to initialize mutex.\n");
@@ -218,6 +225,7 @@ int portscanner(const char *target_ip) {
 
     printf("\n[\x1b[93m*\x1b[0m] Scanning %s with %d threads...\n", target_ip, NUM_THREADS);
 
+    int threads_created = 0;
     for (int i = 0; i < NUM_THREADS; i++) {
         t_args[i].start_port = (i * ports_per_thread) + 1;
         if (i == NUM_THREADS - 1) t_args[i].end_port = 65535;
@@ -225,14 +233,24 @@ int portscanner(const char *target_ip) {
 
         if (pthread_create(&threads[i], NULL, scan_ports_thread, &t_args[i]) != 0) {
             fprintf(stderr, "[-] Failed to create thread %d.\n", i);
+            break;
         }
+        threads_created++;
     }
 
-    for (int i = 0; i < NUM_THREADS; i++) {
+    for (int i = 0; i < threads_created; i++) {
         pthread_join(threads[i], NULL);
     }
 
     pthread_mutex_destroy(&ports_mutex);
+
+    if (scan_alloc_failed) {
+        fprintf(stderr, "[-] Memory allocation failed during scan.\n");
+        free(open_ports_list);
+        open_ports_list = NULL;
+        port_counter = 0;
+        return 1;
+    }
 
     clear_lines(port_counter);
     printf("Total open ports found: \x1b[93m%d\x1b[0m\n", port_counter);

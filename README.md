@@ -104,16 +104,6 @@ ctest --preset macos
 .build/cmake/macos/nero-safe
 ```
 
-**Troubleshooting — `Undefined symbols ... "_SYN_Flood"`:**
-The macOS build requires `src/platform/macos/network_unavailable.c` to define
-`int SYN_Flood(const char *target_ip)` as the unavailable-network adapter.
-Interface enumeration belongs in `src/platform/macos/select_interface_macos.c`.
-Replacing the adapter with interface-listing code removes the required function
-and prevents linking; installing additional libraries will not resolve it.
-Restore the unavailable adapter while preserving any interface changes separately,
-then rebuild. The current local checkout exhibited this error during validation;
-the launch commands above require that source issue to be resolved first.
-
 See [build documentation](docs/building.md) for additional details.
 
 ### Linux
@@ -247,7 +237,7 @@ The project is experimental. Security, reliability, and production readiness are
 
 ## License
 
-Nero is open-source software licensed under the [MIT License](LICENSE).
+Nero is open-source software licensed under the [MIT License](LICENSE.txt).
 
 Copyright © 2025–2026 Muhammed Emin Kıran.
 
