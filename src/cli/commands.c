@@ -325,37 +325,40 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     if (count != 2)
         return CLI_CMD_INVALID;
 
-    struct in_addr address;
+    struct in_addr addr;
 
-    if (inet_pton(AF_INET, tokens[0], &address) != 1)
+    if (inet_pton(AF_INET, tokens[0], &addr) != 1)
         return CLI_CMD_INVALID;
 
 #ifdef NERO_SAFE_TEST
-
-    printf(
-        "\n-Syn: offline test for %s; packets sent: 0\n",
-        tokens[0]
-    );
-
+    printf("\n-Syn: simulation for %s; packets sent: 0\n",
+           tokens[0]);
 #else
-
     const uint16_t port = 80;
+    unsigned successful = 0;
 
-    tcp_port_result result = tcp_port_check(
-        tokens[0],
-        port
-    );
+    ascii_function();
 
-    printf(
-        "\nTCP handshake check\n"
-        "Target : %s\n"
-        "Port   : %u\n"
-        "Status : %s\n",
-        tokens[0],
-        (unsigned)port,
-        tcp_result_string(result)
-    );
+    printf("\nTCP Connection Diagnostics: %s:%u\n\n",
+           tokens[0], (unsigned)port);
 
+    for (size_t i = 0; i < 4; ++i) {
+        if (i > 0 && terminal_color_enabled())
+            fputs("\033[3A\033[J", stdout);
+
+        if (terminal_color_enabled())
+            fputs(windows[i], stdout);
+        else
+            printf("Connection test %zu/4\n", i + 1);
+
+        fflush(stdout);
+
+        if (tcp_port_check(tokens[0], port) == TCP_PORT_OPEN)
+            ++successful;
+    }
+
+    printf("\nCompleted: 4 attempts, %u successful\n",
+           successful);
 #endif
 
     return CLI_CMD_CONTINUE;
