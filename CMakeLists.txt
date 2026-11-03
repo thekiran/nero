@@ -19,6 +19,7 @@ set(NERO_CLI_SUPPORT_SOURCES
     src/cli/parser/parser.c
     src/cli/input.c
     src/cli/render.c
+    src/cli/operation_ui.c
     src/cli/commands.c
     src/cli/ascii.c
 )

@@ -20,37 +20,34 @@ CLI_SUPPORT_SOURCES := \
     src/cli/parser/parser.c \
     src/cli/input.c \
     src/cli/render.c \
+    src/cli/operation_ui.c \
     src/cli/commands.c \
     src/cli/ascii.c
 CLI_SOURCES := src/cli/terminal.c $(CLI_SUPPORT_SOURCES)
 CLI_HEADERS := $(wildcard include/nero/*.h src/cli/*.h)
 
 # Production sources
+UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 SRCS := src/main.c third_party/cjson/cJSON.c $(CLI_SOURCES) \
         src/platform/macos/select_interface_macos.c \
         src/modules/portscanner.c
-# Darwin builds only the development CLI and read-only interface adapter.
-# Linux keeps its original source list and link dependencies.
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-SRCS := src/main.c third_party/cjson/cJSON.c $(CLI_SOURCES) src/platform/macos/select_interface_macos.c
-CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 -g -I include -I third_party/cjson -DUNICODE_SUPPORT -DNERO_NETWORK_UNAVAILABLE
+CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 \
+          -g -I include -I third_party/cjson -DUNICODE_SUPPORT
 LDFLAGS :=
 MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
 LDLIBS += -pthread $(MACOS_FRAMEWORKS)
-else ifneq ($(UNAME_S),Linux)
+else ifeq ($(UNAME_S),Linux)
+SRCS := src/main.c src/modules/syn_flood_powered.c \
+        third_party/cjson/cJSON.c $(CLI_SOURCES) \
+        src/platform/linux/select_interface.c \
+        src/modules/portscanner.c
+else
 $(error Unsupported platform: $(UNAME_S))
 endif
 
 BUILD_DIR    := .build
 OBJS         := $(addprefix $(BUILD_DIR)/obj/,$(SRCS:.c=.o))
-
-# Ensure macOS production objects use the safe platform configuration.
-# This also works when CFLAGS is overridden from the command line.
-ifeq ($(UNAME_S),Darwin)
-$(OBJS): CPPFLAGS += -DNERO_NETWORK_UNAVAILABLE
-endif
 
 TARGET       := nero
 INSTALL_DIR  := /usr/local/bin

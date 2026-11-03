@@ -1,3 +1,5 @@
+/* Shared banner and legacy connection frames. Rendering the banner uses the
+ * display mutex so a concurrent writer cannot interleave its output. */
 #include <pthread.h>
 #include <stdio.h>
 
@@ -20,16 +22,7 @@ int ascii_function(void)
         return 0;
     }
     fputs(terminal_color_enabled() ? COLOR : "\n", stdout);
-    printf("                                                         \n"
-           "                                                         \n"
-           "░▒▓███████▓▒░ ░▒▓████████▓▒░░▒▓███████▓▒░  ░▒▓██████▓▒░  \n"
-           "░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ \n"
-           "░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ \n"
-           "░▒▓█▓▒░░▒▓█▓▒░░▒▓██████▓▒░  ░▒▓███████▓▒░ ░▒▓█▓▒░░▒▓█▓▒░ \n"
-           "░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ \n"
-           "░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ \n"
-           "░▒▓█▓▒░░▒▓█▓▒░░▒▓████████▓▒░░▒▓█▓▒░░▒▓█▓▒░ ░▒▓██████▓▒░  \n"
-           "                                                         \n");
+    fputs(NERO_ASCII_LOGO, stdout);
     fputs(terminal_color_enabled() ? CLEAR : "\n", stdout);
     fflush(stdout);
     pthread_mutex_unlock(&ekran_mutex);

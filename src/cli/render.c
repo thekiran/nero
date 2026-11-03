@@ -15,6 +15,8 @@
 extern pthread_mutex_t ekran_mutex;
 int row_location = 14;
 
+/* Capability checks belong at the rendering boundary: redirected output and
+ * dumb terminals must not receive interactive cursor-control sequences here. */
 int terminal_ansi_enabled(void)
 {
     const char *term = getenv("TERM");

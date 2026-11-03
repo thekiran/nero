@@ -1,4 +1,7 @@
 
+/* macOS interface adapter. getifaddrs supplies local interface records and
+ * SystemConfiguration supplies descriptive metadata for the selection list.
+ * Platform-owned enumeration data must be released after building the list. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

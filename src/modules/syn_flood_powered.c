@@ -1,3 +1,6 @@
+/* Legacy Linux traffic engine. Its worker and signal lifecycle is separate
+ * from the shell; macOS production diagnostics are handled in commands.c.
+ * Platform build rules decide whether this implementation is linked. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

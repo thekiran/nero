@@ -1,3 +1,5 @@
+/* Standalone development report; inspecting capabilities performs no network
+ * operations and does not start the interactive shell. */
 #include <stdio.h>
 #include "nero/platform.h"
 

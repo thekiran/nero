@@ -87,6 +87,8 @@ static int read_byte(char *ch, int timeout_ms)
 
 enum input_key { KEY_NONE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_DELETE, KEY_REJECT };
 
+/* Consume the whole bounded escape sequence before returning a key so
+ * terminal control bytes cannot leak into the editable command text. */
 static enum input_key escape_key(void)
 {
     char ch;

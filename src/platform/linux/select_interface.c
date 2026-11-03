@@ -1,3 +1,5 @@
+/* Linux interface adapter. Reads local sysfs metadata for display and returns
+ * the user's chosen name; selection itself does not configure the interface. */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>

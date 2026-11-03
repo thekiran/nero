@@ -1,3 +1,5 @@
+/* Compile-time capability report for the offline development executables.
+ * These flags describe supported adapters, not runtime network availability. */
 #include "nero/platform.h"
 
 #if defined(_WIN32)

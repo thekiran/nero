@@ -1,6 +1,8 @@
 #ifndef NERO_COMMAND_CATALOG_H
 #define NERO_COMMAND_CATALOG_H
 
+/* X-macro catalogs keep command discovery and help/completion consumers on
+ * shared definitions. Each consumer supplies its own expansion macro. */
 #define CLI_KEYWORDS(X) \
     X(help, cmd_help) \
     X(history, cmd_history) \

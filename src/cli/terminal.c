@@ -2,6 +2,9 @@
 #include "nero/terminal.h"
 #include "cli_internal.h"
 #include "nero/ascii.h"
+#if !defined(NERO_NETWORK_UNAVAILABLE) && !defined(NERO_SAFE_TEST)
+#include "nero/portscanner.h"
+#endif
 
 #include <errno.h>
 #include <limits.h>
@@ -19,9 +22,14 @@ static const int shell_signals[] = {SIGINT, SIGTERM, SIGHUP, SIGPIPE};
 static struct sigaction previous_signals[4];
 static int signals_saved = 0;
 
+/* Signal context only publishes flags. Rendering, joining workers and freeing
+ * resources must run later in normal execution, never inside this handler. */
 static void request_termination(int sig)
 {
     cli_termination_signal = sig;
+#if !defined(NERO_NETWORK_UNAVAILABLE) && !defined(NERO_SAFE_TEST)
+    portscanner_interrupt_requested = 1;
+#endif
 }
 
 int cli_signal_mode(int enabled)
@@ -55,6 +63,8 @@ static int set_terminal(const struct termios *settings)
     return result;
 }
 
+/* Restore the session-owned snapshot once. Menu-local raw modes restore their
+ * own snapshots before the outer terminal session reaches this cleanup. */
 static void terminal_cleanup(void)
 {
     if (terminal_changed) {

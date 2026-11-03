@@ -33,6 +33,7 @@
 #include "nero/printing.h"
 #include "nero/terminal.h"
 #include "nero/network_diagnostics.h"
+#include "nero/operation_ui.h"
 #ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/portscanner.h"
 #endif
@@ -52,8 +53,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <pthread.h>
-#include <stdatomic.h>
 #include <time.h>
 
 
@@ -303,6 +302,12 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
 
     int selected_port = portscanner(tokens[0]);
 
+    if (selected_port == PORTSCANNER_CANCELLED) {
+        if (cli_termination_signal == SIGINT)
+            cli_termination_signal = 0;
+        return CLI_CMD_CONTINUE;
+    }
+
     if (selected_port < 0)
         return CLI_CMD_CONTINUE;
 
@@ -362,6 +367,12 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     /* Existing full-range TCP scanner and arrow-key menu. */
     int selected_port = portscanner(tokens[0]);
 
+    if (selected_port == PORTSCANNER_CANCELLED) {
+        if (cli_termination_signal == SIGINT)
+            cli_termination_signal = 0;
+        return CLI_CMD_CONTINUE;
+    }
+
     if (selected_port < 0)
         return CLI_CMD_CONTINUE;
 
@@ -372,63 +383,93 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
 
     const uint16_t port = (uint16_t)selected_port;
 
-    ascii_function();
-
-    printf(
-        "\nTCP Diagnostics: %s:%u\n\n",
+    char diagnostic_detail[96];
+    snprintf(
+        diagnostic_detail,
+        sizeof(diagnostic_detail),
+        "Target %s:%u",
         tokens[0],
         (unsigned)port
     );
 
-    syn_animation_state animation;
-    atomic_init(&animation.stop, 0);
-
-    pthread_t animation_thread;
-
-    int thread_status = pthread_create(
-        &animation_thread,
-        NULL,
-        syn_animation_worker,
-        &animation
+    /* Each recoverable exit below ends this surface before printing to the
+     * main terminal. The operation object remains local to this invocation. */
+    nero_operation_ui diagnostic_ui = {0};
+    nero_operation_begin(
+        &diagnostic_ui,
+        "TCP diagnostics",
+        diagnostic_detail,
+        "Esc · Back"
     );
-
-    if (thread_status != 0) {
-        fprintf(stderr, "\nFailed to start animation thread.\n");
-        return CLI_CMD_FAILURE;
-    }
+    nero_operation_section("CONNECTION TEST");
 
     unsigned successful = 0;
     unsigned attempts = 0;
 
     const struct timespec pause = {
         .tv_sec = 0,
-        .tv_nsec = 350000000L
+        .tv_nsec = 70000000L
     };
 
     for (size_t i = 0;
          i < 4 && !cli_termination_signal;
          ++i) {
 
+        nero_ui_key key = nero_operation_read_key(0);
+        if (key == NERO_UI_KEY_CANCEL) {
+            nero_operation_end(&diagnostic_ui);
+            puts("TCP diagnostics cancelled. Returned to terminal.");
+            return CLI_CMD_CONTINUE;
+        }
+
+        if (i > 0 && terminal_color_enabled())
+            fputs("\033[3A\033[J", stdout);
+
+        if (terminal_color_enabled())
+            fputs(windows[i], stdout);
+        else
+            printf("Connection test %zu/4\n", i + 1);
+
+        fflush(stdout);
+
         if (tcp_port_check(tokens[0], port) == TCP_PORT_OPEN)
             ++successful;
 
         ++attempts;
-        nanosleep(&pause, NULL);
+        /* Split the frame pause into input-checking slices. A connection
+         * attempt can still wait up to TCP_TIMEOUT_SECONDS before this loop. */
+        for (int slice = 0; slice < 5; ++slice) {
+            key = nero_operation_read_key(0);
+            if (key == NERO_UI_KEY_CANCEL) {
+                nero_operation_end(&diagnostic_ui);
+                puts("TCP diagnostics cancelled. Returned to terminal.");
+                return CLI_CMD_CONTINUE;
+            }
+            nanosleep(&pause, NULL);
+        }
     }
 
-    /* Stop animation and wait for the worker. */
-    atomic_store(&animation.stop, 1);
-
-    if (pthread_join(animation_thread, NULL) != 0) {
-        fprintf(stderr, "\nFailed to join animation thread.\n");
-        return CLI_CMD_FAILURE;
+    if (cli_termination_signal) {
+        int interrupted = cli_termination_signal == SIGINT;
+        if (interrupted)
+            cli_termination_signal = 0;
+        nero_operation_end(&diagnostic_ui);
+        if (interrupted)
+            puts("TCP diagnostics cancelled. Returned to terminal.");
+        return CLI_CMD_CONTINUE;
     }
 
-    printf(
-        "\nCompleted: %u attempts, %u successful\n",
+    char diagnostic_result[96];
+    snprintf(
+        diagnostic_result,
+        sizeof(diagnostic_result),
+        "%u attempts  |  %u successful",
         attempts,
         successful
     );
+    nero_operation_status("32", "Diagnostics complete", diagnostic_result);
+    nero_operation_end(&diagnostic_ui);
+    printf("TCP diagnostics complete: %u/%u successful.\n", successful, attempts);
 
 #else
 

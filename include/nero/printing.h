@@ -1,7 +1,8 @@
 #ifndef PRINTING_H
 #define PRINTING_H
 
-/*the functions is a printing*/
+/* Shared display literals and ANSI styling. These macros contain text only;
+ * callers remain responsible for capability checks and output placement. */
 /*---------------------------*/
 #define ESSID_1 "\x1b[1mESSID\x1b[0m"
 #define PURdBm_1 "\x1b[1mPUR (dBm)\x1b[0m"
