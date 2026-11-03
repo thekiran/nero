@@ -51,7 +51,7 @@
 #ifdef UNICODE_SUPPORT
 
 #define TERMINAL_CURSOR "\xE2\x96\xBA"
-#define TERMINAL_CURSOR_1 ---
+#define TERMINAL_CURSOR_1 "---"
 
 #define PRINTING_LINE "\033[33m\033[1m─────────────────────────────────────────────────────────────\n\033[0m"
 #define PRINTING_LINE_1 "\033[1;34m─────────────────────────────────────────────────────────────\033[0m\n"
@@ -78,7 +78,7 @@
 #else
 
 #define TERMINAL_CURSOR ">"
-#define TERMINAL_CURSOR_1 ---
+#define TERMINAL_CURSOR_1 "---"
 
 #define PRINTING_LINE "\033[33m\033[1m+--------------------------------------------------------+\n\033[0m"
 #define PRINTING_LINE_1 "\033[1;34m------------------------------------------------------------------\033[0m\n"
