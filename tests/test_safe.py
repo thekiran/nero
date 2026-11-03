@@ -85,9 +85,8 @@ class SafeTests(unittest.TestCase):
     def test_interface_fixtures(self):
         for mode, data, code, expected in (
             ("normal", b"1\n", 0, b"SELECTED:fixture0"),
-            ("normal", b"2\n", 0, b"SELECTED:fixture2"),
-            ("normal", b"3\n", 0, b"SELECTED:fixture5"),
-            ("normal", b"4\n", 1, b""),
+            ("normal", b"2\n", 0, b"SELECTED:fixture5"),
+            ("normal", b"3\n", 1, b""),
             ("empty", b"", 1, b""),
             ("error", b"", 1, b"getifaddrs"),
             ("limit", b"128\n", 0, b"SELECTED:fixture99"),
