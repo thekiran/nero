@@ -26,15 +26,10 @@ CLI_SOURCES := src/cli/terminal.c $(CLI_SUPPORT_SOURCES)
 CLI_HEADERS := $(wildcard include/nero/*.h src/cli/*.h)
 
 # Production sources
-SRCS         := \
-                 src/main.c \
-                 src/modules/syn_flood_powered.c \
-                 third_party/cjson/cJSON.c \
-                 $(CLI_SOURCES) \
-                 src/platform/linux/select_interface.c \
-                 src/modules/portscanner.c \
-				 src/platform/macos/network_diagnostics_macos.c
-
+ifeq ($(UNAME_S),Darwin)
+SRCS := src/main.c third_party/cjson/cJSON.c $(CLI_SOURCES) \
+        src/platform/macos/select_interface_macos.c \
+        src/modules/portscanner.c
 # Darwin builds only the development CLI and read-only interface adapter.
 # Linux keeps its original source list and link dependencies.
 UNAME_S := $(shell uname -s)

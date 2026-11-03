@@ -33,6 +33,9 @@
 #include "nero/printing.h"
 #include "nero/terminal.h"
 #include "nero/network_diagnostics.h"
+#ifndef NERO_NETWORK_UNAVAILABLE
+#include "nero/portscanner.h"
+#endif
 
 #ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/syn_flood_powered.h"
@@ -48,6 +51,11 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <pthread.h>
+#include <stdatomic.h>
+#include <time.h>
+
 
 #define CLI_MAX_TOKENS 64
 #define TCP_TIMEOUT_SECONDS 1
@@ -268,6 +276,13 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
     if (inet_pton(AF_INET, tokens[0], &address) != 1)
         return CLI_CMD_INVALID;
 
+#ifdef NERO_NETWORK_UNAVAILABLE
+    fputs(
+        "\n-Sc: unsupported in this build; "
+        "no network traffic is generated.\n",
+        stderr
+    );
+#else
     if (!scan_enabled) {
         puts("\nNetwork diagnostics are disabled.");
         return CLI_CMD_CONTINUE;
@@ -286,33 +301,30 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
 
 #else
 
-    static const uint16_t ports[] = {
-        22,
-        80,
-        443,
-        8080
-    };
+    int selected_port = portscanner(tokens[0]);
 
-    const size_t port_count =
-        sizeof(ports) / sizeof(ports[0]);
+    if (selected_port < 0)
+        return CLI_CMD_CONTINUE;
 
-    printf(
-        "\nChecking TCP ports on %s\n",
-        tokens[0]
-    );
-
-    for (size_t i = 0; i < port_count; ++i) {
-        tcp_port_result result =
-            tcp_port_check(tokens[0], ports[i]);
-
-        printf(
-            "Port %-5u : %s\n",
-            (unsigned)ports[i],
-            tcp_result_string(result)
-        );
+    if (selected_port == 0) {
+        puts("\nNo open TCP ports found.");
+        return CLI_CMD_CONTINUE;
     }
 
+    printf("\nSelected port: %d\n", selected_port);
+
+    tcp_port_result result =
+        tcp_port_check(tokens[0], (uint16_t)selected_port);
+
+    printf(
+        "Port %d : %s\n",
+        selected_port,
+        tcp_result_string(result)
+    );
+
 #endif
+
+#endif /* NERO_NETWORK_UNAVAILABLE */
 
     return CLI_CMD_CONTINUE;
 }
@@ -331,38 +343,112 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     if (inet_pton(AF_INET, tokens[0], &addr) != 1)
         return CLI_CMD_INVALID;
 
-#ifdef NERO_NETWORK_UNAVAILABLE
+#if defined(NERO_NETWORK_UNAVAILABLE)
+
     fputs(
         "\n-Syn: unsupported in this build; "
         "no network traffic is generated.\n",
         stderr
     );
-#else
-    const uint16_t port = 80;
-    unsigned successful = 0;
+
+#elif defined(NERO_SAFE_TEST)
+
+    /* Uses the linked mock implementation. */
+    if (SYN_Flood(tokens[0]) != 0)
+        return CLI_CMD_FAILURE;
+
+#elif defined(__APPLE__)
+
+    /* Existing full-range TCP scanner and arrow-key menu. */
+    int selected_port = portscanner(tokens[0]);
+
+    if (selected_port < 0)
+        return CLI_CMD_CONTINUE;
+
+    if (selected_port == 0) {
+        puts("\nNo open TCP ports found.");
+        return CLI_CMD_CONTINUE;
+    }
+
+    const uint16_t port = (uint16_t)selected_port;
 
     ascii_function();
 
-    printf("\nTCP Connection Diagnostics: %s:%u\n\n",
-           tokens[0], (unsigned)port);
+    printf(
+        "\nTCP Diagnostics: %s:%u\n\n",
+        tokens[0],
+        (unsigned)port
+    );
 
-    for (size_t i = 0; i < 4; ++i) {
-        if (i > 0 && terminal_color_enabled())
-            fputs("\033[3A\033[J", stdout);
+    syn_animation_state animation;
+    atomic_init(&animation.stop, 0);
 
-        if (terminal_color_enabled())
-            fputs(windows[i], stdout);
-        else
-            printf("Connection test %zu/4\n", i + 1);
+    pthread_t animation_thread;
 
-        fflush(stdout);
+    int thread_status = pthread_create(
+        &animation_thread,
+        NULL,
+        syn_animation_worker,
+        &animation
+    );
+
+    if (thread_status != 0) {
+        fprintf(stderr, "\nFailed to start animation thread.\n");
+        return CLI_CMD_FAILURE;
+    }
+
+    unsigned successful = 0;
+    unsigned attempts = 0;
+
+    const struct timespec pause = {
+        .tv_sec = 0,
+        .tv_nsec = 350000000L
+    };
+
+    for (size_t i = 0;
+         i < 4 && !cli_termination_signal;
+         ++i) {
 
         if (tcp_port_check(tokens[0], port) == TCP_PORT_OPEN)
             ++successful;
+
+        ++attempts;
+        nanosleep(&pause, NULL);
     }
 
-    printf("\nCompleted: 4 attempts, %u successful\n",
-           successful);
+    /* Stop animation and wait for the worker. */
+    atomic_store(&animation.stop, 1);
+
+    if (pthread_join(animation_thread, NULL) != 0) {
+        fprintf(stderr, "\nFailed to join animation thread.\n");
+        return CLI_CMD_FAILURE;
+    }
+
+    printf(
+        "\nCompleted: %u attempts, %u successful\n",
+        attempts,
+        successful
+    );
+
+#else
+
+    /* Preserve the existing Linux network engine. */
+    if (cli_signal_mode(0) != 0)
+        return CLI_CMD_FAILURE;
+
+    int status = SYN_Flood(tokens[0]);
+
+    if (cli_signal_mode(1) != 0)
+        return CLI_CMD_FAILURE;
+
+    if (status != 0) {
+        fprintf(
+            stderr,
+            "\n-Syn operation failed (status %d).\n",
+            status
+        );
+    }
+
 #endif
 
     return CLI_CMD_CONTINUE;
