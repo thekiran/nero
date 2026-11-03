@@ -37,6 +37,7 @@ CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 \
 LDFLAGS :=
 MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
 LDLIBS += -pthread $(MACOS_FRAMEWORKS)
+SRCS += src/platform/macos/syn_flood_stub.c
 else ifeq ($(UNAME_S),Linux)
 SRCS := src/main.c src/modules/syn_flood_powered.c \
         third_party/cjson/cJSON.c $(CLI_SOURCES) \
