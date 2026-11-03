@@ -14,8 +14,8 @@ route socket EPERM, loopback bind EPERM verdi (BLOCKED).
 Açık izin mekanizmasıyla sandbox dışında tekrar çalıştırılan sorgular ve
 fixture başarılı oldu. Firewall veya cihaz yapılandırması değiştirilmedi.
 
-Kaynak incelemesi: macOS Make/CMake derlemeleri network_unavailable.c
-kullanır. SYN_Flood burada trafik üretmeden 1 döndürür; CLI çalışmaya devam eder.
+Güncel derleme: macOS Make ve offline CMake hedefleri `NERO_NETWORK_UNAVAILABLE`
+ile komut katmanında trafik üretmeden kullanılamıyor mesajı verir; CLI devam eder.
 Linux kaynaklarındaki raw TCP/UDP trafik üretimi ve portscanner macOS üretim
 ikilisinde çalıştırılmadı. Arayüz seçimi getifaddrs ile salt okunur yapılır;
 seçimin socket binding anlamına gelmediğine dikkat edilmelidir.

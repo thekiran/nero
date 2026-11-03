@@ -40,19 +40,9 @@ class SafeTests(unittest.TestCase):
             rb"\b_?(socket|connect|sendto|sendmsg|getaddrinfo|gethostbyname)(?:@[^\s]+)?$",
             symbols, re.M), symbols)
 
-    def test_unavailable_adapter(self):
-        # Gate execution on symbol inspection: regressions must not open sockets.
-        self.assert_no_network_symbols("test-network-unavailable")
-        result = run("test-network-unavailable", b"")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stderr.count(b"unsupported in this build"), 7)
-
     def test_disabled_network_command(self):
         self.assert_no_network_symbols("nero-safe")
         output = self.cli(b"192.0.2.1 -Syn\nexit\n")
-        # The stub engine prints its own one-line message and returns the
-        # SYN_UNAVAILABLE sentinel; the shell must NOT follow up with a
-        # bogus "operation failed" line, and the session must keep running.
         self.assertIn(b"-Syn: unsupported in this build", output)
         self.assertNotIn(b"-Syn operation failed", output)
         self.assertIn(b"Exiting", output)

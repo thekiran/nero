@@ -14,7 +14,9 @@
 #include "nero/cli/parser.h"
 #include "nero/ascii.h"
 #include "nero/printing.h"
+#ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/syn_flood_powered.h"
+#endif
 #include "nero/terminal.h"
 
 #include <arpa/inet.h>
@@ -42,16 +44,19 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     struct in_addr address;
     if (inet_pton(AF_INET, tokens[0], &address) != 1)
         return CLI_CMD_INVALID;
+#ifdef NERO_NETWORK_UNAVAILABLE
+    fputs("\n-Syn: unsupported in this build; no network traffic is generated.\n",
+          stderr);
+#else
     /* Do not hold the display mutex or shell handlers across engine calls. */
     if (cli_signal_mode(0) != 0)
         return CLI_CMD_FAILURE;
     int status = SYN_Flood(tokens[0]);
     if (cli_signal_mode(1) != 0)
         return CLI_CMD_FAILURE;
-    /* SYN_UNAVAILABLE means a stub engine was linked and has already
-     * explained itself; adding "operation failed" on top would mislead. */
-    if (status != 0 && status != SYN_UNAVAILABLE)
+    if (status != 0)
         fprintf(stderr, "\n-Syn operation failed (status %d).\n", status);
+#endif
     return CLI_CMD_CONTINUE;
 }
 

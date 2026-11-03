@@ -38,8 +38,8 @@ SRCS         := \
 # Linux keeps its original source list and link dependencies.
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-SRCS := src/main.c third_party/cjson/cJSON.c $(CLI_SOURCES) src/platform/macos/select_interface_macos.c src/platform/macos/network_unavailable.c
-CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 -g -I include -I third_party/cjson -DUNICODE_SUPPORT
+SRCS := src/main.c third_party/cjson/cJSON.c $(CLI_SOURCES) src/platform/macos/select_interface_macos.c
+CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 -g -I include -I third_party/cjson -DUNICODE_SUPPORT -DNERO_NETWORK_UNAVAILABLE
 LDFLAGS :=
 MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
 LDLIBS += -pthread $(MACOS_FRAMEWORKS)
@@ -66,7 +66,7 @@ $(TARGET): $(OBJS)
 	@echo "[INFO] Linked $(TARGET) successfully"
 
 # Compile .c sources to .o object files
-$(BUILD_DIR)/obj/%.o: %.c
+$(BUILD_DIR)/obj/%.o: %.c Makefile
 	@mkdir -p $(dir $@)
 	@echo "[CC] Compiling $<"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
@@ -91,7 +91,7 @@ clean:
 
 -include $(OBJS:.o=.d)
 
-# Tests always use the no-network adapter, including on Linux.
+# Tests disable network operations or use mocks, including on Linux.
 SAFE_FLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -g -Iinclude -DUNICODE_SUPPORT -DNERO_SAFE_TEST
 ifeq ($(UNAME_S),Linux)
 SAFE_FLAGS += -D_POSIX_C_SOURCE=200809L
@@ -99,7 +99,7 @@ INTERFACE_SOURCE = src/platform/linux/select_interface.c
 else
 INTERFACE_SOURCE = src/platform/macos/select_interface_macos.c
 endif
-SAFE_SOURCES = src/main.c $(CLI_SOURCES) src/platform/macos/network_unavailable.c
+SAFE_SOURCES = src/main.c $(CLI_SOURCES)
 MOCK_SOURCES = src/main.c $(CLI_SOURCES) tests/mocks/network_handler.c
 FAULT_SOURCES = src/main.c tests/mocks/terminal_faults.c $(CLI_SUPPORT_SOURCES) tests/mocks/network_handler.c
 TEST_DIR ?= .build/tests
@@ -109,7 +109,7 @@ $(TEST_DIR):
 	mkdir -p $@
 
 $(TEST_DIR)/nero-safe: $(SAFE_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
-	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(SAFE_SOURCES) -o $@ -pthread -lm
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) -DNERO_NETWORK_UNAVAILABLE $(SANITIZERS) $(SAFE_SOURCES) -o $@ -pthread -lm
 
 $(TEST_DIR)/interfaces: tests/interfaces.c $(INTERFACE_SOURCE) include/nero/select_interface.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/interfaces.c $(INTERFACE_SOURCE) -o $@ $(MACOS_FRAMEWORKS)
@@ -120,10 +120,7 @@ $(TEST_DIR)/nero-mock: $(MOCK_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
 $(TEST_DIR)/nero-faults: $(FAULT_SOURCES) src/cli/terminal.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(FAULT_SOURCES) -o $@ -pthread
 
-$(TEST_DIR)/test-network-unavailable: tests/unit/test_network_unavailable.c src/platform/macos/network_unavailable.c include/nero/syn_flood_powered.h Makefile | $(TEST_DIR)
-	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/unit/test_network_unavailable.c src/platform/macos/network_unavailable.c -o $@
-
-test: $(TEST_DIR)/test-network-unavailable $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults
+test: $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults
 	python3 tests/test_safe.py $(TEST_DIR)
 	python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
 
@@ -133,7 +130,7 @@ test-sanitize:
 analyze:
 	@mkdir -p .build/analysis
 	@set -e; for source in $(SAFE_SOURCES) $(filter src/platform/macos/%,$(INTERFACE_SOURCE)); do \
-		clang --analyze $(SAFE_FLAGS) -Xanalyzer -analyzer-werror $$source -o .build/analysis/$$(basename $$source).plist; \
+		clang --analyze $(SAFE_FLAGS) -DNERO_NETWORK_UNAVAILABLE -Xanalyzer -analyzer-werror $$source -o .build/analysis/$$(basename $$source).plist; \
 	done
 
 ifeq ($(UNAME_S),Darwin)

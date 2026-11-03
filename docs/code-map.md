@@ -21,7 +21,7 @@
 | Standalone platform report | [platform_info.c](../src/modules/platform_info.c) | `main` |
 | Local macOS interface listing | [select_interface_macos.c](../src/platform/macos/select_interface_macos.c) | `list_and_select_interface` |
 | Local Linux interface listing | [select_interface.c](../src/platform/linux/select_interface.c) | `list_and_select_interface` |
-| Disabled-network adapter | [network_unavailable.c](../src/platform/macos/network_unavailable.c) | Stub replacement for `SYN_Flood` |
+| Disabled-network command | [commands.c](../src/cli/commands.c) | `NERO_NETWORK_UNAVAILABLE` |
 | Make targets and source selection | [Makefile](../Makefile) | `CLI_SOURCES`, `SAFE_SOURCES`, `test` |
 | CMake targets and compiler settings | [CMakeLists.txt](../CMakeLists.txt), [NeroTargets.cmake](../cmake/NeroTargets.cmake) | `nero_target` |
 
@@ -66,7 +66,6 @@ for compatibility. Document ownership when introducing shared state.
 | Line editing, signals, PTY and boundary cases | [test_terminal_quality.py](../tests/test_terminal_quality.py) |
 | Terminal fault injection | [terminal_faults.c](../tests/mocks/terminal_faults.c) |
 | Logging mock for network calls | [network_handler.c](../tests/mocks/network_handler.c) |
-| Adapter unit test | [tests/unit/](../tests/unit/) |
 | Platform report and source integrity | [test_foundation.py](../tests/integration/test_foundation.py) |
 
 ## Legacy and special-purpose files
@@ -75,8 +74,7 @@ for compatibility. Document ownership when introducing shared state.
   Make presentation changes in `include/nero/printing.h` or `render.c`.
 - `src/modules/syn_flood_powered.c` and `portscanner.c` are existing Linux modules;
   they are not linked into CLI development tests.
-- `src/platform/macos/network_unavailable.c` is a portable stub despite its location;
-  offline tests on other platforms use it as well.
+- Offline CLI builds report network unavailability directly in `commands.c`.
 - `src/platform/windows/` is reserved; no Windows terminal implementation exists.
 - `tests/baseline.json` and related manifests record historical and intentional
   changes; they are not runtime data.
