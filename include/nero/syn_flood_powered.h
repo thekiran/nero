@@ -1,9 +1,8 @@
-#ifndef SYN_FLOD_H
-#define SYN_FLOD_H
+#ifndef SYN_FLOOD_H
+#define SYN_FLOOD_H
 
 int SYN_Flood(const char *target_ip);
 void sigint_handler(int sig);
-void animation_fuction(void);
 
 #endif
 

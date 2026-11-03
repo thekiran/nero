@@ -32,6 +32,10 @@ void disable_raw_mode(void) {
 }
 
 int enable_raw_mode(void) {
+    /* The shell in terminal.c already installs its own atexit cleanup; register
+     * our fallback only once so repeated port scans do not stack duplicate
+     * entries on the atexit list. */
+    static int atexit_installed = 0;
     if (!isatty(STDIN_FILENO))
         return -1;
     if (tcgetattr(STDIN_FILENO, &orig_termios) != 0)
@@ -41,7 +45,10 @@ int enable_raw_mode(void) {
     if (tcsetattr(STDIN_FILENO, TCSADRAIN, &raw) != 0)
         return -1;
     raw_mode_active = 1;
-    atexit(disable_raw_mode);
+    if (!atexit_installed) {
+        if (atexit(disable_raw_mode) == 0)
+            atexit_installed = 1;
+    }
     return 0;
 }
 
@@ -224,9 +231,10 @@ void clear_lines(int n) {
 }
 
 // Main controller
-// Returns the selected port (>= 1), 0 when no open port was found, 1 on an
-// internal failure (partial scan or allocation), or -1 when the user aborted
-// the selection menu with EOF/input error.
+// Returns the selected port (>= 1), 0 when no open port was found, or
+// -1 on any failure (user abort, EOF, read error, allocation failure, or
+// partial scan). Previously returned 1 on internal failure, which collided
+// with port 1 being a valid selection.
 int portscanner(const char *target_ip) {
     target_ip_global = target_ip;
     pthread_t threads[NUM_THREADS];
@@ -239,7 +247,7 @@ int portscanner(const char *target_ip) {
 
     if (pthread_mutex_init(&ports_mutex, NULL) != 0) {
         fprintf(stderr, "[-] Failed to initialize mutex.\n");
-        return 1;
+        return -1;
     }
 
     int ports_per_thread = 65535 / NUM_THREADS;
@@ -272,7 +280,7 @@ int portscanner(const char *target_ip) {
         free(open_ports_list);
         open_ports_list = NULL;
         port_counter = 0;
-        return 1;
+        return -1;
     }
 
     if (scan_alloc_failed) {
@@ -280,7 +288,7 @@ int portscanner(const char *target_ip) {
         free(open_ports_list);
         open_ports_list = NULL;
         port_counter = 0;
-        return 1;
+        return -1;
     }
 
     clear_lines(port_counter);

