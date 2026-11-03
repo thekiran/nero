@@ -49,6 +49,13 @@ endif
 
 BUILD_DIR    := .build
 OBJS         := $(addprefix $(BUILD_DIR)/obj/,$(SRCS:.c=.o))
+
+# Ensure macOS production objects use the safe platform configuration.
+# This also works when CFLAGS is overridden from the command line.
+ifeq ($(UNAME_S),Darwin)
+$(OBJS): CPPFLAGS += -DNERO_NETWORK_UNAVAILABLE
+endif
+
 TARGET       := nero
 INSTALL_DIR  := /usr/local/bin
 
