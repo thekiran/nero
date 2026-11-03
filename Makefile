@@ -37,9 +37,9 @@ CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 \
 LDFLAGS :=
 MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
 LDLIBS += -pthread $(MACOS_FRAMEWORKS)
-SRCS += src/platform/macos/syn_flood_stub.c
+SRCS += src/modules/tcp_capacity.c
 else ifeq ($(UNAME_S),Linux)
-SRCS := src/main.c src/modules/syn_flood_powered.c \
+SRCS := src/main.c src/modules/tcp_capacity.c \
         third_party/cjson/cJSON.c $(CLI_SOURCES) \
         src/platform/linux/select_interface.c \
         src/modules/portscanner.c
@@ -125,6 +125,7 @@ $(TEST_DIR)/operation-layout: tests/operation_layout_fixture.c src/cli/operation
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/operation_layout_fixture.c src/cli/operation_ui.c -o $@
 
 test: $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults $(TEST_DIR)/operation-layout
+	$(TEST_DIR)/capacity
 	python3 tests/test_safe.py $(TEST_DIR)
 	python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
 	python3 tests/test_operation_layout.py $(TEST_DIR)/operation-layout
@@ -152,3 +153,7 @@ help:
 	@echo "make analyze         Run Clang static analysis"
 	@echo "make clean           Remove generated build files"
 	@echo "Code map: docs/code-map.md"
+
+$(TEST_DIR)/capacity: tests/capacity.c src/modules/tcp_capacity.c include/nero/tcp_capacity.h | $(TEST_DIR)
+	$(CC) $(SAFE_FLAGS) $(SANITIZERS) tests/capacity.c src/modules/tcp_capacity.c -o $@
+test: $(TEST_DIR)/capacity

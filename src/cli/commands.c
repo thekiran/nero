@@ -28,6 +28,7 @@
 
 #include "cli_internal.h"
 #include "command_catalog.h"
+#include "nero/tcp_capacity.h"
 #include "nero/cli/parser.h"
 #include "nero/ascii.h"
 #include "nero/printing.h"
@@ -340,115 +341,25 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
 
 static cli_cmd_result cmd_syn(char **tokens, size_t count)
 {
-    if (count != 2)
-        return CLI_CMD_INVALID;
-
     struct in_addr addr;
-
-    if (inet_pton(AF_INET, tokens[0], &addr) != 1)
-        return CLI_CMD_INVALID;
-
+    if (inet_pton(AF_INET, tokens[0], &addr) != 1) return CLI_CMD_INVALID;
+#if defined(NERO_SAFE_TEST)
+    if (count != 2) return CLI_CMD_INVALID;
+#endif
 #if defined(NERO_NETWORK_UNAVAILABLE)
-
-    fputs(
-        "\n-Syn: unsupported in this build; "
-        "no network traffic is generated.\n",
-        stderr
-    );
-
+    (void)tokens; (void)count;
+    puts("-Syn: unsupported in this build; no network traffic is generated.");
 #elif defined(NERO_SAFE_TEST)
-
-    /* Uses the linked mock implementation. */
-    if (SYN_Flood(tokens[0]) != 0)
-        return CLI_CMD_FAILURE;
-
-#elif defined(__APPLE__)
-
-    /* Existing full-range TCP scanner and arrow-key menu. */
-    int selected_port = portscanner(tokens[0]);
-
-    if (selected_port == PORTSCANNER_CANCELLED) {
-        if (cli_termination_signal == SIGINT)
-            cli_termination_signal = 0;
-        return CLI_CMD_CONTINUE;
-    }
-
-    if (selected_port < 0)
-        return CLI_CMD_CONTINUE;
-
-    if (selected_port == 0) {
-        puts("\nNo open TCP ports found.");
-        return CLI_CMD_CONTINUE;
-    }
-
-    const uint16_t port = (uint16_t)selected_port;
-
-    char diagnostic_detail[96];
-    snprintf(
-        diagnostic_detail,
-        sizeof(diagnostic_detail),
-        "Target %s:%u",
-        tokens[0],
-        (unsigned)port
-    );
-
-    /* Each recoverable exit below ends this surface before printing to the
-     * main terminal. The operation object remains local to this invocation. */
-    nero_operation_ui diagnostic_ui = {0};
-    nero_operation_begin(
-        &diagnostic_ui,
-        "TCP diagnostics",
-        diagnostic_detail,
-        "Esc · Back"
-    );
-    nero_operation_section("CONNECTION TEST");
-
-    unsigned successful = 0;
-    unsigned attempts = 0;
-
-    SYN_Flood(tokens[0]);//this is the legacy SYN flood engine, which runs in a separate thread and uses raw sockets. It will continue until interrupted.
-
-    if (cli_termination_signal) {
-        int interrupted = cli_termination_signal == SIGINT;
-        if (interrupted)
-            cli_termination_signal = 0;
-        nero_operation_end(&diagnostic_ui);
-        if (interrupted)
-            puts("TCP diagnostics cancelled. Returned to terminal.");
-        return CLI_CMD_CONTINUE;
-    }
-
-    char diagnostic_result[96];
-    snprintf(
-        diagnostic_result,
-        sizeof(diagnostic_result),
-        "%u attempts  |  %u successful",
-        attempts,
-        successful
-    );
-    nero_operation_status("32", "Diagnostics complete", diagnostic_result);
-    nero_operation_end(&diagnostic_ui);
-    printf("TCP diagnostics complete: %u/%u successful.\n", successful, attempts);
-
+    if (count != 2) return CLI_CMD_INVALID;
+    if (SYN_Flood(tokens[0]) != 0) return CLI_CMD_FAILURE;
 #else
-
-    /* Preserve the existing Linux network engine. */
-    if (cli_signal_mode(0) != 0)
-        return CLI_CMD_FAILURE;
-
-    int status = SYN_Flood(tokens[0]);
-
-    if (cli_signal_mode(1) != 0)
-        return CLI_CMD_FAILURE;
-
-    if (status != 0) {
-        fprintf(
-            stderr,
-            "\n-Syn operation failed (status %d).\n",
-            status
-        );
-    }
-
+    nero_operation_ui ui = {0};
+    nero_operation_begin(&ui, "TCP diagnostics", tokens[0], "Ctrl+C · Cancel");
+    int result = nero_tcp_test(tokens, count, &cli_termination_signal);
+    nero_operation_end(&ui);
+    if (cli_termination_signal == SIGINT) cli_termination_signal = 0;
+    if (result < 0) return CLI_CMD_INVALID;
+    if (result > 0) return CLI_CMD_FAILURE;
 #endif
 
     return CLI_CMD_CONTINUE;
