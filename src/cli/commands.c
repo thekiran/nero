@@ -11,6 +11,7 @@
  * "invalid parameters" diagnostic so every handler reports it identically.
  */
 #include "cli_internal.h"
+#include "nero/cli/parser.h"
 #include "nero/ascii.h"
 #include "nero/printing.h"
 #include "nero/syn_flood_powered.h"
@@ -20,7 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define CLI_MAX_TOKENS 3
+#define CLI_MAX_TOKENS 64
 
 /* Handler outcome. CONTINUE/EXIT/FAILURE map directly onto the values
  * cli_dispatch_command returns; INVALID asks the dispatcher to emit the
@@ -153,17 +154,11 @@ int cli_dispatch_command(const char *command)
     size_t length = strlen(command);
     if (length >= sizeof(copy))
         return -1;
-    memcpy(copy, command, length + 1);
-
     char *tokens[CLI_MAX_TOKENS];
     size_t count = 0;
-    char *save = NULL;
-    for (char *token = strtok_r(copy, " \t\r\n", &save); token;
-         token = strtok_r(NULL, " \t\r\n", &save)) {
-        if (count == CLI_MAX_TOKENS)
-            goto invalid; /* More tokens than any command accepts. */
-        tokens[count++] = token;
-    }
+    if (nero_parse(command, sizeof(copy), copy, sizeof(copy), tokens,
+                   CLI_MAX_TOKENS, &count) != NERO_PARSE_OK)
+        goto invalid;
     if (count == 0)
         return 0;
 

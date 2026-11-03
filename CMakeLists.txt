@@ -16,6 +16,7 @@ include(CTest)
 include(cmake/NeroTargets.cmake)
 
 set(NERO_CLI_SUPPORT_SOURCES
+    src/cli/parser/parser.c
     src/cli/input.c
     src/cli/render.c
     src/cli/commands.c
