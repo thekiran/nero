@@ -1,107 +1,304 @@
+
 #include <stdio.h>
 #include <stdlib.h>
-#include <ifaddrs.h>
-#include <net/if.h>
-#include <sys/socket.h>
-#include "nero/select_interface.h"
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+
+#include <CoreFoundation/CoreFoundation.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+
+#include "nero/select_interface.h"
 
 #define MAX_INTERFACES 128
 #define MAX_NAME_LEN 64
 
-// ANSI color codes
 enum {
     COLOR_RESET = 0,
-    COLOR_BLUE = 34,    // Ethernet
-    COLOR_GREEN = 32,   // Wireless
-    COLOR_YELLOW = 33,  // Loopback
-    COLOR_RED = 31      // Other
+    COLOR_BLUE = 34,
+    COLOR_GREEN = 32,
+    COLOR_YELLOW = 33,
+    COLOR_RED = 31,
+    COLOR_CYAN = 36
 };
 
-// Human-readable interface type
-static const char* type_str(int type) {
+typedef enum {
+    IFACE_ETHERNET,
+    IFACE_WIRELESS,
+    IFACE_LOOPBACK,
+    IFACE_VIRTUAL,
+    IFACE_OTHER
+} InterfaceType;
+
+typedef struct {
+    char name[MAX_NAME_LEN];
+    InterfaceType type;
+    unsigned int flags;
+} NetworkInterface;
+
+static NetworkInterface interfaces[MAX_INTERFACES];
+
+/* Identify macOS network interface type */
+static InterfaceType get_interface_type(
+    const char *name,
+    unsigned int flags,
+    CFArrayRef sc_interfaces
+) {
+    if (flags & IFF_LOOPBACK)
+        return IFACE_LOOPBACK;
+
+    /* Common macOS virtual interfaces */
+    if (strncmp(name, "utun", 4) == 0 ||
+        strncmp(name, "awdl", 4) == 0 ||
+        strncmp(name, "llw", 3) == 0 ||
+        strncmp(name, "bridge", 6) == 0 ||
+        strncmp(name, "vmenet", 6) == 0 ||
+        strncmp(name, "vmnet", 5) == 0 ||
+        strncmp(name, "gif", 3) == 0 ||
+        strncmp(name, "stf", 3) == 0) {
+        return IFACE_VIRTUAL;
+    }
+
+
+    if (sc_interfaces) {
+        CFIndex count = CFArrayGetCount(sc_interfaces);
+
+        for (CFIndex i = 0; i < count; i++) {
+            SCNetworkInterfaceRef iface =
+                (SCNetworkInterfaceRef)
+                CFArrayGetValueAtIndex(sc_interfaces, i);
+
+            CFStringRef bsd_name =
+                SCNetworkInterfaceGetBSDName(iface);
+
+            if (!bsd_name)
+                continue;
+
+            char buffer[MAX_NAME_LEN];
+
+            if (!CFStringGetCString(
+                    bsd_name,
+                    buffer,
+                    sizeof(buffer),
+                    kCFStringEncodingUTF8))
+                continue;
+
+            if (strcmp(buffer, name) != 0)
+                continue;
+
+            CFStringRef type =
+                SCNetworkInterfaceGetInterfaceType(iface);
+
+            if (!type)
+                break;
+
+            if (CFEqual(type,
+                        kSCNetworkInterfaceTypeIEEE80211))
+                return IFACE_WIRELESS;
+
+            if (CFEqual(type,
+                        kSCNetworkInterfaceTypeEthernet))
+                return IFACE_ETHERNET;
+
+            break;
+        }
+    }
+
+
+    return IFACE_OTHER;
+}
+
+static const char *type_str(InterfaceType type) {
     switch (type) {
-        case 1:   return "Ethernet";
-        case 801: return "Wireless";
-        case 772: return "Loopback";
-        default:  return "Unknown";
+        case IFACE_ETHERNET: return "Ethernet";
+        case IFACE_WIRELESS: return "Wireless";
+        case IFACE_LOOPBACK: return "Loopback";
+        case IFACE_VIRTUAL:  return "Virtual";
+        default:             return "Unknown";
     }
 }
 
-// Print a colored interface row
-static void print_colored(int idx, const char *name, const char *desc, int type) {
-    int color;
-    if (type == 1)        color = COLOR_BLUE;   // Ethernet
-    else if (type == 801) color = COLOR_GREEN;  // Wireless
-    else if (type == 772) color = COLOR_YELLOW; // Loopback
-    else                  color = COLOR_RED;    // Other
-
-    printf("%2d) \033[1;%dm%-15s\033[0m (%s)\n", idx, color, name, desc);
+static int type_color(InterfaceType type) {
+    switch (type) {
+        case IFACE_ETHERNET: return COLOR_BLUE;
+        case IFACE_WIRELESS: return COLOR_GREEN;
+        case IFACE_LOOPBACK: return COLOR_YELLOW;
+        case IFACE_VIRTUAL:  return COLOR_CYAN;
+        default:             return COLOR_RED;
+    }
 }
 
-// List interfaces and read the selection
+static void print_colored(
+    int index,
+    const NetworkInterface *iface
+) {
+    int color = type_color(iface->type);
+
+    const char *status =
+        (iface->flags & IFF_UP) ? "UP" : "DOWN";
+
+    printf(
+        "%2d) \033[1;%dm%-15s\033[0m "
+        "(%-10s) [%s]\n",
+        index,
+        color,
+        iface->name,
+        type_str(iface->type),
+        status
+    );
+}
+
+/* Avoid duplicate entries from getifaddrs */
+static int interface_exists(
+    const char *name,
+    int count
+) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(interfaces[i].name, name) == 0)
+            return i;
+    }
+
+    return -1;
+}
+
+static int compare_interfaces(
+    const void *a,
+    const void *b
+) {
+    const NetworkInterface *ia = a;
+    const NetworkInterface *ib = b;
+
+    return strcmp(ia->name, ib->name);
+}
+
+/* List and select network interface */
 const char *list_and_select_interface(void) {
-    static char names[MAX_INTERFACES][MAX_NAME_LEN];
-    static int types[MAX_INTERFACES];
+    struct ifaddrs *ifaddr = NULL;
+    struct ifaddrs *ifa = NULL;
+
     int count = 0;
 
-    struct ifaddrs *addresses = NULL;
-    if (getifaddrs(&addresses) != 0) {
+    if (getifaddrs(&ifaddr) == -1) {
         perror("getifaddrs");
         return NULL;
     }
-    for (const struct ifaddrs *it = addresses; it; it = it->ifa_next) {
-        if (!it->ifa_name || !it->ifa_addr ||
-            it->ifa_addr->sa_family != AF_LINK) continue;
-        size_t length = strlen(it->ifa_name);
-        if (length == 0 || length >= MAX_NAME_LEN) continue;
-        int duplicate = 0;
-        for (int i = 0; i < count; ++i)
-            if (strcmp(names[i], it->ifa_name) == 0) duplicate = 1;
-        if (duplicate) continue;
-        if (count == MAX_INTERFACES) {
-            fprintf(stderr, "Interface list truncated to %d entries.\n", MAX_INTERFACES);
-            break;
+
+    CFArrayRef sc_interfaces =
+        SCNetworkInterfaceCopyAll();
+
+    for (ifa = ifaddr;
+         ifa != NULL;
+         ifa = ifa->ifa_next) {
+
+        if (!ifa->ifa_name)
+            continue;
+
+        int existing =
+            interface_exists(ifa->ifa_name, count);
+
+        if (existing >= 0) {
+            interfaces[existing].flags |= ifa->ifa_flags;
+            continue;
         }
-        memcpy(names[count], it->ifa_name, length + 1);
-        /* AF_LINK does not reliably distinguish Ethernet from Wi-Fi. */
-        types[count] = (it->ifa_flags & IFF_LOOPBACK) ? 772 : -1;
+
+        if (count >= MAX_INTERFACES)
+            break;
+
+        size_t len = strlen(ifa->ifa_name);
+
+        if (len == 0 || len >= MAX_NAME_LEN)
+            continue;
+
+        NetworkInterface *entry =
+            &interfaces[count];
+
+        memcpy(entry->name, ifa->ifa_name, len + 1);
+
+        entry->flags = ifa->ifa_flags;
+
+        entry->type = get_interface_type(
+            entry->name,
+            entry->flags,
+            sc_interfaces
+        );
+
         count++;
     }
-    freeifaddrs(addresses);
+
+    if (sc_interfaces)
+        CFRelease(sc_interfaces);
+
+    freeifaddrs(ifaddr);
 
     if (count == 0) {
-        fprintf(stderr, "No network interfaces found.\n");
+        fprintf(stderr,
+                "No network interfaces found.\n");
         return NULL;
     }
 
-    // Clear the screen
-    printf("\033[H\033[J");
-    printf("\033[1;31mAvailable Network Interfaces:\033[0m\n\n");
+    qsort(
+        interfaces,
+        count,
+        sizeof(interfaces[0]),
+        compare_interfaces
+    );
 
-    for (int i = 0; i < count; ++i) {
-        print_colored(i + 1, names[i], type_str(types[i]), types[i]);
+    /* Clear terminal */
+    printf("\033[H\033[J");
+
+    printf(
+        "\033[1;31m"
+        "Available Network Interfaces (macOS)"
+        "\033[0m\n\n"
+    );
+
+    for (int i = 0; i < count; i++) {
+        print_colored(i + 1, &interfaces[i]);
     }
 
     char input[128];
+
     printf("\nSelect an interface [1-%d]: ", count);
-    if (!fgets(input, sizeof(input), stdin) ||
-        (!strchr(input, '\n') && !feof(stdin))) {
-        fprintf(stderr, "Invalid selection.\n");
-        return NULL;
-    }
-    char *end;
-    errno = 0;
-    long choice = strtol(input, &end, 10);
-    int invalid = errno == ERANGE || end == input;
-    while (isspace((unsigned char)*end))
-        ++end;
-    if (invalid || *end != '\0' || choice < 1 || choice > count) {
+    fflush(stdout);
+
+    if (!fgets(input, sizeof(input), stdin)) {
         fprintf(stderr, "Invalid selection.\n");
         return NULL;
     }
 
-    return names[choice - 1];
+    if (!strchr(input, '\n') && !feof(stdin)) {
+        int ch;
+
+        while ((ch = getchar()) != '\n' &&
+               ch != EOF) {
+        }
+
+        fprintf(stderr, "Input too long.\n");
+        return NULL;
+    }
+
+    char *end = NULL;
+
+    errno = 0;
+
+    long choice = strtol(input, &end, 10);
+
+    if (errno == ERANGE || end == input) {
+        fprintf(stderr, "Invalid selection.\n");
+        return NULL;
+    }
+
+    while (isspace((unsigned char)*end))
+        end++;
+
+    if (*end != '\0' ||
+        choice < 1 ||
+        choice > count) {
+        fprintf(stderr, "Invalid selection.\n");
+        return NULL;
+    }
+
+    return interfaces[choice - 1].name;
 }

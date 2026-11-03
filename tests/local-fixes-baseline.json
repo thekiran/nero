@@ -8,8 +8,8 @@
     },
     "src/platform/macos/select_interface_macos.c": {
       "before": "19d26806270b943178b2ddf7c6fad2f855f89148792b0d5834c59557cc6ab380",
-      "after": "1dbfb788eaf8f0fdbb215a6390a44257fcc871884f4df552bab6dc8f0e066c34",
-      "reason": "Reject trailing junk, overflow and oversized interface selections; deterministic fixture tests cover rejected and valid input."
+      "after": "984d5771fd4b95c4a9643b13be0dd4e66697b7980559c3b2c6b84fe7dff4ca0a",
+      "reason": "Reviewed SystemConfiguration classification, virtual-interface precedence, bounded names, duplicate flag merging, sorted enumeration including addressless interfaces, CF ownership and strict input parsing. Interface regression and sanitizer tests cover enumeration and invalid selections."
     },
     "include/nero/portscanner.h": {
       "before": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583",
@@ -30,6 +30,16 @@
       "before": "736967aadb5c844444d778b23f45513a3b11b4f09fbbd20f135157c8effe09d1",
       "after": "540370baa3f4f66c56da11c198da2e31e6de1fd18a23b3ee65780343e7e49b19",
       "reason": "Linux runtime validation: strict C prototypes/newline or bounded interface parsing; see linux-runtime-validation.md."
+    },
+    "Makefile": {
+      "before": "1b047a513b4cd07586d978373403b9e63276e46596f57bd1953b7f7149879f82",
+      "after": "aba0d292f7a11189b7b758794dd638a08288ed5c3521985055b71857facd304b",
+      "reason": "Reviewed Darwin-only CoreFoundation/SystemConfiguration linkage for production and interface tests; include the offline adapter regression executable in Make tests. Linux production source selection and dependencies are unchanged."
+    },
+    "CMakeLists.txt": {
+      "before": "21da1e16528792e6b66c80f94c75c189fd9ea408d4cd85820b95dab014eb6582",
+      "after": "9a6bc06ff7ffe0f964dbb63e0873a53927bb89eebd44c8d9554a1bbd0ad4cc41",
+      "reason": "Reviewed Apple-only framework discovery and linkage for interfaces and interfaces-mock; other targets and Linux selection are unchanged."
     }
   }
 }

@@ -34,11 +34,21 @@ class SafeTests(unittest.TestCase):
             self.assertIn(expected, output)
         self.assertIn(b"help\nhelp -All\nversion\nhistory", output)
 
-    def test_disabled_network_command(self):
-        symbols = subprocess.check_output(["nm", "-u", str(ROOT / "nero-safe")])
+    def assert_no_network_symbols(self, name):
+        symbols = subprocess.check_output(["nm", "-u", str(ROOT / name)])
         self.assertIsNone(re.search(
             rb"\b_?(socket|connect|sendto|sendmsg|getaddrinfo|gethostbyname)(?:@[^\s]+)?$",
             symbols, re.M), symbols)
+
+    def test_unavailable_adapter(self):
+        # Gate execution on symbol inspection: regressions must not open sockets.
+        self.assert_no_network_symbols("test-network-unavailable")
+        result = run("test-network-unavailable", b"")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr.count(b"unsupported in this build"), 7)
+
+    def test_disabled_network_command(self):
+        self.assert_no_network_symbols("nero-safe")
         self.assertIn(b"unsupported in this build", self.cli(b"192.0.2.1 -Syn\nexit\n"))
 
     def test_eof_and_incomplete_escape(self):
@@ -64,7 +74,7 @@ class SafeTests(unittest.TestCase):
         result = run("interfaces", b"1\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         output = ANSI.sub(b"", result.stdout)
-        self.assertIn(b"Available Network Interfaces:", output)
+        self.assertIn(b"Available Network Interfaces", output)
         self.assertIn(b"Select an interface [1-", output)
         names = re.findall(rb"^\s*\d+\) (\S+)", output, re.M)
         self.assertTrue(names)
@@ -79,11 +89,12 @@ class SafeTests(unittest.TestCase):
     def test_interface_fixtures(self):
         for mode, data, code, expected in (
             ("normal", b"1\n", 0, b"SELECTED:fixture0"),
-            ("normal", b"2\n", 0, b"SELECTED:fixture5"),
-            ("normal", b"3\n", 1, b""),
+            ("normal", b"2\n", 0, b"SELECTED:fixture2"),
+            ("normal", b"3\n", 0, b"SELECTED:fixture5"),
+            ("normal", b"4\n", 1, b""),
             ("empty", b"", 1, b""),
             ("error", b"", 1, b"getifaddrs"),
-            ("limit", b"128\n", 0, b"SELECTED:fixture127"),
+            ("limit", b"128\n", 0, b"SELECTED:fixture99"),
         ):
             result = subprocess.run([str(ROOT / "interfaces-mock")], input=data,
                                     capture_output=True, timeout=10,
@@ -100,7 +111,7 @@ class SafeTests(unittest.TestCase):
             with self.subTest(data=data):
                 result = run("interfaces-mock", data)
                 self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertIn(b"Invalid selection.", result.stderr)
+                self.assertRegex(result.stderr, rb"Invalid selection\.|Input too long\.")
                 self.assertNotIn(b"SELECTED:", result.stdout)
         for data in (b"1\n", b" 1 \t\n", b"1"):
             with self.subTest(data=data):
