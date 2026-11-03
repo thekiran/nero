@@ -32,6 +32,13 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Unit and safe smoke tests
         run: ctest --preset ${{ matrix.preset }}
+      # Non-gating audit: reports source drift from the recorded baseline but
+      # never fails the build. Source changes are recorded in
+      # tests/local-fixes-baseline.json; the real gates are the tests above.
+      - name: Source baseline audit (informational, non-gating)
+        if: runner.os != 'Windows'
+        continue-on-error: true
+        run: python3 tests/audit/source_baseline_audit.py
       - name: Configure sanitizers (POSIX targets only)
         if: runner.os != 'Windows'
         run: cmake --preset ${{ matrix.preset }}-sanitize
