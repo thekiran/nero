@@ -32,6 +32,7 @@
 #include "nero/ascii.h"
 #include "nero/printing.h"
 #include "nero/terminal.h"
+#include "nero/network_diagnostics.h"
 
 #ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/syn_flood_powered.h"
@@ -330,9 +331,12 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     if (inet_pton(AF_INET, tokens[0], &addr) != 1)
         return CLI_CMD_INVALID;
 
-#ifdef NERO_SAFE_TEST
-    printf("\n-Syn: simulation for %s; packets sent: 0\n",
-           tokens[0]);
+#ifdef NERO_NETWORK_UNAVAILABLE
+    fputs(
+        "\n-Syn: unsupported in this build; "
+        "no network traffic is generated.\n",
+        stderr
+    );
 #else
     const uint16_t port = 80;
     unsigned successful = 0;

@@ -32,7 +32,8 @@ SRCS         := \
                  third_party/cjson/cJSON.c \
                  $(CLI_SOURCES) \
                  src/platform/linux/select_interface.c \
-                 src/modules/portscanner.c
+                 src/modules/portscanner.c \
+				 src/platform/macos/network_diagnostics_macos.c
 
 # Darwin builds only the development CLI and read-only interface adapter.
 # Linux keeps its original source list and link dependencies.
