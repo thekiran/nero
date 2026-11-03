@@ -34,6 +34,12 @@
 | F11 | P2 | `README.md` | `[MIT License](LICENSE)` link was broken (file is `LICENSE.txt`); the macOS "Undefined symbols `_SYN_Flood`" troubleshooting block was stale — the described issue was already fixed on HEAD. |
 | F12 | P0 (CI) | `tests/*-baseline.json` chains | The foundation integrity test failed on **clean HEAD** (before this audit's edits): `src/platform/macos/network_unavailable.c` digest from commit `97438f0` was never recorded in the baseline chain, keeping the whole foundation CI matrix red. |
 | F13 | P1 | `src/modules/syn_flood_powered.c` | Self-introduced during this audit and caught by the Linux `-Werror` build: a double `free(pseudogram_tcp)` in the UDP allocation-failure path. Fixed before merge; see [fix-report.md](fix-report.md). |
+| F14 | P1 | `src/modules/portscanner.c` (round 5) | Port-selection menu kept looping on EOF/read error; a pipe at EOF spun the redraw loop and the return value could not distinguish "user aborted" from "nothing found". Fixed: EOF/read error → return -1, documented in `include/nero/portscanner.h`; `port_get` aborts the engine call on -1. |
+| F15 | P1 | `src/modules/portscanner.c` (round 5) | Raw mode was entered without an `isatty` check and restored unconditionally, so non-TTY stdin got `tcsetattr` on uninitialized state. Fixed: isatty gate, `tcgetattr` snapshot, single `atexit(disable_raw_mode)` registration, no-op-safe disable. |
+| F16 | P1 | `src/modules/portscanner.c` (round 5) | Partial `pthread_create` failure (already joined correctly since round 4) was still reported as success to the caller. Fixed: `portscanner()` returns 1 with an explicit "only N of M workers started" message; `SYN_Flood` likewise returns 1. |
+| F17 | P2 | `src/cli/commands.c` (round 5) | Passive legacy commands `-Sc`/`-mode` executed silently; silence is indistinguishable from "command not recognized". Fixed: one explicit status line per invocation. |
+| F18 | P2 | `Makefile` (round 5) | `run` target carried a `DOMAIN` variable the application never consumed (verified against argument parsing and help text). Fixed: dead plumbing removed; `make run` launches the interactive CLI directly. |
+| F19 | P1 | `tests/linux/scanner_runtime.c` (round 5) | Harness `memcmp` of `struct termios` compared indeterminate padding bytes (abort, exit 134). Fixed: zero-initialized structs; the comparison now reflects real field state. |
 
 ## 3. CI failure investigation (P0: macos-15 `make test-sanitize`)
 
@@ -62,6 +68,12 @@
   with `-Werror` (exit code 2 is consistent with a build failure and would
   produce no unittest output). The test now emits partial output on timeout to
   discriminate these on the next CI run.
+- **Round 5 update:** hypothesis (a) was experimentally refuted on macOS 27.2.
+  A probe (`/tmp/fdprobe/probe.c`) compiled both plain and under ASan, run with
+  fd 0 closed before `exec`, shows `F_GETFD` on fd 0 → EBADF at `main` entry
+  and the first `open()` receiving fd 0 in both builds — ASan does not reuse
+  fd 0 on this host. Root cause therefore remains **BLOCKED on log access**
+  (403, admin-only); (b) and (c) above are the live candidates.
 - The timeout value was **not** raised.
 
 ## 4. Unverified suspicions (not claimed as bugs)

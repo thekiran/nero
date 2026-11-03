@@ -52,7 +52,7 @@ TARGET       := nero
 INSTALL_DIR  := /usr/local/bin
 
 # Phony targets
-.PHONY: all clean install run run_default help
+.PHONY: all clean install run help
 .DEFAULT_GOAL := all
 
 # Default target: build the executable
@@ -70,19 +70,11 @@ $(BUILD_DIR)/obj/%.o: %.c
 	@echo "[CC] Compiling $<"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
-# Run the binary with a default domain
-run_default: $(TARGET)
-	@echo "[RUN] Executing with example.com"
-	./$(TARGET) example.com
-
-# Run with a custom domain: make run DOMAIN=target.com
+# Run the binary. The development CLI is interactive; it does not process a
+# positional DOMAIN argument (legacy `make run DOMAIN=...` was removed).
 run: $(TARGET)
-	@if [ -z "$(DOMAIN)" ]; then \
-		echo "[ERROR] DOMAIN variable not set. Usage: make run DOMAIN=example.com"; \
-		exit 1; \
-	fi; \
-	echo "[RUN] Executing with $(DOMAIN)"; \
-	./$(TARGET) $(DOMAIN)
+	@echo "[RUN] Launching interactive CLI"
+	./$(TARGET)
 
 # Install the binary system-wide
 install: $(TARGET)

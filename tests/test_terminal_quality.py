@@ -91,6 +91,8 @@ class TerminalQuality(unittest.TestCase):
         output = self.output(b"192.0.2.1 -Sc\n-mode\n192.0.2.1 -mode\nexit -All\n")
         self.assertNotIn(b"MOCK_SYN:", output)
         self.assertNotIn(b"Unknown command", output)
+        self.assertEqual(output.count(b"-Sc: not available in this build"), 1)
+        self.assertEqual(output.count(b"-mode: not available in this build"), 2)
 
     def test_repeated_clear_and_fallback(self):
         result = run(b"clear\n" * 200 + b"help\nexit\n", TERM="dumb", NERO_ASCII="1", NO_COLOR="1")

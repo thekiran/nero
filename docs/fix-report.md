@@ -98,6 +98,58 @@ the Linux build verification matters.
 - `docs/linux-runtime-validation.md`: updated the run-script description to
   match the new failure-propagating, `mktemp`-based behavior.
 
+## Round 5 — remaining `main` defects (2026-11-03, second pass)
+
+1. **Port menu EOF/read errors (F14).** `select_port_menu` treated any failed
+   `read` as "keep looping", so stdin EOF on a pipe made the menu spin and a
+   partial arrow-key escape could be misread as input. The loop now tracks an
+   `input_ok` flag: EOF or read error breaks the loop and the function returns
+   **-1** (documented in `include/nero/portscanner.h`: `>0` chosen port,
+   `0` none found, `-1` aborted/error). `portscanner()` propagates -1 as a
+   clean failure; `port_get` in `syn_flood_powered.c` maps it to
+   "Port selection aborted" and aborts the engine call instead of flooding an
+   arbitrary default.
+2. **Raw-mode lifecycle (F15).** `enable_raw_mode` previously ran even when
+   stdin was not a TTY and restored state that was never captured. It now
+   requires `isatty`, snapshots `orig_termios` with `tcgetattr`, sets the mode
+   with `tcsetattr(TCSADRAIN)`, registers `atexit(disable_raw_mode)` exactly
+   once, and `disable_raw_mode` is a no-op unless raw mode is active — every
+   exit path (EOF, error, valid selection) leaves the terminal restored.
+3. **Partial thread creation (F16).** Both `portscanner()` (200 workers) and
+   `SYN_Flood` (512 workers) already joined only created threads; the missing
+   piece was reporting. `portscanner()` now returns 1 with
+   `Scan incomplete: only N of M workers started.` when
+   `threads_created != NUM_THREADS`, after freeing the partial result list.
+   `SYN_Flood` likewise returns 1 when its worker creation falls short.
+4. **Passive command messages (F17).** `-Sc` and `-mode` (no-op legacy
+   commands) now print a single explicit line each
+   (`-Sc: not available in this build; no network traffic is generated.`) so
+   users see the command was received and intentionally inactive, instead of
+   silence that reads as "nothing happened".
+5. **`Makefile DOMAIN` (F18).** Verified the app never consumed a positional
+   domain argument; the `run` target's `DOMAIN` plumbing was dead weight with
+   a history of shell breakage. Removed `DOMAIN`/`run_default`; `make run`
+   simply launches the interactive CLI. Help text was checked — no command
+   documents a positional domain.
+6. **Regression tests (F19).** New coverage:
+   - `tests/linux/scanner_runtime.c`: pipe-at-EOF → menu returns -1; pty
+     Enter/arrow → expected ports **and** slave termios byte-identical after
+     (structs zero-initialized so `memcmp` never compares indeterminate
+     padding); injected `pthread_create` failure at worker 3 →
+     `portscanner` returns 1, list freed, FD baseline restored. Runs under
+     both plain and ASan/UBSan builds in the Docker harness.
+   - `tests/test_terminal_quality.py`: `test_inactive_legacy_commands` now
+     asserts exactly one `-Sc` line and two `-mode` lines (no duplicates, no
+     `Unknown command`).
+   - `tests/test_safe.py`: `test_disabled_network_command` asserts the
+     `-Syn operation failed (status 1)` stderr line.
+7. **CI macos-15 sanitizer failure.** Local experiment (`/tmp/fdprobe/probe.c`,
+   plain + ASan, `preexec_fn=lambda: os.close(0)`) shows fd 0 stays closed at
+   `main` entry on macOS 27.2 (`F_GETFD` → EBADF; first `open` receives fd 0),
+   so the fd-reuse hypothesis is **refuted locally**. Job logs still return 403
+   (admin-only) — root cause remains BLOCKED; the improved timeout diagnostics
+   from the previous round are the discriminator for the next CI run.
+
 ## Backward compatibility
 
 - CLI commands, help text, prompt rendering, NO_COLOR/UTF-8 handling, signal

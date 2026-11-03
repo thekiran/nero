@@ -45,8 +45,14 @@ int cli_dispatch_command(const char *command)
         return 0;
     }
     if ((count == 1 && strcmp(tokens[0], "-mode") == 0) ||
-        (count == 2 && (strcmp(tokens[1], "-Sc") == 0 || strcmp(tokens[1], "-mode") == 0)))
-        return 0; /* Preserve the inactive legacy commands. */
+        (count == 2 && (strcmp(tokens[1], "-Sc") == 0 || strcmp(tokens[1], "-mode") == 0))) {
+        /* Inactive legacy commands: keep parsing stable, but say so. */
+        if (count == 2 && strcmp(tokens[1], "-Sc") == 0)
+            printf("\n-Sc: not available in this build; no network traffic is generated.\n");
+        else
+            printf("\n-mode: not available in this build.\n");
+        return 0;
+    }
     if (strcmp(tokens[0], "help") == 0) {
         if (count > 2 || (count == 2 && strcmp(tokens[1], "-All") != 0))
             goto invalid;

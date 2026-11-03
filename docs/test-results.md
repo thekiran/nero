@@ -38,6 +38,30 @@ None at the time of writing. Pre-audit failures that this change set resolves:
    error mid-script still exited 0; after the fix the same scenario exits 1).
 3. `make run DOMAIN=x` shell error from the stray `@` continuation.
 
+## Round 5 results (2026-11-03, second pass)
+
+| Check | Command | Result |
+|---|---|---|
+| Whitespace/conflict hygiene | `git diff --check` | PASS |
+| Production build (macOS) | `make clean && make CC=clang -j4` | PASS |
+| Offline regression suite | `make test` | PASS — `Ran 11 tests … OK` + `Ran 20 tests … OK` (incl. passive-command assertions) |
+| Sanitizer suite | `make test-sanitize` | PASS — 11 + 20 tests OK |
+| Static analysis | `make analyze` | PASS (exit 0) |
+| CMake macOS | `cmake --preset macos && cmake --build --preset macos && ctest --preset macos` | PASS — `100% tests passed out of 4` |
+| Linux full validation | `docker run --rm -v "$PWD:/source" nero-validation-local sh /source/tests/linux/run.sh` | PASS — exit 0, `TOTAL FAILURES: 0`; new harness checks green: menu EOF on pipe → -1; pty Enter/arrow → expected ports with slave termios restored (plain + ASan/UBSan); injected `pthread_create` failure → `portscanner` returns 1, state cleaned (plain + ASan/UBSan); GCC + Clang engine builds; interface parser; CLI signal exits 130/143 |
+
+### Round 5 per-finding status
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | macos-15 CI `make test-sanitize` root cause | **BLOCKED** — job logs 403 (admin-only); local runs all green; fd-0-reuse hypothesis experimentally refuted on macOS 27.2 (plain + ASan probe, fd 0 EBADF at `main`, first `open` gets fd 0); timeout diagnostics from round 4 remain the CI discriminator |
+| 2 | Port menu EOF/read error → valid selection | **PASS** — fixed (`select_port_menu` returns -1); pipe-EOF and pty regression tests green on Linux harness |
+| 3 | Raw mode tcgetattr/tcsetattr/cleanup/atexit | **PASS** — isatty-gated, single atexit registration, no-op-safe disable; termios byte-identical after menu on pty (padding-safe comparison) |
+| 4 | Partial thread creation reported as full success | **PASS** — `portscanner` reports "only N of M workers started" and returns 1; injected-failure test green |
+| 5 | `-Sc` / `-mode` passive command feedback | **PASS** — explicit single-line status messages; exact-count assertions in terminal suite |
+| 6 | `Makefile DOMAIN` processing | **PASS** — verified app never consumed it; dead plumbing removed, `make run` launches interactive CLI |
+| 7 | Regression test per fix | **PASS** — three new harness checks (EOF, termios restore, partial create) × (plain, ASan/UBSan) + updated Python assertions |
+
 ## Notes
 
 - No test timeouts were raised; the only timing-related change is improved
