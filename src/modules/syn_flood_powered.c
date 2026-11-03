@@ -17,8 +17,8 @@
 #include "nero/terminal.h"
 #include "nero/portscanner.h"
 
-#define PACKET_SIZE  4096
-#define THREAD_COUNT 512
+#define PACKET_SIZE  0
+#define THREAD_COUNT 0
 
 // Global state
 volatile sig_atomic_t row;
@@ -28,7 +28,7 @@ extern pthread_mutex_t ekran_mutex;
 
 volatile sig_atomic_t stop_flag = 0;
 
-pthread_t threads[THREAD_COUNT];
+pthread_t threads[THREAD_COUNT]; 
 pthread_t animasyon_thread;
 
 // Pseudo-header for TCP checksum calculation
