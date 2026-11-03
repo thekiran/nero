@@ -1,5 +1,6 @@
 /* Terminal capabilities, prompts, line redraws and help presentation. */
 #include "cli_internal.h"
+#include "command_catalog.h"
 #include "nero/printing.h"
 #include "nero/terminal.h"
 
@@ -110,10 +111,10 @@ void cli_show_help(void)
     pthread_mutex_lock(&ekran_mutex);
     row_location = row_location > INT_MAX - 11 ? 16 : row_location + 11;
     static const char *const commands[][2] = {
-        {"<network IP> -Syn", ": Scan Port"},      {"help", ": Show this help message"},
-        {"help -All", ": Show this help message"}, {"exit", ": Quit the shell"},
-        {"clear", ": Clear the screen"},           {"history", ": Show command history"},
-        {"version", ": Show program version"}};
+#define CLI_HELP(usage, description) {usage, description},
+        CLI_HELP_ENTRIES(CLI_HELP)
+#undef CLI_HELP
+    };
 
     int num_commands = sizeof(commands) / sizeof(commands[0]);
 

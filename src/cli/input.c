@@ -1,5 +1,6 @@
 /* Line editing, escape-sequence decoding and command history. */
 #include "cli_internal.h"
+#include "command_catalog.h"
 #include "nero/terminal.h"
 
 #include <errno.h>
@@ -21,6 +22,30 @@ static void copy_line(cli_line *line, const char *text)
     memcpy(line->text, text, length);
     line->text[length] = '\0';
     line->length = line->cursor = length;
+}
+
+static int complete_line(cli_line *line)
+{
+    static const char *const candidates[] = {
+#define CLI_CANDIDATE(usage, description) usage,
+        CLI_HELP_ENTRIES(CLI_CANDIDATE)
+#undef CLI_CANDIDATE
+    };
+    const char *match = NULL;
+    if (line->cursor != line->length || line->length == 0)
+        return 0;
+    for (size_t index = 0; index < sizeof(candidates) / sizeof(candidates[0]); ++index) {
+        if (candidates[index][0] == '<' ||
+            strncmp(candidates[index], line->text, line->length) != 0)
+            continue;
+        if (match != NULL)
+            return 0;
+        match = candidates[index];
+    }
+    if (match == NULL || strlen(match) >= sizeof(line->text))
+        return 0;
+    copy_line(line, match);
+    return 1;
 }
 
 /* Timeout is used only for escape continuation, never for a whole command. */
@@ -166,6 +191,10 @@ int cli_read_line(char command[CLI_LINE_CAPACITY])
                 --line.length;
             }
         } else if (((unsigned char)ch >= 32 && ch != 127) || ch == '\t') {
+            if (ch == '\t' && complete_line(&line)) {
+                cli_render_line(&line);
+                continue;
+            }
             if (ch == '\t')
                 ch = ' ';
             if (line.length == sizeof(line.text) - 1) {

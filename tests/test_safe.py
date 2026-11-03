@@ -43,8 +43,8 @@ class SafeTests(unittest.TestCase):
     def test_disabled_network_command(self):
         self.assert_no_network_symbols("nero-safe")
         output = self.cli(b"192.0.2.1 -Syn\n192.0.2.1 -mode\nexit\n")
-        self.assertIn(b"-Syn: simulation for 192.0.2.1; packets sent: 0", output)
-        self.assertIn(b"-mode: simulation; packets sent: 0", output)
+        self.assertIn(b"-Syn: unsupported in this build; no network traffic is generated.", output)
+        self.assertIn(b"Network diagnostics: ON", output)
         self.assertNotIn(b"-Syn operation failed", output)
         self.assertIn(b"Exiting", output)
 

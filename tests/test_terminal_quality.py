@@ -23,6 +23,15 @@ def run(data, **extra):
 
 
 class TerminalQuality(unittest.TestCase):
+    def test_catalog_completion_and_help(self):
+        output = self.output(b"vers\t\nhistory -c\t\nhelp\nexit\n")
+        self.assertIn(b"version 1.0", output)
+        self.assertIn(b"History cleared.", output)
+        self.assertNotIn(b"Unknown command", output)
+        for usage in (b"help -All", b"history -clear", b"exit -All",
+                      b"<network IP> -Syn", b"<target> -Sc", b"-mode on", b"-mode off"):
+            self.assertIn(usage, output)
+
     def output(self, data):
         result = run(data)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -87,12 +96,12 @@ class TerminalQuality(unittest.TestCase):
         self.assertNotIn(b"version 1.0", output)
         self.assertIn(b"Command too long", output)
 
-    def test_inactive_legacy_commands(self):
+    def test_offline_legacy_commands(self):
         output = self.output(b"192.0.2.1 -Sc\n-mode\n192.0.2.1 -mode\nexit -All\n")
         self.assertNotIn(b"MOCK_SYN:", output)
         self.assertNotIn(b"Unknown command", output)
-        self.assertEqual(output.count(b"-Sc: not available in this build"), 1)
-        self.assertEqual(output.count(b"-mode: not available in this build"), 2)
+        self.assertEqual(output.count(b"-Sc: simulation for 192.0.2.1; packets sent: 0"), 1)
+        self.assertEqual(output.count(b"Network diagnostics: ON"), 2)
 
     def test_repeated_clear_and_fallback(self):
         result = run(b"clear\n" * 200 + b"help\nexit\n", TERM="dumb", NERO_ASCII="1", NO_COLOR="1")
