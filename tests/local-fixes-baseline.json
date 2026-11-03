@@ -1,67 +1,4 @@
 {
-<<<<<<< HEAD
-  "description": "Intentional local validation fixes; historical migration manifests remain unchanged.",
-  "changes": {
-    "src/cli/input.c": {
-      "before": "3dd6d832fc08870b2bb3a520640bc8d5d51c78ff77ac1439d68e7800feebc4ea",
-      "after": "d47126d2fc556c3d69db947f58c61509573f23d44a7a0e143469ebe55639b3c1",
-      "reason": "Explicit zero initialization prevents oversized Mach-O common-symbol alignment; history regression tests preserve behavior."
-    },
-    "src/platform/macos/select_interface_macos.c": {
-      "before": "19d26806270b943178b2ddf7c6fad2f855f89148792b0d5834c59557cc6ab380",
-      "after": "984d5771fd4b95c4a9643b13be0dd4e66697b7980559c3b2c6b84fe7dff4ca0a",
-      "reason": "Reviewed SystemConfiguration classification, virtual-interface precedence, bounded names, duplicate flag merging, sorted enumeration including addressless interfaces, CF ownership and strict input parsing. Interface regression and sanitizer tests cover enumeration and invalid selections."
-    },
-    "include/nero/portscanner.h": {
-      "before": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583",
-      "after": "fa5615763ac210e12ecee465c6ffb2aadf7d7a5284cc1a1e0efbad50df461274",
-      "reason": "docs(portscanner): clarify unified -1 failure sentinel to avoid port 1 ambiguity"
-    },
-    "src/modules/portscanner.c": {
-      "before": "c067450c59288109bf6fb54f1143818ced60954539cd1d952d31e311599f1cc4",
-      "after": "4a2e635076ee72d122149c9f6b22db2d8d312c3f02b1500b0356c6e5bd81391b",
-      "reason": "fix(portscanner): preserve unified -1 failure contract and one-time raw-mode atexit registration"
-    },
-    "src/modules/syn_flood_powered.c": {
-      "before": "8847df4a96caf14455fa8485948614eabbe8c9f723b7c05ab88b32109cedc4e6",
-      "after": "8b6fc39d3755963b55f833f90ae2a614dc7ef5bffb4e480e56f33bdda9400d2b",
-      "reason": "fix(engine): validate ping command input, use thread-safe rand_r, and correct format output"
-    },
-    "src/platform/linux/select_interface.c": {
-      "before": "736967aadb5c844444d778b23f45513a3b11b4f09fbbd20f135157c8effe09d1",
-      "after": "540370baa3f4f66c56da11c198da2e31e6de1fd18a23b3ee65780343e7e49b19",
-      "reason": "Linux runtime validation: strict C prototypes/newline or bounded interface parsing; see linux-runtime-validation.md."
-    },
-    "Makefile": {
-      "before": "1b047a513b4cd07586d978373403b9e63276e46596f57bd1953b7f7149879f82",
-      "after": "9c28006005c6487bfde6bf5e945a45352f2ea9dc04f380e2997e53a66916348c",
-      "reason": "fix(make): drop unprocessed DOMAIN/run_default; run launches the interactive CLI"
-    },
-    "CMakeLists.txt": {
-      "before": "21da1e16528792e6b66c80f94c75c189fd9ea408d4cd85820b95dab014eb6582",
-      "after": "9a6bc06ff7ffe0f964dbb63e0873a53927bb89eebd44c8d9554a1bbd0ad4cc41",
-      "reason": "Reviewed Apple-only framework discovery and linkage for interfaces and interfaces-mock; other targets and Linux selection are unchanged."
-    },
-    "src/platform/macos/network_unavailable.c": {
-      "before": "932663ef68a8f31e0463b5334b97eb6d90fb9264a90aef6fe1cc5c55c9be4bc2",
-      "after": "32cefcd3d58ac8ff579db3854223d500ad02591b54dd631cc1ca3763613dc726",
-      "reason": "fix(macos): return SYN_UNAVAILABLE sentinel and keep unsupported-adapter notice"
-    },
-    "include/nero/printing.h": {
-      "before": "1f1f1cbb07e8d3325230cf725739c81e8ce3781722c2ac3b02c684837d4886d4",
-      "after": "fdebd5a47a8b0528531e316a4753af944b00bb262053d39912333e81c72ab50b",
-      "reason": "fix(printing): keep cursor fallback macros as string literals"
-    },
-    "include/nero/syn_flood_powered.h": {
-      "before": "71fc60fc3592a591615cc301f43f82b92d0e4fa56beebdb1bdf6c7ffd1699c80",
-      "after": "be2962a61512a7e055a270314e6f4c69958962b5f1187cb7075fc8e374597e41",
-      "reason": "docs(engine): rename include guard and document SYN_UNAVAILABLE sentinel"
-    },
-    "src/cli/commands.c": {
-      "before": "f96218b475633ab5983c94d170cb05fa61155c59389aa3718fb5f66bc115dacb",
-      "after": "dfd21bbd9d0cc9c1f57c1a01e87db31493a62ed5877143ab380194976201727c",
-      "reason": "fix(cli): suppress duplicate SYN failure output for unavailable adapter; avoid printf format parsing"
-=======
     "description": "Intentional local validation fixes; historical migration manifests remain unchanged.",
     "changes": {
         "src/cli/input.c": {
@@ -77,17 +14,17 @@
         "include/nero/portscanner.h": {
             "before": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583",
             "after": "fa5615763ac210e12ecee465c6ffb2aadf7d7a5284cc1a1e0efbad50df461274",
-            "reason": "docs(portscanner): document single-negative failure return contract"
+            "reason": "docs(portscanner): document portscanner return contract"
         },
         "src/modules/portscanner.c": {
             "before": "c067450c59288109bf6fb54f1143818ced60954539cd1d952d31e311599f1cc4",
             "after": "4a2e635076ee72d122149c9f6b22db2d8d312c3f02b1500b0356c6e5bd81391b",
-            "reason": "fix(portscanner): single negative failure sentinel (-1) so port 1 stays a valid selection; register atexit raw-mode cleanup once"
+            "reason": "fix(portscanner): EOF/menu abort returns -1, robust raw mode, partial scan reports failure"
         },
         "src/modules/syn_flood_powered.c": {
             "before": "8847df4a96caf14455fa8485948614eabbe8c9f723b7c05ab88b32109cedc4e6",
             "after": "8b6fc39d3755963b55f833f90ae2a614dc7ef5bffb4e480e56f33bdda9400d2b",
-            "reason": "fix(engine): validate target with inet_pton before ping (no shell injection), per-thread rand_r, closed ANSI escape sequence"
+            "reason": "fix(engine): abort on aborted/missing port selection, report partial flood thread creation"
         },
         "src/platform/linux/select_interface.c": {
             "before": "736967aadb5c844444d778b23f45513a3b11b4f09fbbd20f135157c8effe09d1",
@@ -102,17 +39,17 @@
         "CMakeLists.txt": {
             "before": "21da1e16528792e6b66c80f94c75c189fd9ea408d4cd85820b95dab014eb6582",
             "after": "7802e171409045ebade107142a469e92349d070ee2a24b161b62680c20a4385e",
-            "reason": "ci(test-architecture): register the source hash check as an optional, non-gating audit via NERO_SOURCE_AUDIT (OFF by default); keeps the earlier Apple-only framework discovery/linkage for interfaces and interfaces-mock"
+            "reason": "Reviewed Apple-only framework discovery and linkage for interfaces and interfaces-mock; other targets and Linux selection are unchanged."
         },
         "src/platform/macos/network_unavailable.c": {
             "before": "932663ef68a8f31e0463b5334b97eb6d90fb9264a90aef6fe1cc5c55c9be4bc2",
             "after": "32cefcd3d58ac8ff579db3854223d500ad02591b54dd631cc1ca3763613dc726",
-            "reason": "fix(macos): stub returns SYN_UNAVAILABLE with a newline-prefixed message so the shell skips the bogus failure line"
+            "reason": "fix(macos): restore no-network adapter stub printing 'unsupported in this build' (commit 97438f0)"
         },
         "src/cli/commands.c": {
             "before": "f96218b475633ab5983c94d170cb05fa61155c59389aa3718fb5f66bc115dacb",
-            "after": "dfd21bbd9d0cc9c1f57c1a01e87db31493a62ed5877143ab380194976201727c",
-            "reason": "fix(cli): skip the 'operation failed' line when SYN_Flood returns SYN_UNAVAILABLE; harden printf(MACRO) into fputs(MACRO, stdout)"
+            "after": "e141ca6c606b56e41816eeecbc5c21e897c672a664518a7066827102981b4219",
+            "reason": "refactor(cli): table-driven command dispatch with small per-command handlers; behaviour preserved (31 CLI tests green)"
         },
         "include/nero/printing.h": {
             "before": "1f1f1cbb07e8d3325230cf725739c81e8ce3781722c2ac3b02c684837d4886d4",
@@ -124,6 +61,11 @@
             "after": "be2962a61512a7e055a270314e6f4c69958962b5f1187cb7075fc8e374597e41",
             "reason": "fix(header): correct include guard SYN_FLOD_H -> SYN_FLOOD_H; add SYN_UNAVAILABLE sentinel; drop undefined animation_fuction declaration"
         }
->>>>>>> 1a490e8 (fix(ci): add optional non-gating source baseline audit and update related tests)
+    },
+    "removed": [
+        "src/cli/printing.c"
+    ],
+    "removed-reasons": {
+        "src/cli/printing.c": "chore(cli): remove dead duplicate of include/nero/printing.h; the .c held only macro redefinitions, was compiled by no target, and included by no source"
     }
 }
