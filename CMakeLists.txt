@@ -85,6 +85,11 @@ elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         endforeach()
         add_test(NAME terminal-quality COMMAND ${Python3_EXECUTABLE}
             "${PROJECT_SOURCE_DIR}/tests/test_terminal_quality.py" $<TARGET_FILE:nero-mock>)
+        add_executable(operation-layout tests/operation_layout_fixture.c src/cli/operation_ui.c)
+        nero_target(operation-layout)
+        add_test(NAME operation-layout COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/tests/test_operation_layout.py" $<TARGET_FILE:operation-layout>)
+        set_tests_properties(operation-layout PROPERTIES TIMEOUT 30)
         set_tests_properties(terminal-quality PROPERTIES TIMEOUT 120)
         add_test(NAME legacy-safe-regression COMMAND ${Python3_EXECUTABLE}
             "${PROJECT_SOURCE_DIR}/tests/test_safe.py" $<TARGET_FILE_DIR:nero-safe>)

@@ -10,11 +10,78 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 #define ESCAPE_CONTINUATION_MS 35
 #define OPERATION_DOT_COUNT 6
 
 static int alternate_screen_active = 0;
+static nero_operation_ui *current_ui;
+
+static void position(int row, int column)
+{
+    printf("\033[%d;%dH", row, column);
+}
+
+static void paint_layout(nero_operation_ui *ui)
+{
+    if (!ui->interactive)
+        return;
+    fputs("\033[0m\033[H\033[2J", stdout);
+    if (ui->compact) {
+        /* Never wrap or shrink the brand into a different logo. */
+        position(1, 1);
+        printf("%.*s", ui->columns - 1, "Enlarge terminal to at least 64 x 24");
+        return;
+    }
+    if (ui->color) fputs("\033[35m", stdout);
+    fputs(NERO_ASCII_LOGO, stdout);
+    if (ui->color) fputs("\033[0m", stdout);
+    position(14, 3);
+    if (ui->color) fputs("\033[1m", stdout);
+    printf("%.*s", ui->columns - 4, ui->title ? ui->title : "");
+    if (ui->color) fputs("\033[0m", stdout);
+    position(15, 3);
+    if (ui->color) fputs("\033[2m", stdout);
+    printf("%.*s", ui->columns - 4, ui->detail ? ui->detail : "");
+    if (ui->color) fputs("\033[0m", stdout);
+    position(ui->rows, 3);
+    if (ui->color) fputs("\033[2m", stdout);
+    printf("%.*s", ui->columns - 4, ui->controls ? ui->controls : "");
+    if (ui->color) fputs("\033[0m", stdout);
+}
+
+static void refresh_layout(nero_operation_ui *ui)
+{
+    struct winsize size = {0};
+    int rows = 24, columns = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0) {
+        if (size.ws_row) rows = size.ws_row;
+        if (size.ws_col) columns = size.ws_col;
+    }
+    if (rows == ui->rows && columns == ui->columns) return;
+    ui->rows = rows;
+    ui->columns = columns;
+    ui->compact = columns < 64 || rows < 24;
+    ui->content_top = 17;
+    ui->content_bottom = rows - 2;
+    paint_layout(ui);
+}
+
+/* Clear bounded rows rather than the rest of the screen: the logo and footer
+ * are owned by the layout and cannot be erased by an operation update. */
+static int body(nero_operation_ui *ui)
+{
+    if (!ui || !ui->interactive) return 1;
+    refresh_layout(ui);
+    if (ui->compact) { fflush(stdout); return 0; }
+    for (int row = ui->content_top; row <= ui->content_bottom; ++row) {
+        position(row, 1);
+        fputs("\033[2K", stdout);
+    }
+    position(ui->content_top, 3);
+    return 1;
+}
 
 /* Idempotent normal-exit fallback. atexit does not run after SIGKILL or a
  * fatal crash, so callers must still end operations on recoverable paths. */
@@ -25,6 +92,8 @@ static void restore_operation_surface(void)
     fputs("\033[0m\033[?1049l", stdout);
     fflush(stdout);
     alternate_screen_active = 0;
+    fputs("\033[?25h", stdout);
+    fflush(stdout);
 }
 
 /* Return 1 for a byte, 0 for timeout and a negative value for input failure.
@@ -56,34 +125,40 @@ void nero_operation_begin(
         return;
     /* Both ends must be terminals before switching screen buffers. Redirected
      * output keeps its linear transcript instead of entering another screen. */
-    ui->interactive = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+    const char *term = getenv("TERM");
+    ui->interactive = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) &&
+                      term && strcmp(term, "dumb") != 0;
+    ui->color = ui->interactive && getenv("NO_COLOR") == NULL;
+    ui->title = title;
+    ui->detail = detail;
+    ui->controls = controls;
+    ui->rows = ui->columns = ui->scroll_offset = 0;
+    current_ui = ui;
     ui->active = 1;
     if (ui->interactive) {
         static int cleanup_registered = 0;
         if (!cleanup_registered && atexit(restore_operation_surface) == 0)
             cleanup_registered = 1;
         alternate_screen_active = 1;
-        fputs("\033[?1049h\033[H\033[2J", stdout);
+        fputs("\033[?1049h\033[?25l", stdout);
+        refresh_layout(ui);
+        fflush(stdout);
+        return;
     } else {
         putchar('\n');
     }
 
-    /* Draw the shared brand above all operation content. Loader redraws only
-     * replace their own line, leaving the logo intact during discovery. */
-    if (ui->interactive && getenv("NO_COLOR") == NULL)
-        fputs("\033[35m", stdout);
+    /* Redirected output is a plain transcript, with no cursor or color codes. */
     fputs(NERO_ASCII_LOGO, stdout);
-    if (ui->interactive && getenv("NO_COLOR") == NULL)
-        fputs("\033[0m", stdout);
     putchar('\n');
 
     /* Keep operation metadata light so the shared logo remains the heading. */
     if (title != NULL && title[0] != '\0')
-        printf("  \033[1m%s\033[0m\n", title);
+        printf("  %s\n", title);
     if (detail != NULL && detail[0] != '\0')
-        printf("  \033[2m%s\033[0m\n", detail);
+        printf("  %s\n", detail);
     if (controls != NULL && controls[0] != '\0') {
-        printf("  \033[2m%s\033[0m\n", controls);
+        printf("  %s\n", controls);
     }
     putchar('\n');
     fflush(stdout);
@@ -91,7 +166,8 @@ void nero_operation_begin(
 
 void nero_operation_section(const char *label)
 {
-    printf("\033[1;36m%s\033[0m\n\n", label);
+    if (!body(current_ui)) return;
+    printf("%s\n", label);
     fflush(stdout);
 }
 
@@ -99,15 +175,15 @@ void nero_operation_section(const char *label)
  * frame produces the static six-dot representation used for reduced motion. */
 void nero_operation_loader(const char *label, const char *detail, unsigned frame)
 {
-    printf("\r\033[2K  %-12s ", label);
+    (void)detail; /* The target already appears once in the fixed header. */
+    if (!body(current_ui)) return;
+    printf("%-12s ", label);
     for (unsigned index = 0; index < OPERATION_DOT_COUNT; ++index) {
-        if (index == frame)
-            fputs("\033[96m\342\227\217\033[0m", stdout);
-        else
-            fputs("\033[2m\302\267\033[0m", stdout);
+        int color = current_ui && current_ui->color;
+        if (color) fputs(index == frame ? "\033[35m" : "\033[2m", stdout);
+        fputs(index == frame ? "●" : "·", stdout);
+        if (color) fputs("\033[0m", stdout);
     }
-    if (detail != NULL && detail[0] != '\0')
-        printf("  \033[2m%s\033[0m", detail);
     fflush(stdout);
 }
 
@@ -115,10 +191,13 @@ void nero_operation_loader(const char *label, const char *detail, unsigned frame
  * Finalizing the loader with a newline leaves later sections on a fresh row. */
 void nero_operation_status(const char *color, const char *label, const char *detail)
 {
-    fputs("\r\033[2K", stdout);
-    printf("\033[%sm%s\033[0m", color == NULL ? "0" : color, label);
+    if (!body(current_ui)) return;
+    int styled = current_ui && current_ui->color;
+    if (styled) printf("\033[%sm", color ? color : "0");
+    printf("%s", label);
+    if (styled) fputs("\033[0m", stdout);
     if (detail != NULL && detail[0] != '\0')
-        printf("  \033[2m%s\033[0m", detail);
+        printf("  %s", detail);
     putchar('\n');
     fflush(stdout);
 }
@@ -134,6 +213,96 @@ void nero_operation_end(nero_operation_ui *ui)
     }
     fflush(stdout);
     ui->active = 0;
+    current_ui = NULL;
+}
+
+/* Discovery and selection share column widths, so the same result keeps its
+ * visual position when the operation changes from scanning to choosing. */
+static void port_table_header(nero_operation_ui *ui, int row)
+{
+    if (ui->interactive) position(row, 3);
+    else putchar('\n');
+    if (ui->color) fputs("\033[2m", stdout);
+    printf("  %-9s%-13s%s", "PORT", "PROTOCOL", "STATUS");
+    if (ui->color) fputs("\033[0m", stdout);
+}
+
+static void port_table_row(nero_operation_ui *ui, int row, int port, int selected)
+{
+    if (ui->interactive) position(row, 3);
+    else putchar('\n');
+    if (ui->color) fputs(selected ? "\033[1;35m" : "\033[1m", stdout);
+    printf("%s %-9d", selected ? ">" : " ", port);
+    if (ui->color) fputs("\033[0;2m", stdout);
+    printf("%-13s", "TCP");
+    if (ui->color) fputs("\033[0;35m", stdout);
+    fputs("OPEN", stdout);
+    if (ui->color) fputs("\033[0m", stdout);
+}
+
+void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, int selected)
+{
+    ui->controls = "↑↓ · Move   Enter · Select   Esc · Back";
+    if (!body(ui)) return;
+    int visible = ui->interactive ? ui->content_bottom - ui->content_top - 2 : count;
+    if (selected < ui->scroll_offset) ui->scroll_offset = selected;
+    if (selected >= ui->scroll_offset + visible) ui->scroll_offset = selected - visible + 1;
+    if (ui->color) fputs("\033[1m", stdout);
+    printf("Choose a port");
+    if (ui->color) fputs("\033[0;2m", stdout);
+    printf("     %d / %d", selected + 1, count);
+    if (ui->color) fputs("\033[0m", stdout);
+    port_table_header(ui, ui->content_top + 2);
+    for (int index = 0; index < visible && ui->scroll_offset + index < count; ++index) {
+        int item = ui->scroll_offset + index;
+        port_table_row(ui, ui->content_top + index + 3, ports[item], item == selected);
+    }
+    if (ui->interactive) {
+        position(ui->rows, 3);
+        printf("%s", ui->controls);
+    }
+    fflush(stdout);
+}
+
+void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned attempt)
+{
+    if (!body(ui)) return;
+    if (ui->color && getenv("NERO_REDUCE_MOTION") == NULL)
+        fputs(frame, stdout); /* Existing frames occupy three bounded body rows. */
+    else
+        printf("Connection test %u/4", attempt);
+    fflush(stdout);
+}
+
+void nero_operation_discovery(const int *recent, int recent_count, int total,
+                              unsigned frame, int latest_port)
+{
+    nero_operation_loader("Scanning", NULL, frame);
+    nero_operation_ui *ui = current_ui;
+    if (!ui || !ui->interactive || ui->compact) return;
+    position(ui->content_top + 1, 3);
+    if (ui->color) fputs("\033[2m", stdout);
+    if (latest_port > 0)
+        printf("Latest probe  TCP / %d", latest_port);
+    else
+        fputs("Preparing TCP probes", stdout);
+    if (ui->color) fputs("\033[0m", stdout);
+    position(ui->content_top + 2, 3);
+    if (ui->color) fputs("\033[1m", stdout);
+    printf("Discovered");
+    if (ui->color) fputs("\033[0;35m", stdout);
+    printf("  %d", total);
+    if (ui->color) fputs("\033[0;2m", stdout);
+    printf(" open port%s", total == 1 ? "" : "s");
+    if (ui->color) fputs("\033[0m", stdout);
+    port_table_header(ui, ui->content_top + 3);
+    int visible = ui->content_bottom - ui->content_top - 3;
+    if (visible < 1) visible = 1;
+    int start = recent_count > visible ? recent_count - visible : 0;
+    for (int index = start; index < recent_count; ++index) {
+        port_table_row(ui, ui->content_top + 4 + index - start, recent[index], 0);
+    }
+    fflush(stdout);
 }
 
 nero_ui_key nero_operation_read_key(int timeout_ms)

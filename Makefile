@@ -120,9 +120,13 @@ $(TEST_DIR)/nero-mock: $(MOCK_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
 $(TEST_DIR)/nero-faults: $(FAULT_SOURCES) src/cli/terminal.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(FAULT_SOURCES) -o $@ -pthread
 
-test: $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults
+$(TEST_DIR)/operation-layout: tests/operation_layout_fixture.c src/cli/operation_ui.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/operation_layout_fixture.c src/cli/operation_ui.c -o $@
+
+test: $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults $(TEST_DIR)/operation-layout
 	python3 tests/test_safe.py $(TEST_DIR)
 	python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
+	python3 tests/test_operation_layout.py $(TEST_DIR)/operation-layout
 
 test-sanitize:
 	$(MAKE) test TEST_DIR=.build/sanitize SANITIZERS="-fsanitize=address,undefined -fno-omit-frame-pointer"

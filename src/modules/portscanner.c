@@ -31,6 +31,9 @@ volatile sig_atomic_t portscanner_interrupt_requested = 0;
 /* Keyboard cancellation crosses threads through an atomic flag; signal
  * cancellation uses the separate sig_atomic_t flag above. */
 static atomic_int scan_cancel_requested;
+/* Latest started probe is a sample, not a sequential progress counter:
+ * multiple workers scan different ranges concurrently. */
+static atomic_int latest_probe_port;
 const char *target_ip_global;
 pthread_mutex_t ports_mutex;
 
@@ -67,10 +70,19 @@ static void *scan_animation_worker(void *arg)
     unsigned frame = 0;
 
     while (!atomic_load_explicit(&state->stop, memory_order_relaxed)) {
-        if (state->animate) {
-            nero_operation_loader("Scanning", state->target_ip, frame);
-            frame = (frame + 1) % 6;
-        }
+        /* Copy recent discoveries while locked; terminal writes must never
+         * block network workers or retain pointers across reallocations. */
+        int recent[128];
+        pthread_mutex_lock(&ports_mutex);
+        int total = port_counter;
+        int recent_count = total < 128 ? total : 128;
+        if (recent_count > 0)
+            memcpy(recent, open_ports_list + total - recent_count,
+                   (size_t)recent_count * sizeof(*recent));
+        pthread_mutex_unlock(&ports_mutex);
+        nero_operation_discovery(recent, recent_count, total, state->animate ? frame : 6,
+            atomic_load_explicit(&latest_probe_port, memory_order_relaxed));
+        frame = (frame + 1) % 6;
 
         if (nero_operation_read_key(0) == NERO_UI_KEY_CANCEL)
             atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
@@ -120,7 +132,6 @@ static int select_port_menu_in_ui(
     int count,
     nero_operation_ui *ui
 ) {
-    (void)ui;
     if (count == 0) {
         return 0;
     }
@@ -132,30 +143,13 @@ static int select_port_menu_in_ui(
     int current_selection = 0;
     int input_ok = 1;
 
-    nero_operation_section("OPEN PORTS");
-    printf("\033[2mUp/Down  Move    Enter  Select    Esc  Back\033[0m\n\n");
-
-    // Draw the menu for the first time (using the sorted list)
-    for (int i = 0; i < count; i++) {
-        if (i == 0) printf("  \033[36m>\033[0m \033[7m %d \033[0m\n", open_ports[i]);
-        else printf("    %d\n", open_ports[i]);
-    }
-    fflush(stdout);
-
     while (1) {
-        printf("\x1b[%dA", count); // Move cursor to the top of the menu
-
-        // Redraw the menu
-        for (int i = 0; i < count; i++) {
-            printf("\x1b[K"); // Clear the line
-            if (i == current_selection)
-                printf("  \033[36m>\033[0m \033[7m %d \033[0m\n", open_ports[i]);
-            else
-                printf("    %d\n", open_ports[i]);
+        nero_operation_ports(ui, open_ports, count, current_selection);
+        if (portscanner_interrupt_requested) {
+            if (raw_mode) disable_raw_mode();
+            return PORTSCANNER_CANCELLED;
         }
-        fflush(stdout);
-
-        nero_ui_key key = nero_operation_read_key(-1);
+        nero_ui_key key = nero_operation_read_key(100);
         if (key == NERO_UI_KEY_EOF) {
             input_ok = 0;
             break;
@@ -172,8 +166,6 @@ static int select_port_menu_in_ui(
         else if (key == NERO_UI_KEY_ENTER)
             break;
     }
-    printf("\x1b[%dA", count);
-    printf("\x1b[0J");
     if (raw_mode)
         disable_raw_mode();
     if (!input_ok) {
@@ -233,12 +225,12 @@ void *scan_ports_thread(void *args) {
         if (flags < 0) { close(sockfd); continue; }
         if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) { close(sockfd); continue; }
 
+        atomic_store_explicit(&latest_probe_port, port, memory_order_relaxed);
         int ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
         if (ret == 0) {
             // Connected immediately
             pthread_mutex_lock(&ports_mutex);
-            port_counter++;
-            int *tmp = realloc(open_ports_list, port_counter * sizeof(int));
+            int *tmp = realloc(open_ports_list, (port_counter + 1) * sizeof(int));
             if (!tmp) {
                 scan_alloc_failed = 1;
                 pthread_mutex_unlock(&ports_mutex);
@@ -246,7 +238,7 @@ void *scan_ports_thread(void *args) {
                 pthread_exit(NULL);
             }
             open_ports_list = tmp;
-            open_ports_list[port_counter - 1] = port;
+            open_ports_list[port_counter++] = port;
             pthread_mutex_unlock(&ports_mutex);
             close(sockfd);
             continue;
@@ -276,8 +268,7 @@ void *scan_ports_thread(void *args) {
             if (so_error == 0) {
                 // Connection successful
                 pthread_mutex_lock(&ports_mutex);
-                port_counter++;
-                int *tmp = realloc(open_ports_list, port_counter * sizeof(int));
+                int *tmp = realloc(open_ports_list, (port_counter + 1) * sizeof(int));
                 if (!tmp) {
                     scan_alloc_failed = 1;
                     pthread_mutex_unlock(&ports_mutex);
@@ -285,7 +276,7 @@ void *scan_ports_thread(void *args) {
                     pthread_exit(NULL);
                 }
                 open_ports_list = tmp;
-                open_ports_list[port_counter - 1] = port;
+                open_ports_list[port_counter++] = port;
                 pthread_mutex_unlock(&ports_mutex);
             }
         }
@@ -321,6 +312,7 @@ int portscanner(const char *target_ip) {
     scan_alloc_failed = 0;
     portscanner_interrupt_requested = 0;
     atomic_init(&scan_cancel_requested, 0);
+    atomic_init(&latest_probe_port, 0);
 
     if (pthread_mutex_init(&ports_mutex, NULL) != 0) {
         fprintf(stderr, "[-] Failed to initialize mutex.\n");

