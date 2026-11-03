@@ -13,18 +13,18 @@
     },
     "include/nero/portscanner.h": {
       "before": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583",
-      "after": "221f3cfb9afe8984e2de7e89895ab22d70526a76c107eedfa5e736d636c79761",
-      "reason": "Linux runtime validation: strict C prototypes/newline or bounded interface parsing; see linux-runtime-validation.md."
+      "after": "f2299956c42ccb3e0664078f3fe56d1ca8207d437887a8953b1e0371cdb12ce2",
+      "reason": "docs(portscanner): document portscanner return contract"
     },
     "src/modules/portscanner.c": {
       "before": "c067450c59288109bf6fb54f1143818ced60954539cd1d952d31e311599f1cc4",
-      "after": "7ced754c6789a3885fedfb474e1acb7ecd551575ea7cf5f87328f8a6f834d3fe",
-      "reason": "fix(portscanner): EOF-safe port menu, join only created threads, no exit() from realloc failure"
+      "after": "a6481ac8582aa37aaa5f64b297274b06c31700720e6c757a8f0b477016d029bb",
+      "reason": "fix(portscanner): EOF/menu abort returns -1, robust raw mode, partial scan reports failure"
     },
     "src/modules/syn_flood_powered.c": {
       "before": "8847df4a96caf14455fa8485948614eabbe8c9f723b7c05ab88b32109cedc4e6",
-      "after": "7efbde795b764531cba8b8807c3bba415b0ca0613471f95845e52e9538066591",
-      "reason": "fix(engine): async-signal-safe SIGINT handler, join only created threads, malloc checks"
+      "after": "5a67d148a071af2ade12f3523e6d130aba067b16a82fdef7cd35320c990d9005",
+      "reason": "fix(engine): abort on aborted/missing port selection, report partial flood thread creation"
     },
     "src/platform/linux/select_interface.c": {
       "before": "736967aadb5c844444d778b23f45513a3b11b4f09fbbd20f135157c8effe09d1",
@@ -33,8 +33,8 @@
     },
     "Makefile": {
       "before": "1b047a513b4cd07586d978373403b9e63276e46596f57bd1953b7f7149879f82",
-      "after": "b6f9b121cd452746e7df2ea4133fd5ff0c541b539e8cf62b2bffdc4db949dc26",
-      "reason": "fix(make): remove stray @ prefix inside continued run recipe so make run DOMAIN=... executes the echo"
+      "after": "9c28006005c6487bfde6bf5e945a45352f2ea9dc04f380e2997e53a66916348c",
+      "reason": "fix(make): drop unprocessed DOMAIN/run_default; run launches the interactive CLI"
     },
     "CMakeLists.txt": {
       "before": "21da1e16528792e6b66c80f94c75c189fd9ea408d4cd85820b95dab014eb6582",

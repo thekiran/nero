@@ -22,16 +22,27 @@ const char *target_ip_global;
 pthread_mutex_t ports_mutex;
 
 // --- Terminal Functions ---
+static int raw_mode_active = 0;
+
 void disable_raw_mode(void) {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+    if (!raw_mode_active)
+        return;
+    tcsetattr(STDIN_FILENO, TCSADRAIN, &orig_termios);
+    raw_mode_active = 0;
 }
 
-void enable_raw_mode(void) {
-    tcgetattr(STDIN_FILENO, &orig_termios);
-    atexit(disable_raw_mode);
+int enable_raw_mode(void) {
+    if (!isatty(STDIN_FILENO))
+        return -1;
+    if (tcgetattr(STDIN_FILENO, &orig_termios) != 0)
+        return -1;
     struct termios raw = orig_termios;
     raw.c_lflag &= ~(ECHO | ICANON);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    if (tcsetattr(STDIN_FILENO, TCSADRAIN, &raw) != 0)
+        return -1;
+    raw_mode_active = 1;
+    atexit(disable_raw_mode);
+    return 0;
 }
 
 // --- Port Menu (unchanged logic) ---
@@ -41,6 +52,9 @@ int compare_desc(const void *a, const void *b) {
 }
 
 // --- Port Menu (sorted entries) ---
+// Returns the chosen port (>= 1), 0 when there is nothing to select, or -1
+// when the menu input ends before a selection (EOF/read error) — never a
+// silent "first port" guess.
 int select_port_menu(int *open_ports, int count) {
     if (count == 0) {
         printf("[!] No open ports found to select.\n");
@@ -50,10 +64,9 @@ int select_port_menu(int *open_ports, int count) {
     // Sort ports before displaying the menu
     qsort(open_ports, count, sizeof(int), compare_desc);
 
-    int raw_mode = isatty(STDIN_FILENO);
-    if (raw_mode)
-        enable_raw_mode();
+    int raw_mode = enable_raw_mode() == 0;
     int current_selection = 0;
+    int input_ok = 1;
     char c;
 
     // Draw the menu for the first time (using the sorted list)
@@ -73,13 +86,15 @@ int select_port_menu(int *open_ports, int count) {
         }
 
         ssize_t got = read(STDIN_FILENO, &c, 1);
-        if (got != 1)
-            break; /* EOF or read error: leave the menu instead of spinning. */
+        if (got != 1) {
+            input_ok = 0; /* EOF or read error: no valid selection. */
+            break;
+        }
 
         if (c == '\x1b') { // Arrow keys
             char seq[2];
-            if (read(STDIN_FILENO, &seq[0], 1) != 1) break;
-            if (read(STDIN_FILENO, &seq[1], 1) != 1) break;
+            if (read(STDIN_FILENO, &seq[0], 1) != 1) { input_ok = 0; break; }
+            if (read(STDIN_FILENO, &seq[1], 1) != 1) { input_ok = 0; break; }
             if (seq[0] == '[') {
                 if (seq[1] == 'A' && current_selection > 0) current_selection--;
                 else if (seq[1] == 'B' && current_selection < count - 1) current_selection++;
@@ -92,6 +107,10 @@ int select_port_menu(int *open_ports, int count) {
     printf("\x1b[0J");
     if (raw_mode)
         disable_raw_mode();
+    if (!input_ok) {
+        printf("[!] Port selection aborted (input ended).\n");
+        return -1;
+    }
     printf("Selected Port: %d\n", open_ports[current_selection]);
     return open_ports[current_selection];
 }
@@ -205,6 +224,9 @@ void clear_lines(int n) {
 }
 
 // Main controller
+// Returns the selected port (>= 1), 0 when no open port was found, 1 on an
+// internal failure (partial scan or allocation), or -1 when the user aborted
+// the selection menu with EOF/input error.
 int portscanner(const char *target_ip) {
     target_ip_global = target_ip;
     pthread_t threads[NUM_THREADS];
@@ -244,6 +266,15 @@ int portscanner(const char *target_ip) {
 
     pthread_mutex_destroy(&ports_mutex);
 
+    if (threads_created != NUM_THREADS) {
+        fprintf(stderr, "[-] Scan incomplete: only %d of %d workers started.\n",
+                threads_created, NUM_THREADS);
+        free(open_ports_list);
+        open_ports_list = NULL;
+        port_counter = 0;
+        return 1;
+    }
+
     if (scan_alloc_failed) {
         fprintf(stderr, "[-] Memory allocation failed during scan.\n");
         free(open_ports_list);
@@ -257,5 +288,6 @@ int portscanner(const char *target_ip) {
 
     int selected_port = select_port_menu(open_ports_list, port_counter);
     free(open_ports_list);
+    open_ports_list = NULL;
     return selected_port;
 }

