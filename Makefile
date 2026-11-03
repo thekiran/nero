@@ -40,7 +40,8 @@ ifeq ($(UNAME_S),Darwin)
 SRCS := src/main.c third_party/cjson/cJSON.c $(CLI_SOURCES) src/platform/macos/select_interface_macos.c src/platform/macos/network_unavailable.c
 CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 -g -I include -I third_party/cjson -DUNICODE_SUPPORT
 LDFLAGS :=
-LDLIBS += -pthread
+MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
+LDLIBS += -pthread $(MACOS_FRAMEWORKS)
 else ifneq ($(UNAME_S),Linux)
 $(error Unsupported platform: $(UNAME_S))
 endif
@@ -118,7 +119,7 @@ $(TEST_DIR)/nero-safe: $(SAFE_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(SAFE_SOURCES) -o $@ -pthread -lm
 
 $(TEST_DIR)/interfaces: tests/interfaces.c $(INTERFACE_SOURCE) include/nero/select_interface.h Makefile | $(TEST_DIR)
-	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/interfaces.c $(INTERFACE_SOURCE) -o $@
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/interfaces.c $(INTERFACE_SOURCE) -o $@ $(MACOS_FRAMEWORKS)
 
 $(TEST_DIR)/nero-mock: $(MOCK_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(MOCK_SOURCES) -o $@ -pthread
@@ -126,7 +127,10 @@ $(TEST_DIR)/nero-mock: $(MOCK_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
 $(TEST_DIR)/nero-faults: $(FAULT_SOURCES) src/cli/terminal.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(FAULT_SOURCES) -o $@ -pthread
 
-test: $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults
+$(TEST_DIR)/test-network-unavailable: tests/unit/test_network_unavailable.c src/platform/macos/network_unavailable.c include/nero/syn_flood_powered.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/unit/test_network_unavailable.c src/platform/macos/network_unavailable.c -o $@
+
+test: $(TEST_DIR)/test-network-unavailable $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults
 	python3 tests/test_safe.py $(TEST_DIR)
 	python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
 
@@ -141,7 +145,7 @@ analyze:
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
-	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $< -o $@
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $< -o $@ $(MACOS_FRAMEWORKS)
 test: $(TEST_DIR)/interfaces-mock
 endif
 
