@@ -8,7 +8,7 @@
 #include <ctype.h>
 #include <errno.h>
 
-#define MAX_INTERFACES 128
+#define MAX_INTERFACES 512
 #define MAX_NAME_LEN 64
 
 // ANSI color codes
