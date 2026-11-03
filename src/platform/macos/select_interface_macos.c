@@ -125,4 +125,118 @@ static void classify_interfaces(int count)
             interfaces[index].type = TYPE_ETHERNET;
         }
     }
+    CFRelease(all); /* SCNetworkInterfaceCopyAll follows the Copy rule. */
+}
+
+static const char *type_label(InterfaceType type)
+{
+    switch (type) {
+    case TYPE_ETHERNET:
+        return "Ethernet";
+    case TYPE_WIRELESS:
+        return "Wireless";
+    case TYPE_LOOPBACK:
+        return "Loopback";
+    default:
+        return "Unknown";
+    }
+}
+
+static int type_color(InterfaceType type)
+{
+    switch (type) {
+    case TYPE_ETHERNET:
+        return COLOR_BLUE;
+    case TYPE_WIRELESS:
+        return COLOR_GREEN;
+    case TYPE_LOOPBACK:
+        return COLOR_YELLOW;
+    default:
+        return COLOR_RED;
+    }
+}
+
+static int compare_interfaces(const void *left, const void *right)
+{
+    return strcmp(((const InterfaceEntry *)left)->name, ((const InterfaceEntry *)right)->name);
+}
+
+/* Redirected output and NO_COLOR receive plain text, matching the CLI's
+ * rendering capability rules. */
+static void print_interfaces(int count)
+{
+    const char *term = getenv("TERM");
+    int interactive = isatty(STDOUT_FILENO) && term && strcmp(term, "dumb") != 0;
+    int colored = interactive && getenv("NO_COLOR") == NULL;
+
+    if (interactive)
+        printf("\033[H\033[J");
+    if (colored)
+        printf("\033[1;31mAvailable Network Interfaces:\033[0m\n\n");
+    else
+        printf("Available Network Interfaces:\n\n");
+
+    for (int i = 0; i < count; ++i) {
+        const InterfaceEntry *entry = &interfaces[i];
+        if (colored)
+            printf("%2d) \033[1;%dm%-15s\033[0m (%s)\n", i + 1, type_color(entry->type),
+                   entry->name, type_label(entry->type));
+        else
+            printf("%2d) %-15s (%s)\n", i + 1, entry->name, type_label(entry->type));
+    }
+}
+
+/* Accept one complete decimal integer in [1, count], optionally surrounded
+ * by whitespace; anything else is rejected rather than partially parsed. */
+static int read_selection(int count)
+{
+    char input[128];
+
+    printf("\nSelect an interface [1-%d]: ", count);
+    fflush(stdout);
+
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        fprintf(stderr, "Invalid selection.\n");
+        return -1;
+    }
+    if (strchr(input, '\n') == NULL && !feof(stdin)) {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) {
+        }
+        fprintf(stderr, "Input too long.\n");
+        return -1;
+    }
+
+    char *end = NULL;
+    errno = 0;
+    long choice = strtol(input, &end, 10);
+    if (errno == ERANGE || end == input) {
+        fprintf(stderr, "Invalid selection.\n");
+        return -1;
+    }
+    while (isspace((unsigned char)*end))
+        ++end;
+    if (*end != '\0' || choice < 1 || choice > count) {
+        fprintf(stderr, "Invalid selection.\n");
+        return -1;
+    }
+    return (int)choice - 1;
+}
+
+const char *list_and_select_interface(void)
+{
+    int count = enumerate_interfaces();
+    if (count < 0)
+        return NULL;
+    if (count == 0) {
+        fprintf(stderr, "No network interfaces found.\n");
+        return NULL;
+    }
+
+    classify_interfaces(count);
+    qsort(interfaces, (size_t)count, sizeof(interfaces[0]), compare_interfaces);
+    print_interfaces(count);
+
+    int index = read_selection(count);
+    return index < 0 ? NULL : interfaces[index].name;
 }
