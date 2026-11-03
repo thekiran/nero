@@ -13,18 +13,18 @@
     },
     "include/nero/portscanner.h": {
       "before": "3c37841945944d9d5155ce2116b132bf3e4d2a9eff194e396295a14f1175d583",
-      "after": "f2299956c42ccb3e0664078f3fe56d1ca8207d437887a8953b1e0371cdb12ce2",
-      "reason": "docs(portscanner): document portscanner return contract"
+      "after": "fa5615763ac210e12ecee465c6ffb2aadf7d7a5284cc1a1e0efbad50df461274",
+      "reason": "docs(portscanner): clarify unified -1 failure sentinel to avoid port 1 ambiguity"
     },
     "src/modules/portscanner.c": {
       "before": "c067450c59288109bf6fb54f1143818ced60954539cd1d952d31e311599f1cc4",
-      "after": "a6481ac8582aa37aaa5f64b297274b06c31700720e6c757a8f0b477016d029bb",
-      "reason": "fix(portscanner): EOF/menu abort returns -1, robust raw mode, partial scan reports failure"
+      "after": "4a2e635076ee72d122149c9f6b22db2d8d312c3f02b1500b0356c6e5bd81391b",
+      "reason": "fix(portscanner): preserve unified -1 failure contract and one-time raw-mode atexit registration"
     },
     "src/modules/syn_flood_powered.c": {
       "before": "8847df4a96caf14455fa8485948614eabbe8c9f723b7c05ab88b32109cedc4e6",
-      "after": "5a67d148a071af2ade12f3523e6d130aba067b16a82fdef7cd35320c990d9005",
-      "reason": "fix(engine): abort on aborted/missing port selection, report partial flood thread creation"
+      "after": "8b6fc39d3755963b55f833f90ae2a614dc7ef5bffb4e480e56f33bdda9400d2b",
+      "reason": "fix(engine): validate ping command input, use thread-safe rand_r, and correct format output"
     },
     "src/platform/linux/select_interface.c": {
       "before": "736967aadb5c844444d778b23f45513a3b11b4f09fbbd20f135157c8effe09d1",
@@ -43,8 +43,23 @@
     },
     "src/platform/macos/network_unavailable.c": {
       "before": "932663ef68a8f31e0463b5334b97eb6d90fb9264a90aef6fe1cc5c55c9be4bc2",
-      "after": "9e50589e2d4a093a63313c07c57b2dade873feff7b17a990201fec5d05e780a7",
-      "reason": "fix(macos): restore no-network adapter stub printing 'unsupported in this build' (commit 97438f0)"
+      "after": "32cefcd3d58ac8ff579db3854223d500ad02591b54dd631cc1ca3763613dc726",
+      "reason": "fix(macos): return SYN_UNAVAILABLE sentinel and keep unsupported-adapter notice"
+    },
+    "include/nero/printing.h": {
+      "before": "1f1f1cbb07e8d3325230cf725739c81e8ce3781722c2ac3b02c684837d4886d4",
+      "after": "fdebd5a47a8b0528531e316a4753af944b00bb262053d39912333e81c72ab50b",
+      "reason": "fix(printing): keep cursor fallback macros as string literals"
+    },
+    "include/nero/syn_flood_powered.h": {
+      "before": "71fc60fc3592a591615cc301f43f82b92d0e4fa56beebdb1bdf6c7ffd1699c80",
+      "after": "be2962a61512a7e055a270314e6f4c69958962b5f1187cb7075fc8e374597e41",
+      "reason": "docs(engine): rename include guard and document SYN_UNAVAILABLE sentinel"
+    },
+    "src/cli/commands.c": {
+      "before": "f96218b475633ab5983c94d170cb05fa61155c59389aa3718fb5f66bc115dacb",
+      "after": "dfd21bbd9d0cc9c1f57c1a01e87db31493a62ed5877143ab380194976201727c",
+      "reason": "fix(cli): suppress duplicate SYN failure output for unavailable adapter; avoid printf format parsing"
     }
   }
 }
