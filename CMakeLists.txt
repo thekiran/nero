@@ -7,6 +7,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 option(NERO_SANITIZERS "Enable ASan and UBSan for offline development targets" OFF)
 option(NERO_STATIC_ANALYSIS "Enable MSVC code analysis for foundation targets" OFF)
+# Source baseline hashes are an optional audit, not a quality gate. Enabling
+# this registers the non-gating source-baseline-audit test; it is OFF by
+# default so a legitimate source change never fails the default test run.
+option(NERO_SOURCE_AUDIT "Register the non-gating source baseline hash audit" OFF)
 include(CTest)
 
 include(cmake/NeroTargets.cmake)
@@ -28,6 +32,12 @@ if(BUILD_TESTING)
     add_test(NAME network-unavailable COMMAND test-network-unavailable)
     add_test(NAME foundation COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/integration/test_foundation.py" $<TARGET_FILE:nero-platform-info>)
+    # Non-gating: only registered when explicitly requested, so the default
+    # ctest run (the CI quality gate) never includes the source hash audit.
+    if(NERO_SOURCE_AUDIT)
+        add_test(NAME source-baseline-audit COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/tests/audit/source_baseline_audit.py")
+    endif()
 endif()
 
 if(WIN32)
