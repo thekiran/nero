@@ -125,3 +125,4 @@ static void classify_interfaces(int count)
             interfaces[index].type = TYPE_ETHERNET;
         }
     }
+}

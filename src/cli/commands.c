@@ -342,24 +342,64 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
 static cli_cmd_result cmd_syn(char **tokens, size_t count)
 {
     struct in_addr addr;
-    if (inet_pton(AF_INET, tokens[0], &addr) != 1) return CLI_CMD_INVALID;
+
+    /* Validate arguments and command syntax. */
+    if (tokens == NULL || count != 2 ||
+        tokens[0] == NULL || tokens[1] == NULL) {
+        return CLI_CMD_INVALID;
+    }
+
+    if (strcmp(tokens[1], "-Syn") != 0 ||
+        inet_pton(AF_INET, tokens[0], &addr) != 1) {
+        return CLI_CMD_INVALID;
+    }
+
 #if defined(NERO_SAFE_TEST)
-    if (count != 2) return CLI_CMD_INVALID;
-#endif
-#if defined(NERO_NETWORK_UNAVAILABLE)
-    (void)tokens; (void)count;
-    puts("-Syn: unsupported in this build; no network traffic is generated.");
-#elif defined(NERO_SAFE_TEST)
-    if (count != 2) return CLI_CMD_INVALID;
-    if (SYN_Flood(tokens[0]) != 0) return CLI_CMD_FAILURE;
+
+    /* Safe test mode: no real network traffic. */
+    puts("-Syn: safe test mode; no network traffic generated.");
+
+#elif defined(NERO_NETWORK_UNAVAILABLE)
+
+    /* Network diagnostics are unavailable in this build. */
+    puts("-Syn: network diagnostics unavailable.");
+
 #else
+
+    /* Initialize the existing terminal operation UI. */
     nero_operation_ui ui = {0};
-    nero_operation_begin(&ui, "TCP diagnostics", tokens[0], "Ctrl+C · Cancel");
-    int result = nero_tcp_test(tokens, count, &cli_termination_signal);
+
+    nero_operation_begin(
+        &ui,
+        "TCP diagnostics",
+        tokens[0],
+        "Ctrl+C · Cancel"
+    );
+
+    /* Execute the platform-independent TCP diagnostics engine. */
+    int result = nero_tcp_test(
+        tokens,
+        count,
+        &cli_termination_signal
+    );
+
+    /* Restore terminal state after execution. */
     nero_operation_end(&ui);
-    if (cli_termination_signal == SIGINT) cli_termination_signal = 0;
-    if (result < 0) return CLI_CMD_INVALID;
-    if (result > 0) return CLI_CMD_FAILURE;
+
+    /* Clear the handled interruption signal. */
+    if (cli_termination_signal == SIGINT) {
+        cli_termination_signal = 0;
+    }
+
+    /* Translate engine results into CLI results. */
+    if (result < 0) {
+        return CLI_CMD_INVALID;
+    }
+
+    if (result > 0) {
+        return CLI_CMD_FAILURE;
+    }
+
 #endif
 
     return CLI_CMD_CONTINUE;
