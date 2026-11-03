@@ -330,31 +330,31 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     if (inet_pton(AF_INET, tokens[0], &address) != 1)
         return CLI_CMD_INVALID;
 
-#ifdef NERO_NETWORK_UNAVAILABLE
+#ifdef NERO_SAFE_TEST
 
-    fputs(
-        "\n-Syn: unsupported in this build; "
-        "no network traffic is generated.\n",
-        stderr
+    printf(
+        "\n-Syn: offline test for %s; packets sent: 0\n",
+        tokens[0]
     );
 
 #else
 
-    if (cli_signal_mode(0) != 0)
-        return CLI_CMD_FAILURE;
+    const uint16_t port = 80;
 
-    int status = SYN_Flood(tokens[0]);
+    tcp_port_result result = tcp_port_check(
+        tokens[0],
+        port
+    );
 
-    if (cli_signal_mode(1) != 0)
-        return CLI_CMD_FAILURE;
-
-    if (status != 0) {
-        fprintf(
-            stderr,
-            "\n-Syn operation failed (status %d).\n",
-            status
-        );
-    }
+    printf(
+        "\nTCP handshake check\n"
+        "Target : %s\n"
+        "Port   : %u\n"
+        "Status : %s\n",
+        tokens[0],
+        (unsigned)port,
+        tcp_result_string(result)
+    );
 
 #endif
 
