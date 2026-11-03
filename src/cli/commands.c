@@ -71,7 +71,7 @@ int cli_dispatch_command(const char *command)
         if (count > 2 || (count == 2 && strcmp(tokens[1], "-All") != 0))
             goto invalid;
         if (terminal_color_enabled())
-            printf(EXIT_MESSAGE);
+            fputs(EXIT_MESSAGE, stdout);
         else
             puts("\nExiting...");
         if (count == 2)
@@ -85,10 +85,10 @@ int cli_dispatch_command(const char *command)
     } else if (strcmp(tokens[0], "version") == 0) {
         if (count != 1)
             goto invalid;
-        printf(VERSION_MESSAGE);
+        fputs(VERSION_MESSAGE, stdout);
     } else {
         if (terminal_color_enabled())
-            printf(UNKNOWN_COMMAND_WARNING);
+            fputs(UNKNOWN_COMMAND_WARNING, stdout);
         else
             fputs("\n[WARNING] Unknown command! Available commands: 'help'", stdout);
     }
