@@ -40,7 +40,9 @@ int cli_dispatch_command(const char *command)
         int status = SYN_Flood(tokens[0]);
         if (cli_signal_mode(1) != 0)
             return -1;
-        if (status != 0)
+        /* SYN_UNAVAILABLE means a stub engine was linked and has already
+         * explained itself; adding "operation failed" on top would mislead. */
+        if (status != 0 && status != SYN_UNAVAILABLE)
             fprintf(stderr, "\n-Syn operation failed (status %d).\n", status);
         return 0;
     }

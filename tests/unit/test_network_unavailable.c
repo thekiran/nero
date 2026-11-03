@@ -11,8 +11,8 @@ int main(void)
     /* Valid addresses must be rejected too, without attempting a connection. */
     const char *targets[] = {"", "192.0.2.1", "127.0.0.1", "::1", "example.invalid"};
     for (size_t i = 0; i < sizeof(targets) / sizeof(targets[0]); ++i) {
-        if (SYN_Flood(targets[i]) != 1) {
-            fputs("Unavailable adapter did not reject target\n", stderr);
+        if (SYN_Flood(targets[i]) != SYN_UNAVAILABLE) {
+            fputs("Unavailable adapter did not report SYN_UNAVAILABLE\n", stderr);
             return 1;
         }
     }

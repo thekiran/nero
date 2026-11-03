@@ -4,7 +4,9 @@
 int SYN_Flood(const char *target_ip)
 {
     (void)target_ip;
-    fputs("unsupported in this build; no network traffic is generated.\n",
+    /* Leading newline so the message does not glue to the echoed command;
+     * SYN_UNAVAILABLE tells the shell to skip its "operation failed" line. */
+    fputs("\n-Syn: unsupported in this build; no network traffic is generated.\n",
           stderr);
-    return 1;
+    return SYN_UNAVAILABLE;
 }
