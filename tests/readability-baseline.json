@@ -35,7 +35,7 @@
   "added": {
     "src/cli/input.c": "3dd6d832fc08870b2bb3a520640bc8d5d51c78ff77ac1439d68e7800feebc4ea",
     "src/cli/render.c": "d946c72cf6f16d45fb7468cc7deccec656c92a0aa99dca969d7b0fae0f11476c",
-    "src/cli/commands.c": "8c0d402725e7a6c2953634382e4a4e36884c13fe36c4946d65105654e145b285",
+    "src/cli/commands.c": "3a784dcc9f5e0268aa44fc91b66c9c9bc0b9ed9a229ac7ac3bdd1bc2026507e2",
     "src/cli/cli_internal.h": "4154b5ac820da04f149c88b211b2bd5f7363a18fe4fdb1597a973f503b84d4a1",
     ".clang-format": "6098e34f1ebabf5682a111f0c6d936063a5de9f9cd3b3ec68d884b189c0c7184",
     ".editorconfig": "8f617694f17b348d28ca56aea2d9c9e7e8817aef97fc089e2f3196a69c331dea"

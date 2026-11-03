@@ -63,11 +63,13 @@ class TerminalQuality(unittest.TestCase):
                 self.assertIn(b"version 1.0", output)
                 self.assertNotIn(b"Unknown command", output)
 
-    def test_history_draft_and_legacy_clear(self):
-        output = self.output(b"help\nversion\x1b[A\x1b[B\nhistory -clear\nhistory\nexit\n")
+    def test_history_draft_and_clear(self):
+        output = self.output(b"help\nversion\x1b[A\x1b[B\nhistory -clear\nafter-clear\nhistory\nexit\n")
         self.assertIn(b"version 1.0", output)
-        self.assertIn(b"done", output)
-        self.assertIn(b"\nhelp\nversion\nhistory -clear\nhistory", output)
+        self.assertIn(b"History cleared.", output)
+        # Only entries typed after the clear are listed.
+        self.assertIn(b"\nafter-clear\nhistory", output)
+        self.assertNotIn(b"\nhelp\nversion", output)
 
     def test_history_eviction(self):
         output = self.output(b"first-entry\n" + b"version\n" * 256 + b"history\nexit\n")
@@ -98,10 +100,21 @@ class TerminalQuality(unittest.TestCase):
         self.assertIn(b"LABORATORY USE ONLY", result.stdout)
 
     def test_closed_stdin_error(self):
-        result = subprocess.run([str(BINARY)], capture_output=True, timeout=10, env=ENV,
-                                preexec_fn=lambda: os.close(0))
+        try:
+            result = subprocess.run([str(BINARY)], capture_output=True, timeout=10, env=ENV,
+                                    preexec_fn=lambda: os.close(0))
+        except subprocess.TimeoutExpired as error:
+            self.fail(f"closed-stdin run hung: partial stdout={error.stdout!r} "
+                      f"stderr={error.stderr!r}")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn(b"terminal read", result.stderr)
+
+    def test_devnull_stdin_is_eof_not_error(self):
+        with open(os.devnull, "rb") as devnull:
+            result = subprocess.run([str(BINARY)], stdin=devnull, capture_output=True,
+                                    timeout=10, env=ENV)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(b"\xe2\x96\xba", result.stdout)
 
     def test_control_c_pipe(self):
         result = run(b"\x03")

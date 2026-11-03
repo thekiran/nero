@@ -81,7 +81,7 @@ run: $(TARGET)
 		echo "[ERROR] DOMAIN variable not set. Usage: make run DOMAIN=example.com"; \
 		exit 1; \
 	fi; \
-	@echo "[RUN] Executing with $(DOMAIN)"
+	echo "[RUN] Executing with $(DOMAIN)"; \
 	./$(TARGET) $(DOMAIN)
 
 # Install the binary system-wide

