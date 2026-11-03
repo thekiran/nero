@@ -1,0 +1,13 @@
+Test project /Users/kiran/Desktop/nero/nero/.build/cmake/macos-sanitize
+    Start 1: network-unavailable
+1/4 Test #1: network-unavailable ..............   Passed    0.02 sec
+    Start 2: foundation
+2/4 Test #2: foundation .......................   Passed    0.05 sec
+    Start 3: terminal-quality
+3/4 Test #3: terminal-quality .................   Passed    1.08 sec
+    Start 4: legacy-safe-regression
+4/4 Test #4: legacy-safe-regression ...........   Passed    0.50 sec
+
+100% tests passed out of 4
+
+Total Test time (real) =   1.65 sec

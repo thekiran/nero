@@ -21,11 +21,11 @@ const char *target_ip_global;
 pthread_mutex_t ports_mutex;
 
 // --- Terminal Functions ---
-void disable_raw_mode() {
+void disable_raw_mode(void) {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
-void enable_raw_mode() {
+void enable_raw_mode(void) {
     tcgetattr(STDIN_FILENO, &orig_termios);
     atexit(disable_raw_mode);
     struct termios raw = orig_termios;

@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <string.h>
+#include <ctype.h>
+#include <errno.h>
 
 #define MAX_INTERFACES 128
 #define MAX_NAME_LEN 64
@@ -54,7 +56,7 @@ static void print_colored(int idx, const char *name, const char *desc, int type)
 }
 
 // List interfaces and read the selection
-const char *list_and_select_interface() {
+const char *list_and_select_interface(void) {
     static char names[MAX_INTERFACES][MAX_NAME_LEN];
     static int types[MAX_INTERFACES];
     int count = 0;
@@ -94,9 +96,20 @@ const char *list_and_select_interface() {
         print_colored(i + 1, names[i], type_str(types[i]), types[i]);
     }
 
-    int choice = 0;
+    char input[128];
     printf("\nSelect an interface [1-%d]: ", count);
-    if (scanf("%d", &choice) != 1 || choice < 1 || choice > count) {
+    if (!fgets(input, sizeof(input), stdin) ||
+        (!strchr(input, '\n') && !feof(stdin))) {
+        fprintf(stderr, "Invalid selection.\n");
+        return NULL;
+    }
+    char *end;
+    errno = 0;
+    long choice = strtol(input, &end, 10);
+    int invalid = errno == ERANGE || end == input;
+    while (isspace((unsigned char)*end))
+        ++end;
+    if (invalid || *end != '\0' || choice < 1 || choice > count) {
         fprintf(stderr, "Invalid selection.\n");
         return NULL;
     }

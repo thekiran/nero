@@ -1,0 +1,320 @@
+COMMAND: uname -a
+Linux ab18d67e7f0c 7.0.12-linuxkit #1 SMP PREEMPT Fri Aug 14 16:27:59 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux
+EXIT: 0
+COMMAND: cat /etc/os-release
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.4 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+EXIT: 0
+COMMAND: gcc --version
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+EXIT: 0
+COMMAND: clang --version
+Ubuntu clang version 18.1.3 (1ubuntu1)
+Target: aarch64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /usr/bin
+EXIT: 0
+COMMAND: cmake --version
+cmake version 3.28.3
+
+CMake suite maintained and supported by Kitware (kitware.com/cmake).
+EXIT: 0
+COMMAND: ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+3: gre0@NONE: <NOARP> mtu 1476 qdisc noop state DOWN group default qlen 1000
+    link/gre 0.0.0.0 brd 0.0.0.0
+4: gretap0@NONE: <BROADCAST,MULTICAST> mtu 1462 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+5: erspan0@NONE: <BROADCAST,MULTICAST> mtu 1450 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+6: ip_vti0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+7: ip6_vti0@NONE: <NOARP> mtu 1428 qdisc noop state DOWN group default qlen 1000
+    link/tunnel6 :: brd :: permaddr 3649:f7cb:10b9::
+8: sit0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/sit 0.0.0.0 brd 0.0.0.0
+9: ip6tnl0@NONE: <NOARP> mtu 1452 qdisc noop state DOWN group default qlen 1000
+    link/tunnel6 :: brd :: permaddr b6f9:87c3:632d::
+10: ip6gre0@NONE: <NOARP> mtu 1448 qdisc noop state DOWN group default qlen 1000
+    link/gre6 :: brd :: permaddr be6c:7d2:ca2e::
+EXIT: 0
+COMMAND: make -B CC=gcc BUILD_DIR=/tmp/gcc-build TARGET=/tmp/nero-gcc
+[CC] Compiling src/main.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/main.c -o /tmp/gcc-build/obj/src/main.o
+[CC] Compiling src/modules/syn_flood_powered.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/modules/syn_flood_powered.c -o /tmp/gcc-build/obj/src/modules/syn_flood_powered.o
+[CC] Compiling third_party/cjson/cJSON.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c third_party/cjson/cJSON.c -o /tmp/gcc-build/obj/third_party/cjson/cJSON.o
+[CC] Compiling src/cli/terminal.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/terminal.c -o /tmp/gcc-build/obj/src/cli/terminal.o
+[CC] Compiling src/cli/input.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/input.c -o /tmp/gcc-build/obj/src/cli/input.o
+[CC] Compiling src/cli/render.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/render.c -o /tmp/gcc-build/obj/src/cli/render.o
+[CC] Compiling src/cli/commands.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/commands.c -o /tmp/gcc-build/obj/src/cli/commands.o
+[CC] Compiling src/cli/ascii.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/ascii.c -o /tmp/gcc-build/obj/src/cli/ascii.o
+[CC] Compiling src/platform/linux/select_interface.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/platform/linux/select_interface.c -o /tmp/gcc-build/obj/src/platform/linux/select_interface.o
+[CC] Compiling src/modules/portscanner.c
+gcc  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/modules/portscanner.c -o /tmp/gcc-build/obj/src/modules/portscanner.o
+gcc /tmp/gcc-build/obj/src/main.o /tmp/gcc-build/obj/src/modules/syn_flood_powered.o /tmp/gcc-build/obj/third_party/cjson/cJSON.o /tmp/gcc-build/obj/src/cli/terminal.o /tmp/gcc-build/obj/src/cli/input.o /tmp/gcc-build/obj/src/cli/render.o /tmp/gcc-build/obj/src/cli/commands.o /tmp/gcc-build/obj/src/cli/ascii.o /tmp/gcc-build/obj/src/platform/linux/select_interface.o /tmp/gcc-build/obj/src/modules/portscanner.o -o /tmp/nero-gcc -lcurl -lcjson -lldns -pthread -lncurses 
+[INFO] Linked /tmp/nero-gcc successfully
+[INFO] Built /tmp/nero-gcc
+EXIT: 0
+COMMAND: make -B CC=clang BUILD_DIR=/tmp/clang-build TARGET=/tmp/nero-clang
+[CC] Compiling src/main.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/main.c -o /tmp/clang-build/obj/src/main.o
+[CC] Compiling src/modules/syn_flood_powered.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/modules/syn_flood_powered.c -o /tmp/clang-build/obj/src/modules/syn_flood_powered.o
+[CC] Compiling third_party/cjson/cJSON.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c third_party/cjson/cJSON.c -o /tmp/clang-build/obj/third_party/cjson/cJSON.o
+[CC] Compiling src/cli/terminal.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/terminal.c -o /tmp/clang-build/obj/src/cli/terminal.o
+[CC] Compiling src/cli/input.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/input.c -o /tmp/clang-build/obj/src/cli/input.o
+[CC] Compiling src/cli/render.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/render.c -o /tmp/clang-build/obj/src/cli/render.o
+[CC] Compiling src/cli/commands.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/commands.c -o /tmp/clang-build/obj/src/cli/commands.o
+[CC] Compiling src/cli/ascii.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/cli/ascii.c -o /tmp/clang-build/obj/src/cli/ascii.o
+[CC] Compiling src/platform/linux/select_interface.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/platform/linux/select_interface.c -o /tmp/clang-build/obj/src/platform/linux/select_interface.o
+[CC] Compiling src/modules/portscanner.c
+clang  -Wall -Wextra -Werror -pedantic -std=c11 -D_POSIX_C_SOURCE=199309L -g -I include -I third_party/cjson -I /usr/include/ldns -DUNICODE_SUPPORT -MMD -MP -c src/modules/portscanner.c -o /tmp/clang-build/obj/src/modules/portscanner.o
+clang /tmp/clang-build/obj/src/main.o /tmp/clang-build/obj/src/modules/syn_flood_powered.o /tmp/clang-build/obj/third_party/cjson/cJSON.o /tmp/clang-build/obj/src/cli/terminal.o /tmp/clang-build/obj/src/cli/input.o /tmp/clang-build/obj/src/cli/render.o /tmp/clang-build/obj/src/cli/commands.o /tmp/clang-build/obj/src/cli/ascii.o /tmp/clang-build/obj/src/platform/linux/select_interface.o /tmp/clang-build/obj/src/modules/portscanner.o -o /tmp/nero-clang -lcurl -lcjson -lldns -pthread -lncurses 
+[INFO] Linked /tmp/nero-clang successfully
+[INFO] Built /tmp/nero-clang
+EXIT: 0
+COMMAND: gcc -Wall -Wextra -Werror -pedantic -std=c11 -pthread tests/linux/scanner_runtime.c -o /tmp/scanner-runtime
+EXIT: 0
+COMMAND: timeout 15 strace -f -e trace=socket,connect,getsockopt,close,select,pselect6 /tmp/scanner-runtime
+close(3)                                = 0
+close(3)                                = 0
+close(3)                                = 0
+socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+strace: Process 118 attached
+[pid   118] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   118] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   118] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999208})
+[pid   118] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   118] close(4)                    = 0
+[pid   118] close(4)                    = 0
+[pid   118] close(4)                    = 0
+[pid   118] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 119 attached
+[pid   119] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   119] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   119] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999333})
+[pid   119] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   119] close(4)                    = 0
+[pid   119] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 120 attached
+[pid   120] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   120] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   120] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999500})
+[pid   120] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   120] close(4)                    = 0
+[pid   120] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 121 attached
+[pid   121] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   121] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   121] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999250})
+[pid   121] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   121] close(4)                    = 0
+[pid   121] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 122 attached
+[pid   122] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   122] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   122] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999292})
+[pid   122] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   122] close(4)                    = 0
+[pid   122] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 123 attached
+[pid   123] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   123] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   123] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999417})
+[pid   123] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   123] close(4)                    = 0
+[pid   123] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 124 attached
+[pid   124] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   124] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   124] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999542})
+[pid   124] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   124] close(4)                    = 0
+[pid   124] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 125 attached
+[pid   125] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   125] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   125] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999961667})
+[pid   125] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   125] close(4)                    = 0
+[pid   125] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 126 attached
+[pid   126] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   126] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   126] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999500})
+[pid   126] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   126] close(4)                    = 0
+[pid   126] +++ exited with 0 +++
+close(4)                                = 0
+strace: Process 127 attached
+[pid   127] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 4
+[pid   127] connect(4, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   127] pselect6(5, NULL, [4], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [4], left {tv_sec=0, tv_nsec=999999459})
+[pid   127] getsockopt(4, SOL_SOCKET, SO_ERROR, [0], [4]) = 0
+[pid   127] close(4)                    = 0
+[pid   127] +++ exited with 0 +++
+close(4)                                = 0
+close(3)                                = 0
+strace: Process 128 attached
+[pid   128] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+[pid   128] connect(3, {sa_family=AF_INET, sin_port=htons(45015), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+[pid   128] pselect6(4, NULL, [3], NULL, {tv_sec=1, tv_nsec=0}, NULL) = 1 (out [3], left {tv_sec=0, tv_nsec=999999584})
+[pid   128] getsockopt(3, SOL_SOCKET, SO_ERROR, [ECONNREFUSED], [4]) = 0
+[pid   128] close(3)                    = 0
+[pid   128] +++ exited with 0 +++
+strace: Process 129 attached
+[pid   129] +++ exited with 0 +++
+close(3)                                = 0
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+[K[+] [92mOpen Port: 45015[0m
+PASS actual scanner worker: 10 connects/EOF, closed port, invalid IPv4, FD baseline restored
++++ exited with 0 +++
+EXIT: 0
+COMMAND: gcc -g -fsanitize=address,undefined -fno-omit-frame-pointer -pthread tests/linux/scanner_runtime.c -o /tmp/scanner-sanitize
+EXIT: 0
+COMMAND: timeout 15 /tmp/scanner-sanitize
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+[K[+] [92mOpen Port: 45987[0m
+PASS actual scanner worker: 10 connects/EOF, closed port, invalid IPv4, FD baseline restored
+EXIT: 0
+COMMAND: gcc -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude tests/interfaces.c src/platform/linux/select_interface.c -o /tmp/interfaces
+EXIT: 0
+Invalid selection.
+[H[J[1;31mAvailable Network Interfaces:[0m
+
+ 1) [1;31mip6_vti0       [0m (Unknown)
+ 2) [1;31mip6gre0        [0m (Unknown)
+ 3) [1;34mgretap0        [0m (Ethernet)
+ 4) [1;33mlo             [0m (Loopback)
+ 5) [1;34merspan0        [0m (Ethernet)
+ 6) [1;31msit0           [0m (Unknown)
+ 7) [1;31mtunl0          [0m (Unknown)
+ 8) [1;31mip6tnl0        [0m (Unknown)
+ 9) [1;31mip_vti0        [0m (Unknown)
+10) [1;31mgre0           [0m (Unknown)
+
+Select an interface [1-10]: INVALID PREFIX EXIT: 1
+[H[J[1;31mAvailable Network Interfaces:[0m
+
+ 1) [1;31mip6_vti0       [0m (Unknown)
+ 2) [1;31mip6gre0        [0m (Unknown)
+ 3) [1;34mgretap0        [0m (Ethernet)
+ 4) [1;33mlo             [0m (Loopback)
+ 5) [1;34merspan0        [0m (Ethernet)
+ 6) [1;31msit0           [0m (Unknown)
+ 7) [1;31mtunl0          [0m (Unknown)
+ 8) [1;31mip6tnl0        [0m (Unknown)
+ 9) [1;31mip_vti0        [0m (Unknown)
+10) [1;31mgre0           [0m (Unknown)
+
+Select an interface [1-10]: SELECTED:ip6_vti0
+VALID EXIT: 0
+COMMAND: ss -tanup
+Netid State     Recv-Q Send-Q Local Address:Port  Peer Address:Port Process
+tcp   TIME-WAIT 0      0          127.0.0.1:34122    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34130    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34134    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34140    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34156    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34168    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34172    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34180    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34184    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:34196    127.0.0.1:45987       
+tcp   TIME-WAIT 0      0          127.0.0.1:52974    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:52984    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53000    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53012    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53028    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53030    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53040    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53050    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53066    127.0.0.1:45015       
+tcp   TIME-WAIT 0      0          127.0.0.1:53082    127.0.0.1:45015       
+EXIT: 0
+COMMAND: python3 tests/linux/interface_regression.py
+PASS Linux interface parser valid and six invalid cases
+EXIT: 0
+
+                                                         
+                                                         
+░▒▓███████▓▒░ ░▒▓████████▓▒░░▒▓███████▓▒░  ░▒▓██████▓▒░  
+░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░░▒▓██████▓▒░  ░▒▓███████▓▒░ ░▒▓█▓▒░░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░░▒▓████████▓▒░░▒▓█▓▒░░▒▓█▓▒░ ░▒▓██████▓▒░  
+                                                         
+
+
+► version
+version 1.0
+► exit
+Exiting...
+PRODUCTION CLI EXIT: 0
+COMMAND: python3 tests/linux/cli_signals.py
+PASS production CLI 2 exit 130
+PASS production CLI 15 exit 143
+EXIT: 0

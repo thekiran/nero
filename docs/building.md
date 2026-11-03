@@ -9,7 +9,7 @@ Run all commands from the repository root.
 | Command | Result |
 | --- | --- |
 | `make` | Build the platform-specific `nero` executable |
-| `make test` | Run 9 core and 19 terminal regression tests |
+| `make test` | Run 10 core and 19 terminal regression tests on macOS |
 | `make test-sanitize` | Run the same offline tests with ASan/UBSan |
 | `make analyze` | Analyze the CLI and selected macOS adapter with Clang |
 | `make help` | List development commands |
