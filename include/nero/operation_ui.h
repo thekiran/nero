@@ -22,6 +22,8 @@ typedef enum {
     NERO_UI_KEY_ENTER,
     NERO_UI_KEY_CANCEL,
     NERO_UI_KEY_EOF,
+    NERO_UI_KEY_WHEEL_UP,
+    NERO_UI_KEY_WHEEL_DOWN,
     NERO_UI_KEY_OTHER
 } nero_ui_key;
 
@@ -47,11 +49,13 @@ void nero_operation_end(nero_operation_ui *ui);
 
 /* Recalculate layout on resize; draw only within the operation body. */
 void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, int selected);
-/* Discovery shows recent results without enabling selection until workers join.
- * percent (0..100) drives a full-width progress bar on the terminal's last row,
- * drawn just below the controls hint. */
-void nero_operation_discovery(const int *recent, int recent_count, int total,
-                              unsigned frame, int latest_port, int percent);
+/* Discovery shows the live results without enabling selection until workers
+ * join. percent (0..100) drives a full-width progress bar on the terminal's
+ * last row. scroll_delta (wheel/arrow) moves the viewport when the discovered
+ * list is taller than the body; 0 keeps following the newest results. */
+void nero_operation_discovery(const int *ports, int count, int total,
+                              unsigned frame, int latest_port, int percent,
+                              int scroll_delta);
 void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned attempt);
 
 /* Decodes a standalone Escape separately from CSI/SS3 arrow sequences.

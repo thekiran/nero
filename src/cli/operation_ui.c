@@ -18,6 +18,12 @@
 static int alternate_screen_active = 0;
 static nero_operation_ui *current_ui;
 
+/* Live-discovery viewport state: follow the newest results until the user
+ * scrolls up, then resume following once scrolled back to the bottom. Reset
+ * per operation in nero_operation_begin. */
+static int discovery_scroll = 0;
+static int discovery_follow = 1;
+
 static void position(int row, int column)
 {
     printf("\033[%d;%dH", row, column);
@@ -133,6 +139,8 @@ void nero_operation_begin(
     ui->detail = detail;
     ui->controls = controls;
     ui->rows = ui->columns = ui->scroll_offset = 0;
+    discovery_scroll = 0;
+    discovery_follow = 1;
     current_ui = ui;
     ui->active = 1;
     if (ui->interactive) {
@@ -240,6 +248,31 @@ static void port_table_row(nero_operation_ui *ui, int row, int port, int selecte
     if (ui->color) fputs("\033[0m", stdout);
 }
 
+/* Vertical scrollbar in the right margin: a dim track with an accent thumb,
+ * shown only when the list is taller than its viewport. first_row is the top
+ * list row; visible is how many rows fit; offset is the current top index. */
+static void draw_scrollbar(nero_operation_ui *ui, int first_row, int visible,
+                           int count, int offset)
+{
+    if (!ui->interactive || ui->compact || visible <= 0 || count <= visible)
+        return;
+    int bar_col = ui->columns - 2;
+    int thumb = (int)((long)visible * visible / count);
+    if (thumb < 1) thumb = 1;
+    if (thumb > visible) thumb = visible;
+    int max_off = count - visible;
+    int thumb_pos = (int)((long)offset * (visible - thumb) / max_off);
+    if (thumb_pos < 0) thumb_pos = 0;
+    if (thumb_pos > visible - thumb) thumb_pos = visible - thumb;
+    for (int r = 0; r < visible; ++r) {
+        int on = (r >= thumb_pos && r < thumb_pos + thumb);
+        position(first_row + r, bar_col);
+        if (ui->color) fputs(on ? "\033[35m" : "\033[2m", stdout);
+        fputs(on ? "█" : "│", stdout);
+        if (ui->color) fputs("\033[0m", stdout);
+    }
+}
+
 void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, int selected)
 {
     ui->controls = "↑↓ · Move   Enter · Select   Esc · Back";
@@ -263,6 +296,7 @@ void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, in
         int item = ui->scroll_offset + index;
         port_table_row(ui, ui->content_top + index + 3, ports[item], item == selected);
     }
+    draw_scrollbar(ui, ui->content_top + 3, visible, count, ui->scroll_offset);
     if (ui->interactive) {
         position(ui->rows, 3);
         printf("%s", ui->controls);
@@ -305,8 +339,9 @@ static void draw_progress_bar(nero_operation_ui *ui, int percent)
     fputs(suffix, stdout);
 }
 
-void nero_operation_discovery(const int *recent, int recent_count, int total,
-                              unsigned frame, int latest_port, int percent)
+void nero_operation_discovery(const int *ports, int count, int total,
+                              unsigned frame, int latest_port, int percent,
+                              int scroll_delta)
 {
     nero_operation_loader("Scanning", NULL, frame);
     nero_operation_ui *ui = current_ui;
@@ -327,12 +362,31 @@ void nero_operation_discovery(const int *recent, int recent_count, int total,
     printf(" open port%s", total == 1 ? "" : "s");
     if (ui->color) fputs("\033[0m", stdout);
     port_table_header(ui, ui->content_top + 3);
+
     int visible = ui->content_bottom - ui->content_top - 3;
     if (visible < 1) visible = 1;
-    int start = recent_count > visible ? recent_count - visible : 0;
-    for (int index = start; index < recent_count; ++index) {
-        port_table_row(ui, ui->content_top + 4 + index - start, recent[index], 0);
+
+    /* Follow the newest results until the user scrolls up with the wheel or
+     * arrows; resume following once they scroll back to the bottom. */
+    int max_off = count > visible ? count - visible : 0;
+    if (scroll_delta != 0 && max_off > 0) {
+        discovery_follow = 0;
+        discovery_scroll += scroll_delta;
+        if (discovery_scroll < 0) discovery_scroll = 0;
+        if (discovery_scroll >= max_off) {
+            discovery_scroll = max_off;
+            discovery_follow = 1;
+        }
     }
+    if (discovery_follow || discovery_scroll > max_off)
+        discovery_scroll = max_off;
+
+    for (int index = 0; index < visible && discovery_scroll + index < count; ++index) {
+        int item = discovery_scroll + index;
+        port_table_row(ui, ui->content_top + 4 + index, ports[item], 0);
+    }
+    draw_scrollbar(ui, ui->content_top + 4, visible, count, discovery_scroll);
+
     /* Controls hint on the second-to-last row, with the full-width progress
      * bar pinned to the very bottom row, directly beneath it. */
     position(ui->rows - 1, 1);
@@ -369,9 +423,12 @@ nero_ui_key nero_operation_read_key(int timeout_ms)
         return NERO_UI_KEY_CANCEL;
 
     /* Bound malformed sequences so terminal input cannot monopolize the UI.
-     * Consume parameter bytes through the final control byte before mapping. */
+     * Capture parameter bytes up to the final control byte, then map arrows
+     * and SGR mouse-wheel reports (ESC [ < button ; col ; row M|m). */
+    char params[16];
+    int params_len = 0;
     char final = 0;
-    for (int index = 0; index < 12; ++index) {
+    for (int index = 0; index < 20; ++index) {
         status = read_byte(&byte, ESCAPE_CONTINUATION_MS);
         if (status <= 0)
             return NERO_UI_KEY_OTHER;
@@ -379,7 +436,25 @@ nero_ui_key nero_operation_read_key(int timeout_ms)
             final = byte;
             break;
         }
+        if (params_len < (int)sizeof(params) - 1)
+            params[params_len++] = byte;
     }
+    params[params_len] = '\0';
+
+    /* SGR mouse report: wheel up reports button 64 and wheel down 65 on press
+     * (final 'M'). Ignore clicks, releases and motion so only the wheel scrolls
+     * the list. */
+    if (params_len > 0 && params[0] == '<') {
+        if (final == 'M') {
+            int button = atoi(params + 1);
+            if (button == 64)
+                return NERO_UI_KEY_WHEEL_UP;
+            if (button == 65)
+                return NERO_UI_KEY_WHEEL_DOWN;
+        }
+        return NERO_UI_KEY_NONE;
+    }
+
     if (final == 'A')
         return NERO_UI_KEY_UP;
     if (final == 'B')

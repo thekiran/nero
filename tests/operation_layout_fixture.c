@@ -16,7 +16,7 @@ int main(void)
     int ports[100];
     for (int i = 0; i < 100; ++i) ports[i] = 1000 + i;
     nero_operation_begin(&ui, "Port scan", "127.0.0.1", "Esc · Back");
-    nero_operation_discovery(ports, 7, 7, 3, 8197, 42);
+    nero_operation_discovery(ports, 7, 7, 3, 8197, 42, 0);
     int selected = 0;
     for (;;) {
         nero_operation_ports(&ui, ports, 100, selected);

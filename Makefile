@@ -28,10 +28,6 @@ COMMON_SOURCES := \
     $(CLI_SOURCES) \
     src/modules/portscanner.c
 
-# This existing file defines SYN_Flood() but does not generate network traffic.
-# Both platforms must link it while commands.c references that symbol.
-NETWORK_STUB_SOURCE := src/platform/macos/syn_flood_stub.c
-
 ifeq ($(UNAME_S),Darwin)
     INTERFACE_SOURCE := src/platform/macos/select_interface_macos.c
     MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
@@ -44,7 +40,7 @@ else
     $(error Unsupported platform: $(UNAME_S))
 endif
 
-SRCS := $(COMMON_SOURCES) $(INTERFACE_SOURCE) $(NETWORK_STUB_SOURCE)
+SRCS := $(COMMON_SOURCES) $(INTERFACE_SOURCE)
 
 BUILD_DIR := .build
 OBJS := $(addprefix $(BUILD_DIR)/obj/,$(SRCS:.c=.o))

