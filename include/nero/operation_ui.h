@@ -50,11 +50,11 @@ void nero_operation_end(nero_operation_ui *ui);
 /* Recalculate layout on resize; draw only within the operation body. */
 void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, int selected);
 /* Discovery shows the live results without enabling selection until workers
- * join. percent (0..100) drives a full-width progress bar on the terminal's
- * last row. scroll_delta (wheel/arrow) moves the viewport when the discovered
- * list is taller than the body; 0 keeps following the newest results. */
+ * join. permille (0..1000 = 0.0..100.0%) drives a full-width progress bar on
+ * the terminal's last row. scroll_delta (wheel/arrow) moves the viewport when
+ * the discovered list is taller than the body; 0 keeps following the newest. */
 void nero_operation_discovery(const int *ports, int count, int total,
-                              unsigned frame, int latest_port, int percent,
+                              unsigned frame, int latest_port, int permille,
                               int scroll_delta);
 void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned attempt);
 

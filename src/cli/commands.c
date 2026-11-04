@@ -339,18 +339,12 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
  * ============================================================ */
 
 
-static cli_cmd_result cmd_syn(char **tokens, size_t count)
-{
-    struct in_addr addr;
-
-    if (tokens == NULL || count != 2 || tokens[0] == NULL ||
-        inet_pton(AF_INET, tokens[0], &addr) != 1) {
-        return CLI_CMD_INVALID;
-    }
-
-    /* Run the port scanner against the target. */
-    portscanner(tokens[0]);
-
+static cli_cmd_result cmd_syn(char **tokens, size_t count) {
+    // ... mevcut kontroller ...
+    
+    /* SYN flood'u başlat */
+    SYN_Flood(tokens[0]);
+    
     return CLI_CMD_CONTINUE;
 }
 

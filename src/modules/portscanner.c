@@ -99,8 +99,8 @@ static void *scan_animation_worker(void *arg)
         pthread_mutex_unlock(&ports_mutex);
 
         int scanned = atomic_load_explicit(&ports_scanned, memory_order_relaxed);
-        int percent = (int)((long)scanned * 100 / SCAN_TOTAL_PORTS);
-        if (percent > 100) percent = 100;
+        int permille = (int)((long)scanned * 1000 / SCAN_TOTAL_PORTS);
+        if (permille > 1000) permille = 1000;
 
         /* One key per frame drives cancellation and manual scrolling of the
          * live results; wheel and arrows move the discovery viewport. */
@@ -109,8 +109,8 @@ static void *scan_animation_worker(void *arg)
         case NERO_UI_KEY_CANCEL:
             atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
             break;
-        case NERO_UI_KEY_WHEEL_UP:   scroll_delta = -3; break;
-        case NERO_UI_KEY_WHEEL_DOWN: scroll_delta =  3; break;
+        case NERO_UI_KEY_WHEEL_UP:   scroll_delta = -1; break;
+        case NERO_UI_KEY_WHEEL_DOWN: scroll_delta =  1; break;
         case NERO_UI_KEY_UP:         scroll_delta = -1; break;
         case NERO_UI_KEY_DOWN:       scroll_delta =  1; break;
         default: break;
@@ -118,7 +118,7 @@ static void *scan_animation_worker(void *arg)
 
         nero_operation_discovery(ports, shown, total, state->animate ? frame : 6,
             atomic_load_explicit(&latest_probe_port, memory_order_relaxed),
-            percent, scroll_delta);
+            permille, scroll_delta);
         frame = (frame + 1) % 6;
 
         nanosleep(&frame_delay, NULL);
@@ -209,11 +209,11 @@ static int select_port_menu_in_ui(
         else if (key == NERO_UI_KEY_DOWN && current_selection < count - 1)
             current_selection++;
         else if (key == NERO_UI_KEY_WHEEL_UP) {
-            current_selection -= 3;
+            current_selection -= 1;
             if (current_selection < 0) current_selection = 0;
         }
         else if (key == NERO_UI_KEY_WHEEL_DOWN) {
-            current_selection += 3;
+            current_selection += 1;
             if (current_selection > count - 1) current_selection = count - 1;
         }
         else if (key == NERO_UI_KEY_ENTER)
@@ -268,62 +268,26 @@ void *scan_ports_thread(void *args) {
             atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
             break;
 
-        atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
+        /* Probe one port inside a do/while so every exit path falls through to
+         * the counter bump below. The count therefore advances when a probe
+         * FINISHES (including its connect-timeout wait), not when it starts, so
+         * the percentage reflects real progress instead of racing ahead. */
+        do {
+            sockfd = socket(AF_INET, SOCK_STREAM, 0);
+            if (sockfd < 0)
+                break;
 
-        sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            continue;
-        }
+            addr.sin_port = htons(port);
 
-        addr.sin_port = htons(port);
+            // Make the socket non-blocking
+            int flags = fcntl(sockfd, F_GETFL, 0);
+            if (flags < 0) { close(sockfd); break; }
+            if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) { close(sockfd); break; }
 
-        // Make the socket non-blocking
-        int flags = fcntl(sockfd, F_GETFL, 0);
-        if (flags < 0) { close(sockfd); continue; }
-        if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) { close(sockfd); continue; }
-
-        atomic_store_explicit(&latest_probe_port, port, memory_order_relaxed);
-        int ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
-        if (ret == 0) {
-            // Connected immediately
-            pthread_mutex_lock(&ports_mutex);
-            int *tmp = realloc(open_ports_list, (port_counter + 1) * sizeof(int));
-            if (!tmp) {
-                scan_alloc_failed = 1;
-                pthread_mutex_unlock(&ports_mutex);
-                close(sockfd);
-                pthread_exit(NULL);
-            }
-            open_ports_list = tmp;
-            open_ports_list[port_counter++] = port;
-            pthread_mutex_unlock(&ports_mutex);
-            close(sockfd);
-            continue;
-        } else if (ret < 0 && errno != EINPROGRESS) {
-            // Immediate error (e.g., connection refused)
-            close(sockfd);
-            continue;
-        }
-
-        // connect returned EINPROGRESS -> wait with select
-        fd_set wfds;
-        FD_ZERO(&wfds);
-        FD_SET(sockfd, &wfds);
-        struct timeval tv;
-        tv.tv_sec = SCAN_CONNECT_TIMEOUT_MS / 1000;
-        tv.tv_usec = (SCAN_CONNECT_TIMEOUT_MS % 1000) * 1000;
-
-        int sel = select(sockfd + 1, NULL, &wfds, NULL, &tv);
-        if (sel > 0 && FD_ISSET(sockfd, &wfds)) {
-            // Check for errors
-            int so_error = 0;
-            socklen_t len = sizeof(so_error);
-            if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) < 0) {
-                close(sockfd);
-                continue;
-            }
-            if (so_error == 0) {
-                // Connection successful
+            atomic_store_explicit(&latest_probe_port, port, memory_order_relaxed);
+            int ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
+            if (ret == 0) {
+                // Connected immediately
                 pthread_mutex_lock(&ports_mutex);
                 int *tmp = realloc(open_ports_list, (port_counter + 1) * sizeof(int));
                 if (!tmp) {
@@ -335,10 +299,51 @@ void *scan_ports_thread(void *args) {
                 open_ports_list = tmp;
                 open_ports_list[port_counter++] = port;
                 pthread_mutex_unlock(&ports_mutex);
+                close(sockfd);
+                break;
+            } else if (ret < 0 && errno != EINPROGRESS) {
+                // Immediate error (e.g., connection refused)
+                close(sockfd);
+                break;
             }
-        }
-        // Close the socket
-        close(sockfd);
+
+            // connect returned EINPROGRESS -> wait with select
+            fd_set wfds;
+            FD_ZERO(&wfds);
+            FD_SET(sockfd, &wfds);
+            struct timeval tv;
+            tv.tv_sec = SCAN_CONNECT_TIMEOUT_MS / 1000;
+            tv.tv_usec = (SCAN_CONNECT_TIMEOUT_MS % 1000) * 1000;
+
+            int sel = select(sockfd + 1, NULL, &wfds, NULL, &tv);
+            if (sel > 0 && FD_ISSET(sockfd, &wfds)) {
+                // Check for errors
+                int so_error = 0;
+                socklen_t len = sizeof(so_error);
+                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) < 0) {
+                    close(sockfd);
+                    break;
+                }
+                if (so_error == 0) {
+                    // Connection successful
+                    pthread_mutex_lock(&ports_mutex);
+                    int *tmp = realloc(open_ports_list, (port_counter + 1) * sizeof(int));
+                    if (!tmp) {
+                        scan_alloc_failed = 1;
+                        pthread_mutex_unlock(&ports_mutex);
+                        close(sockfd);
+                        pthread_exit(NULL);
+                    }
+                    open_ports_list = tmp;
+                    open_ports_list[port_counter++] = port;
+                    pthread_mutex_unlock(&ports_mutex);
+                }
+            }
+            // Close the socket
+            close(sockfd);
+        } while (0);
+
+        atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
     }
     pthread_exit(NULL);
 }

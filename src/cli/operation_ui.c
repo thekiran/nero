@@ -228,7 +228,7 @@ void nero_operation_end(nero_operation_ui *ui)
  * visual position when the operation changes from scanning to choosing. */
 static void port_table_header(nero_operation_ui *ui, int row)
 {
-    if (ui->interactive) position(row, 3);
+    if (ui->interactive) position(row, 1);
     else putchar('\n');
     if (ui->color) fputs("\033[2m", stdout);
     printf("  %-9s%-13s%s", "PORT", "PROTOCOL", "STATUS");
@@ -237,7 +237,7 @@ static void port_table_header(nero_operation_ui *ui, int row)
 
 static void port_table_row(nero_operation_ui *ui, int row, int port, int selected)
 {
-    if (ui->interactive) position(row, 3);
+    if (ui->interactive) position(row, 1);
     else putchar('\n');
     if (ui->color) fputs(selected ? "\033[1;35m" : "\033[1m", stdout);
     printf("%s %-9d", selected ? ">" : " ", port);
@@ -317,17 +317,20 @@ void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned att
 /* Full-width progress bar on the terminal's last row. Filled cells use the
  * UI accent; the percentage is printed at the right. The last column is left
  * untouched so writing the bar never triggers an auto-wrap scroll. */
-static void draw_progress_bar(nero_operation_ui *ui, int percent)
+static void draw_progress_bar(nero_operation_ui *ui, int permille)
 {
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
+    if (permille < 0) permille = 0;
+    if (permille > 1000) permille = 1000;
 
-    char suffix[8];
-    int suffix_len = snprintf(suffix, sizeof(suffix), " %3d%%", percent);
+    /* One decimal place (permille/10) keeps the readout honest and precise
+     * instead of snapping between whole percents. */
+    char suffix[12];
+    int suffix_len = snprintf(suffix, sizeof(suffix), " %3d.%d%%",
+                              permille / 10, permille % 10);
     int usable = ui->columns - 1;            /* keep the final column empty */
     int bar_cells = usable - suffix_len;
     if (bar_cells < 1) return;               /* too narrow for a meaningful bar */
-    int filled = (int)((long)bar_cells * percent / 100);
+    int filled = (int)((long)bar_cells * permille / 1000);
 
     position(ui->rows, 1);
     fputs("\033[2K", stdout);
@@ -340,7 +343,7 @@ static void draw_progress_bar(nero_operation_ui *ui, int percent)
 }
 
 void nero_operation_discovery(const int *ports, int count, int total,
-                              unsigned frame, int latest_port, int percent,
+                              unsigned frame, int latest_port, int permille,
                               int scroll_delta)
 {
     nero_operation_loader("Scanning", NULL, frame);
@@ -395,7 +398,7 @@ void nero_operation_discovery(const int *ports, int count, int total,
     if (ui->color) fputs("\033[2m", stdout);
     printf("%.*s", ui->columns - 4, ui->controls ? ui->controls : "Esc · Back");
     if (ui->color) fputs("\033[0m", stdout);
-    draw_progress_bar(ui, percent);
+    draw_progress_bar(ui, permille);
     fflush(stdout);
 }
 
