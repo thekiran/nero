@@ -35,6 +35,8 @@ typedef enum {
     NERO_UI_KEY_PAGE_DOWN,
     NERO_UI_KEY_HOME,
     NERO_UI_KEY_END,
+    NERO_UI_KEY_LEFT,
+    NERO_UI_KEY_RIGHT,
     NERO_UI_KEY_OTHER
 } nero_ui_key;
 
@@ -68,6 +70,17 @@ void nero_operation_discovery(const int *ports, int count, int total,
                               unsigned frame, int latest_port, int permille,
                               int scroll_delta);
 void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned attempt);
+
+/* Generic single-column selection menu drawn inside the operation body, using
+ * the same highlight, scrollbar and glyph conventions as the port list.
+ * `heading` is an optional bold title above the list (NULL to omit).
+ * `labels[0..count-1]` are the rows; `values`, when non-NULL, prints
+ * values[i] right-aligned after each label (used for adjustable settings).
+ * `selected` is the highlighted row. Rendering only; the caller owns the key
+ * loop and state. */
+void nero_operation_menu(nero_operation_ui *ui, const char *heading,
+                         const char *const *labels, const char *const *values,
+                         int count, int selected);
 
 /* Decodes a standalone Escape separately from CSI/SS3 arrow sequences.
  * timeout_ms < 0 waits indefinitely; zero performs a non-blocking poll. */

@@ -380,6 +380,57 @@ void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, in
     fflush(stdout);
 }
 
+void nero_operation_menu(nero_operation_ui *ui, const char *heading,
+                         const char *const *labels, const char *const *values,
+                         int count, int selected)
+{
+    if (!body(ui)) return;
+    if (count < 0) count = 0;
+    if (selected >= count) selected = count - 1;
+    if (selected < 0) selected = 0;
+
+    int row = ui->content_top;
+    if (heading && heading[0]) {
+        if (ui->interactive) position(row, 3);
+        if (ui->color) fputs("\033[1m", stdout);
+        printf("%.*s", ui->columns - 4, heading);
+        if (ui->color) fputs("\033[0m", stdout);
+        if (!ui->interactive) putchar('\n');
+        row += 2;
+    }
+    int first_row = row;
+    int visible = ui->interactive ? ui->content_bottom - first_row + 1 : count;
+    if (visible < 1) visible = 1;
+
+    if (selected < ui->scroll_offset) ui->scroll_offset = selected;
+    if (selected >= ui->scroll_offset + visible) ui->scroll_offset = selected - visible + 1;
+    int max_off = count > visible ? count - visible : 0;
+    if (ui->scroll_offset > max_off) ui->scroll_offset = max_off;
+    if (ui->scroll_offset < 0) ui->scroll_offset = 0;
+
+    for (int i = 0; i < visible && ui->scroll_offset + i < count; ++i) {
+        int item = ui->scroll_offset + i;
+        int sel = item == selected;
+        if (ui->interactive) position(first_row + i, 1);
+        else putchar('\n');
+        if (ui->color) fputs(sel ? "\033[1;35m" : "\033[0m", stdout);
+        printf("%s %s", sel ? ">" : " ", labels[item] ? labels[item] : "");
+        if (values && values[item]) {
+            if (ui->color) fputs(sel ? "\033[0;35m" : "\033[0;2m", stdout);
+            printf("   %s", values[item]);
+        }
+        if (ui->color) fputs("\033[0m", stdout);
+    }
+    draw_scrollbar(ui, first_row, visible, count, ui->scroll_offset);
+    if (ui->interactive && ui->controls && ui->controls[0]) {
+        position(ui->rows, 3);
+        if (ui->color) fputs("\033[2m", stdout);
+        printf("%.*s", ui->columns - 4, ui->controls);
+        if (ui->color) fputs("\033[0m", stdout);
+    }
+    fflush(stdout);
+}
+
 void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned attempt)
 {
     if (!body(ui)) return;
@@ -590,6 +641,8 @@ nero_ui_key nero_operation_read_key(int timeout_ms)
     switch (final) {
     case 'A': return NERO_UI_KEY_UP;   /* CSI A, CSI 1;5A, SS3 A */
     case 'B': return NERO_UI_KEY_DOWN;
+    case 'C': return NERO_UI_KEY_RIGHT;
+    case 'D': return NERO_UI_KEY_LEFT;
     case 'H': return NERO_UI_KEY_HOME; /* CSI H, SS3 H */
     case 'F': return NERO_UI_KEY_END;  /* CSI F, SS3 F */
     case '~':

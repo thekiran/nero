@@ -23,37 +23,43 @@
 #include "nero/operation_ui.h"
 #include "nero/portscanner.h"
 
-/* iOS odaklı öncelikli portlar */
-static const int IOS_PRIORITY_PORTS[] = { 62078, 49152, 32498 };
-#define IOS_PRIORITY_COUNT (sizeof(IOS_PRIORITY_PORTS) / sizeof(IOS_PRIORITY_PORTS[0]))
-
-/* Batch scanner parametreleri.
- * 8 thread * 400 soket = 3200 eşzamanlı probe.
- * macOS'ta FD_SETSIZE 1024'tür, BATCH_SIZE bunun çok altında kalmalı.
- * ulimit -n değerinin en az 4000 olduğundan emin olun:
- *   ulimit -n 8192 */
-#define FAST_BATCH_THREADS 8
-#define FAST_BATCH_SIZE    400
-#define FAST_TIMEOUT_MS    1200
-
-#define DEEP_BATCH_THREADS 4
-#define DEEP_BATCH_SIZE    200
-#define DEEP_TIMEOUT_MS    2500
-
-/* Çok fazla "filtered" varsa deep scan anlamsız olur; bu eşiğin
- * üzerinde atla. */
-#define DEEP_SCAN_MAX_CANDIDATES 5000
-
+/* Genel amaçlı tarayıcı: her IP için tam 1-65535 aralığı taranır. */
 #define SCAN_TOTAL_PORTS 65535
 #define DISCOVERY_VIEW_CAP 512
 
-/* Port başına kesin probe sonucu. */
-typedef enum {
-    PROBE_OPEN     =  1,
-    PROBE_CLOSED   =  0,
-    PROBE_FILTERED = -1,
-    PROBE_ERROR    = -2
-} probe_status;
+/* Yığın dizilerinin derleme-zamanı üst sınırları. Tüm profiller ve manuel
+ * ayar bu sınırların altında tutulur (poll() kullandığımız için FD_SETSIZE
+ * sorunu yoktur; sınırlar yalnızca bellek ve hedefe nezaket içindir). */
+#define MAX_THREADS 16
+#define MAX_BATCH   512
+
+/* Bir tarama hız profili. Daha düşük eşzamanlılık = hedefi/WiFi'yi daha az
+ * boğar = daha kararlı; daha kısa zaman aşımı = daha hızlı bitiş. */
+typedef struct {
+    const char *name;
+    int fast_threads, fast_batch, fast_timeout_ms;
+    int deep_threads, deep_batch, deep_timeout_ms;
+    int deep_max_candidates; /* bu kadar filtrelenmiş porttan fazlası varsa derin taramayı atla */
+} scan_profile;
+
+enum { PROFILE_FAST = 0, PROFILE_MEDIUM, PROFILE_SLOW, PROFILE_MANUAL, PROFILE_COUNT };
+
+/* name alanları hız menüsünde de gösterilir. */
+static const scan_profile SCAN_PROFILES[] = {
+    /* Hızlı: kısa zaman aşımı, yüksek eşzamanlılık. Birkaç saniyede biter;
+     * yoğun WiFi'de çok seyrek portları kaçırabilir. */
+    { "Hizli",  8, 256, 500,  4, 128, 1000, 8000 },
+    /* Orta (önerilen): dengeli. */
+    { "Orta",   6, 200, 1000, 4, 100, 2000, 12000 },
+    /* Yavaş: düşük eşzamanlılık, uzun zaman aşımı. En kararlı/eksiksiz. */
+    { "Yavas",  4, 100, 1500, 2, 64,  3000, 65535 },
+};
+
+/* Manuel profil: kullanıcının ayarladığı değerlerle doldurulur. */
+static scan_profile manual_profile = { "Manuel", 6, 200, 1000, 4, 100, 2000, 12000 };
+
+/* Tarama boyunca okunur (yalnız-okuma; thread'ler güvenle paylaşır). */
+static const scan_profile *active_profile = &SCAN_PROFILES[PROFILE_MEDIUM];
 
 typedef struct {
     int port;
@@ -64,12 +70,14 @@ typedef struct {
     int start_port;
     int end_port;
     int timeout_ms;
+    int batch;
 } batch_thread_args;
 
 typedef struct {
     int start_idx;
     int end_idx;
     int timeout_ms;
+    int batch;
 } deep_batch_args;
 
 static struct termios orig_termios;
@@ -182,7 +190,7 @@ static int compare_ports_asc(const void *a, const void *b) {
 static void raise_fd_limit(void) {
     struct rlimit rl;
     if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return;
-    rlim_t needed = (rlim_t)FAST_BATCH_THREADS * FAST_BATCH_SIZE + 64;
+    rlim_t needed = (rlim_t)MAX_THREADS * MAX_BATCH + 64;
     if (rl.rlim_cur >= needed) return;
     rlim_t target = needed;
     if (rl.rlim_max != RLIM_INFINITY && target > rl.rlim_max)
@@ -229,50 +237,6 @@ int select_port_menu(int *open_ports, int count) {
     int result = select_port_menu_in_ui(open_ports, count, &ui);
     nero_operation_end(&ui);
     return result;
-}
-
-/* --- Tek port probe (yalnızca iOS öncelikli portlar için kullanılır) --- */
-static probe_status probe_single_port(const char *ip, int port, int timeout_ms) {
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return PROBE_ERROR;
-
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) return PROBE_ERROR;
-
-    int flags = fcntl(sockfd, F_GETFL, 0);
-    if (flags < 0) { close(sockfd); return PROBE_ERROR; }
-    if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) { close(sockfd); return PROBE_ERROR; }
-
-    int ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
-    if (ret == 0) { close(sockfd); return PROBE_OPEN; }
-    if (ret < 0) {
-        if (errno == ECONNREFUSED) { close(sockfd); return PROBE_CLOSED; }
-        if (errno != EINPROGRESS) { close(sockfd); return PROBE_ERROR; }
-    }
-
-    /* poll() yerine select() kullanmamanın nedeni: fd değeri FD_SETSIZE'ı
-     * aşarsa select/FD_SET tanımsız davranıştır. poll bu sınırdan muaftır. */
-    struct pollfd pfd = { sockfd, POLLOUT, 0 };
-    int pret;
-    do { pret = poll(&pfd, 1, timeout_ms); } while (pret < 0 && errno == EINTR);
-    if (pret < 0) { close(sockfd); return PROBE_ERROR; }
-    if (pret == 0) { close(sockfd); return PROBE_FILTERED; }
-
-    int so_error = 0;
-    socklen_t len = sizeof(so_error);
-    if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) != 0) {
-        close(sockfd);
-        return PROBE_ERROR;
-    }
-    close(sockfd);
-
-    if (so_error == 0)           return PROBE_OPEN;
-    if (so_error == ECONNREFUSED) return PROBE_CLOSED;
-    if (so_error == ETIMEDOUT)    return PROBE_FILTERED;
-    return PROBE_ERROR;
 }
 
 /* --- Idempotent sonuç ekleme --- */
@@ -322,16 +286,16 @@ static void add_filtered_candidate(int port) {
 /* --- Batch select ile eşzamanlı port tarama ---
  *
  * Her çağrıda `ports[]` dizisindeki portlar için bir soket açar,
- * hepsine non-blocking connect() gönderir, sonra tek bir select()
- * ile yanıtları bekler. Bu sayede aynı anda yüzlerce port probe
- * edilir; tek tek 1500 ms beklemek yerine toplu bekleriz. */
+ * hepsine non-blocking connect() gönderir, sonra poll() ile yanıtları
+ * bekler. Bu sayede aynı anda yüzlerce port probe edilir; tek tek
+ * beklemek yerine toplu bekleriz. */
 static void scan_ports_batch(
     const char *ip,
     const int *ports,
     int count,
     int timeout_ms
 ) {
-    if (count > FAST_BATCH_SIZE) count = FAST_BATCH_SIZE;
+    if (count > MAX_BATCH) count = MAX_BATCH;
     if (count <= 0) return;
 
     struct sockaddr_in addr;
@@ -339,8 +303,8 @@ static void scan_ports_batch(
     addr.sin_family = AF_INET;
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
 
-    struct pollfd pfds[FAST_BATCH_SIZE];
-    int slot_port[FAST_BATCH_SIZE];
+    struct pollfd pfds[MAX_BATCH];
+    int slot_port[MAX_BATCH];
     int nfds = 0;
 
     /* 1. Soketleri aç ve non-blocking connect() başlat. */
@@ -449,15 +413,16 @@ static void scan_ports_batch(
 /* --- Fast batch thread --- */
 void *fast_scan_thread(void *args) {
     batch_thread_args *t = args;
-    int ports[FAST_BATCH_SIZE];
+    int ports[MAX_BATCH];
+    int batch = t->batch > 0 && t->batch <= MAX_BATCH ? t->batch : MAX_BATCH;
 
-    for (int base = t->start_port; base <= t->end_port; base += FAST_BATCH_SIZE) {
+    for (int base = t->start_port; base <= t->end_port; base += batch) {
         if (portscanner_interrupt_requested ||
             atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
             break;
 
         int count = 0;
-        int end = base + FAST_BATCH_SIZE - 1;
+        int end = base + batch - 1;
         if (end > t->end_port) end = t->end_port;
 
         for (int port = base; port <= end; ++port)
@@ -472,14 +437,15 @@ void *fast_scan_thread(void *args) {
 /* --- Deep batch thread (yalnızca candidates üzerinde) --- */
 void *deep_scan_thread(void *args) {
     deep_batch_args *t = args;
-    int ports[DEEP_BATCH_SIZE];
+    int ports[MAX_BATCH];
+    int batch = t->batch > 0 && t->batch <= MAX_BATCH ? t->batch : MAX_BATCH;
 
-    for (int base = t->start_idx; base < t->end_idx; base += DEEP_BATCH_SIZE) {
+    for (int base = t->start_idx; base < t->end_idx; base += batch) {
         if (portscanner_interrupt_requested ||
             atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
             break;
 
-        int end = base + DEEP_BATCH_SIZE;
+        int end = base + batch;
         if (end > t->end_idx) end = t->end_idx;
 
         int count = 0;
@@ -492,6 +458,207 @@ void *deep_scan_thread(void *args) {
         atomic_fetch_add_explicit(&ports_scanned, count, memory_order_relaxed);
     }
     pthread_exit(NULL);
+}
+
+/* --- Hızlı erişilebilirlik ön kontrolü ---
+ * Tam 65535 portu taramadan önce, hostun orada olup olmadığını birkaç yüz
+ * ms'de anlar: yaygın portlara eşzamanlı SYN gönderir. Herhangi bir porttan
+ * SYN-ACK (açık) VEYA RST (kapalı) gelmesi hostun var olduğunu kanıtlar;
+ * hepsi sessiz kalırsa host muhtemelen kapalı/erişilemez. 1: canlı, 0: sessiz. */
+static int host_probe_alive(const char *ip) {
+    static const int probe_ports[] = {
+        80, 443, 22, 53, 445, 139, 8080, 3389, 21, 23, 25, 111, 135, 993, 62078, 548
+    };
+    const int n = (int)(sizeof(probe_ports) / sizeof(probe_ports[0]));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return 0;
+
+    struct pollfd pfds[32];
+    int nfds = 0;
+    for (int i = 0; i < n; ++i) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) continue;
+        int fl = fcntl(fd, F_GETFL, 0);
+        if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0) { close(fd); continue; }
+        addr.sin_port = htons((uint16_t)probe_ports[i]);
+        int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+        if (r == 0) { close(fd); return 1; }                       /* anında açık */
+        if (r < 0 && errno == ECONNREFUSED) { close(fd); return 1; } /* RST → canlı */
+        if (r < 0 && errno != EINPROGRESS) { close(fd); continue; }
+        pfds[nfds].fd = fd;
+        pfds[nfds].events = POLLOUT;
+        pfds[nfds].revents = 0;
+        nfds++;
+    }
+
+    int alive = 0;
+    if (nfds > 0) {
+        struct timespec start;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        int remaining = nfds;
+        while (remaining > 0 && !alive) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            long el = (now.tv_sec - start.tv_sec) * 1000L
+                    + (now.tv_nsec - start.tv_nsec) / 1000000L;
+            int wait = 700 - (int)el; /* sabit, kısa canlılık penceresi */
+            if (wait <= 0) break;
+            int ready;
+            do { ready = poll(pfds, (nfds_t)nfds, wait); } while (ready < 0 && errno == EINTR);
+            if (ready <= 0) break;
+            for (int s = 0; s < nfds && ready > 0; ++s) {
+                if (pfds[s].fd < 0 || pfds[s].revents == 0) continue;
+                ready--;
+                int se = 0;
+                socklen_t l = sizeof(se);
+                if (getsockopt(pfds[s].fd, SOL_SOCKET, SO_ERROR, &se, &l) == 0) {
+                    if (se == 0 || se == ECONNREFUSED) alive = 1; /* açık veya kapalı → host var */
+                }
+                close(pfds[s].fd);
+                pfds[s].fd = -1;
+                remaining--;
+            }
+        }
+    }
+    for (int s = 0; s < nfds; ++s)
+        if (pfds[s].fd >= 0) close(pfds[s].fd);
+    return alive;
+}
+
+/* Host sessizse: interaktifte "yine de taransın mı?" sorar (varsayılan Hayır).
+ * 1 döndürürse taramaya devam, 0 döndürürse vazgeç. Non-interaktif ortamda
+ * (betik/boru) hiçbir hostu atlamamak için devam eder (1). */
+static int confirm_scan_unreachable(nero_operation_ui *ui) {
+    if (!ui->interactive) return 1;
+    int raw = enable_raw_mode() == 0;
+    if (raw) set_mouse_reporting(1);
+    const char *labels[2] = { "Hayir  (geri don)", "Evet  (yine de tara)" };
+    int sel = 0, res = 0;
+    ui->controls = "Up/Down: Sec   Enter: Onayla   Esc: Iptal";
+    for (;;) {
+        nero_operation_menu(ui, "Host yanit vermiyor — yine de taransin mi?",
+                            labels, NULL, 2, sel);
+        if (portscanner_interrupt_requested) { res = 0; break; }
+        nero_ui_key k = nero_operation_read_key(100);
+        if (k == NERO_UI_KEY_CANCEL || k == NERO_UI_KEY_EOF) { res = 0; break; }
+        if (k == NERO_UI_KEY_UP || k == NERO_UI_KEY_WHEEL_UP) { if (sel > 0) sel--; }
+        else if (k == NERO_UI_KEY_DOWN || k == NERO_UI_KEY_WHEEL_DOWN) { if (sel < 1) sel++; }
+        else if (k == NERO_UI_KEY_ENTER) { res = sel; break; }
+    }
+    if (raw) { set_mouse_reporting(0); disable_raw_mode(); }
+    return res;
+}
+
+/* --- Manuel hız ayarı ekranı ---
+ * Üç satır (iş parçacığı, parti başına soket, zaman aşımı) ←/→ ile ayarlanır.
+ * Enter taramayı başlatır, Esc menüye döner. manual_profile'ı günceller.
+ * 1 döndürürse kullanıcı onayladı, 0 döndürürse iptal etti. */
+static int adjust_manual_profile(nero_operation_ui *ui) {
+    int threads = manual_profile.fast_threads;
+    int batch   = manual_profile.fast_batch;
+    int timeout = manual_profile.fast_timeout_ms;
+    int row = 0;
+    ui->controls = "Up/Down: Satir   Left/Right: Degistir   Enter: Basla   Esc: Geri";
+
+    for (;;) {
+        char v0[24], v1[24], v2[24];
+        snprintf(v0, sizeof v0, "%d", threads);
+        snprintf(v1, sizeof v1, "%d", batch);
+        snprintf(v2, sizeof v2, "%d ms", timeout);
+        const char *labels[3] = { "Is parcacigi", "Parti basina soket", "Zaman asimi" };
+        const char *values[3] = { v0, v1, v2 };
+        nero_operation_menu(ui, "Manuel hiz ayari", labels, values, 3, row);
+        if (portscanner_interrupt_requested) return 0;
+
+        nero_ui_key k = nero_operation_read_key(100);
+        if (k == NERO_UI_KEY_CANCEL || k == NERO_UI_KEY_EOF) return 0;
+        if (k == NERO_UI_KEY_ENTER) break;
+        if (k == NERO_UI_KEY_UP || k == NERO_UI_KEY_WHEEL_UP) { if (row > 0) row--; }
+        else if (k == NERO_UI_KEY_DOWN || k == NERO_UI_KEY_WHEEL_DOWN) { if (row < 2) row++; }
+        else if (k == NERO_UI_KEY_LEFT || k == NERO_UI_KEY_RIGHT) {
+            int dir = (k == NERO_UI_KEY_RIGHT) ? 1 : -1;
+            if (row == 0) {
+                threads += dir;
+                if (threads < 1) threads = 1;
+                if (threads > MAX_THREADS) threads = MAX_THREADS;
+            } else if (row == 1) {
+                batch += dir * 16;
+                if (batch < 16) batch = 16;
+                if (batch > MAX_BATCH) batch = MAX_BATCH;
+            } else {
+                timeout += dir * 100;
+                if (timeout < 200) timeout = 200;
+                if (timeout > 5000) timeout = 5000;
+            }
+        }
+    }
+
+    manual_profile.fast_threads = threads;
+    manual_profile.fast_batch = batch;
+    manual_profile.fast_timeout_ms = timeout;
+    /* Derin aşama: daha nazik ve daha uzun bekleyen türev değerler. */
+    manual_profile.deep_threads = threads > 1 ? threads / 2 : 1;
+    manual_profile.deep_batch = batch > 32 ? batch / 2 : 16;
+    manual_profile.deep_timeout_ms = timeout * 2 > 5000 ? 5000 : timeout * 2;
+    manual_profile.deep_max_candidates = 65535; /* manuelde her zaman derin tara */
+    return 1;
+}
+
+/* --- Tarama hızı seçim menüsü ---
+ * İnteraktif değilse menü göstermeden önerilen (Orta) profili kullanır.
+ * Kullanıcı iptal ederse NULL döndürür. */
+static const scan_profile *select_scan_profile(nero_operation_ui *ui) {
+    if (!ui->interactive) return &SCAN_PROFILES[PROFILE_MEDIUM];
+
+    int raw = enable_raw_mode() == 0;
+    if (raw) set_mouse_reporting(1);
+
+    const char *labels[PROFILE_COUNT] = {
+        "Hizli", "Orta  (onerilen)", "Yavas", "Manuel ayar"
+    };
+    char vbuf[PROFILE_COUNT][40];
+    const char *values[PROFILE_COUNT];
+    for (int i = 0; i < 3; ++i) {
+        snprintf(vbuf[i], sizeof vbuf[i], "%dx%d soket, %d ms",
+                 SCAN_PROFILES[i].fast_threads, SCAN_PROFILES[i].fast_batch,
+                 SCAN_PROFILES[i].fast_timeout_ms);
+        values[i] = vbuf[i];
+    }
+
+    int sel = PROFILE_MEDIUM;
+    const scan_profile *chosen = NULL;
+    ui->controls = "Up/Down: Sec   Enter: Onayla   Esc: Iptal";
+
+    for (;;) {
+        snprintf(vbuf[PROFILE_MANUAL], sizeof vbuf[PROFILE_MANUAL], "%dx%d soket, %d ms",
+                 manual_profile.fast_threads, manual_profile.fast_batch,
+                 manual_profile.fast_timeout_ms);
+        values[PROFILE_MANUAL] = vbuf[PROFILE_MANUAL];
+
+        nero_operation_menu(ui, "Tarama hizi secin", labels, values, PROFILE_COUNT, sel);
+        if (portscanner_interrupt_requested) { chosen = NULL; break; }
+
+        nero_ui_key k = nero_operation_read_key(100);
+        if (k == NERO_UI_KEY_CANCEL || k == NERO_UI_KEY_EOF) { chosen = NULL; break; }
+        if (k == NERO_UI_KEY_UP || k == NERO_UI_KEY_WHEEL_UP) { if (sel > 0) sel--; }
+        else if (k == NERO_UI_KEY_DOWN || k == NERO_UI_KEY_WHEEL_DOWN) { if (sel < PROFILE_COUNT - 1) sel++; }
+        else if (k == NERO_UI_KEY_ENTER) {
+            if (sel == PROFILE_MANUAL) {
+                if (adjust_manual_profile(ui)) { chosen = &manual_profile; break; }
+                if (portscanner_interrupt_requested) { chosen = NULL; break; }
+                ui->controls = "Up/Down: Sec   Enter: Onayla   Esc: Iptal";
+            } else {
+                chosen = &SCAN_PROFILES[sel];
+                break;
+            }
+        }
+    }
+
+    if (raw) { set_mouse_reporting(0); disable_raw_mode(); }
+    return chosen;
 }
 
 /* --- Ana kontrolcü --- */
@@ -519,34 +686,58 @@ int portscanner(const char *target_ip) {
     snprintf(detail, sizeof(detail), "%s", target_ip);
     nero_operation_begin(&ui, "Port scan", detail, "Esc · Back");
 
-    /* Aşama 0: iOS öncelikli portları tek tek dene (yalnızca 3 port) */
-    for (size_t i = 0; i < IOS_PRIORITY_COUNT; ++i) {
-        int port = IOS_PRIORITY_PORTS[i];
-        probe_status status = probe_single_port(target_ip, port, FAST_TIMEOUT_MS);
-        if (status == PROBE_OPEN) {
-            add_open_result(port);
-        } else if (status == PROBE_FILTERED) {
-            add_filtered_candidate(port);
-        }
-        atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
+    /* Aşama 0: tarama hızını seç (Hızlı/Orta/Yavaş/Manuel). İnteraktif
+     * değilse önerilen profil kullanılır; kullanıcı iptal ederse çıkılır. */
+    active_profile = select_scan_profile(&ui);
+    if (active_profile == NULL) {
+        pthread_mutex_destroy(&results_mutex);
+        free(results_list);
+        results_list = NULL;
+        result_count = 0;
+        nero_operation_end(&ui);
+        puts("Scan cancelled. Returned to terminal.");
+        return PORTSCANNER_CANCELLED;
     }
 
-    /* Aşama 1: Event-driven batch hızlı keşif */
-    pthread_t fast_threads[FAST_BATCH_THREADS];
-    batch_thread_args fast_args[FAST_BATCH_THREADS];
-    int ports_per_fast = SCAN_TOTAL_PORTS / FAST_BATCH_THREADS;
+    /* Aşama 0.5: hostun orada olup olmadığını hızlıca anla. Ulaşılamayan bir
+     * hedefte 65535 portu tam zaman aşımıyla taramak dakikalarca sürebilir;
+     * önce kısa bir canlılık kontrolü yapıp kullanıcıyı bekletme. */
+    if (!host_probe_alive(target_ip)) {
+        if (confirm_scan_unreachable(&ui) != 1) {
+            pthread_mutex_destroy(&results_mutex);
+            free(results_list);
+            results_list = NULL;
+            result_count = 0;
+            nero_operation_end(&ui);
+            printf("Host %s yanit vermiyor (erisilemiyor). Tarama yapilmadi.\n", target_ip);
+            return 0;
+        }
+    }
+
+    const scan_profile *prof = active_profile;
+    int fast_thread_count = prof->fast_threads;
+    if (fast_thread_count < 1) fast_thread_count = 1;
+    if (fast_thread_count > MAX_THREADS) fast_thread_count = MAX_THREADS;
+
+    /* Aşama 1: Event-driven batch hızlı keşif (tam 1-65535 aralığı) */
+    pthread_t fast_threads[MAX_THREADS];
+    batch_thread_args fast_args[MAX_THREADS];
+    int ports_per_fast = SCAN_TOTAL_PORTS / fast_thread_count;
     if (ports_per_fast == 0) ports_per_fast = SCAN_TOTAL_PORTS;
 
-    for (int i = 0; i < FAST_BATCH_THREADS; ++i) {
+    int fast_created = 0;
+    for (int i = 0; i < fast_thread_count; ++i) {
         fast_args[i].start_port = (i * ports_per_fast) + 1;
-        fast_args[i].end_port = (i == FAST_BATCH_THREADS - 1)
+        fast_args[i].end_port = (i == fast_thread_count - 1)
             ? SCAN_TOTAL_PORTS
             : (i + 1) * ports_per_fast;
-        fast_args[i].timeout_ms = FAST_TIMEOUT_MS;
+        fast_args[i].timeout_ms = prof->fast_timeout_ms;
+        fast_args[i].batch = prof->fast_batch;
         if (pthread_create(&fast_threads[i], NULL, fast_scan_thread, &fast_args[i]) != 0) {
             fprintf(stderr, "[-] Failed to create fast thread %d.\n", i);
             break;
         }
+        fast_created++;
     }
 
     scan_animation_state animation = { .target_ip = target_ip, .animate = scan_motion_enabled() };
@@ -562,7 +753,7 @@ int portscanner(const char *target_ip) {
     }
     if (!animation_started) nero_operation_loader("Scanning", target_ip, 6);
 
-    for (int i = 0; i < FAST_BATCH_THREADS; ++i) pthread_join(fast_threads[i], NULL);
+    for (int i = 0; i < fast_created; ++i) pthread_join(fast_threads[i], NULL);
 
     /* İptal edildiyse önce animasyon/girdi thread'ini durdur ki temizlik
      * sırasında serbest bırakılan belleğe erişmesin. */
@@ -592,7 +783,7 @@ int portscanner(const char *target_ip) {
     for (int i = 0; i < result_count; ++i)
         if (results_list[i].filtered) filtered_total++;
 
-    if (filtered_total > 0 && filtered_total <= DEEP_SCAN_MAX_CANDIDATES) {
+    if (filtered_total > 0 && filtered_total <= prof->deep_max_candidates) {
         candidates = malloc(filtered_total * sizeof(int));
         if (candidates) {
             int idx = 0;
@@ -610,14 +801,20 @@ int portscanner(const char *target_ip) {
      * iptal edebilir. İlerleme çubuğu hızlı aşamada doldu; derin aşamada
      * latest_probe_port canlı etkinliği gösterir. */
     if (candidate_count > 0 && candidates) {
-        pthread_t deep_threads[DEEP_BATCH_THREADS];
-        deep_batch_args deep_args[DEEP_BATCH_THREADS];
+        int deep_thread_count = prof->deep_threads;
+        if (deep_thread_count < 1) deep_thread_count = 1;
+        if (deep_thread_count > MAX_THREADS) deep_thread_count = MAX_THREADS;
+        if (deep_thread_count > candidate_count) deep_thread_count = candidate_count;
+
+        pthread_t deep_threads[MAX_THREADS];
+        deep_batch_args deep_args[MAX_THREADS];
         int created = 0;
 
-        for (int i = 0; i < DEEP_BATCH_THREADS; ++i) {
-            deep_args[i].start_idx = (i * candidate_count) / DEEP_BATCH_THREADS;
-            deep_args[i].end_idx   = ((i + 1) * candidate_count) / DEEP_BATCH_THREADS;
-            deep_args[i].timeout_ms = DEEP_TIMEOUT_MS;
+        for (int i = 0; i < deep_thread_count; ++i) {
+            deep_args[i].start_idx = (i * candidate_count) / deep_thread_count;
+            deep_args[i].end_idx   = ((i + 1) * candidate_count) / deep_thread_count;
+            deep_args[i].timeout_ms = prof->deep_timeout_ms;
+            deep_args[i].batch = prof->deep_batch;
             if (pthread_create(&deep_threads[i], NULL, deep_scan_thread, &deep_args[i]) != 0)
                 break;
             created++;
