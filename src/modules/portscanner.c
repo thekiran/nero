@@ -22,6 +22,15 @@
 
 #define NUM_THREADS 200 // can be lowered if needed
 
+/* Per-port connect() wait. Ports are probed sequentially within each worker,
+ * so a filtered host that drops SYNs costs this long for every unanswered
+ * port; keep it short enough that a full range stays responsive. */
+#define SCAN_CONNECT_TIMEOUT_MS 400
+
+/* Full TCP port range probed by the workers (ports 1..65535). Used both to
+ * partition work across threads and to turn the probe count into a percentage. */
+#define SCAN_TOTAL_PORTS 65535
+
 // --- Global Variables ---
 static struct termios orig_termios;
 int *open_ports_list = NULL;
@@ -31,6 +40,9 @@ volatile sig_atomic_t portscanner_interrupt_requested = 0;
 /* Keyboard cancellation crosses threads through an atomic flag; signal
  * cancellation uses the separate sig_atomic_t flag above. */
 static atomic_int scan_cancel_requested;
+/* Monotonic count of ports probed across all workers; turns into the progress
+ * bar's percentage against SCAN_TOTAL_PORTS. */
+static atomic_int ports_scanned;
 /* Latest started probe is a sample, not a sequential progress counter:
  * multiple workers scan different ranges concurrently. */
 static atomic_int latest_probe_port;
@@ -80,8 +92,11 @@ static void *scan_animation_worker(void *arg)
             memcpy(recent, open_ports_list + total - recent_count,
                    (size_t)recent_count * sizeof(*recent));
         pthread_mutex_unlock(&ports_mutex);
+        int scanned = atomic_load_explicit(&ports_scanned, memory_order_relaxed);
+        int percent = (int)((long)scanned * 100 / SCAN_TOTAL_PORTS);
+        if (percent > 100) percent = 100;
         nero_operation_discovery(recent, recent_count, total, state->animate ? frame : 6,
-            atomic_load_explicit(&latest_probe_port, memory_order_relaxed));
+            atomic_load_explicit(&latest_probe_port, memory_order_relaxed), percent);
         frame = (frame + 1) % 6;
 
         if (nero_operation_read_key(0) == NERO_UI_KEY_CANCEL)
@@ -120,8 +135,8 @@ int enable_raw_mode(void) {
 }
 
 /* Ascending numeric order gives the selection menu a stable initial item. */
-int compare_desc(const void *a, const void *b) {
-    return (*(int*)a - *(int*)b);
+static int compare_ports_asc(const void *a, const void *b) {
+    return (*(const int *)a - *(const int *)b);
 }
 
 // --- Port Menu (sorted entries) ---
@@ -137,7 +152,7 @@ static int select_port_menu_in_ui(
     }
 
     // Sort ports before displaying the menu
-    qsort(open_ports, count, sizeof(int), compare_desc);
+    qsort(open_ports, count, sizeof(int), compare_ports_asc);
 
     int raw_mode = enable_raw_mode() == 0;
     int current_selection = 0;
@@ -213,6 +228,8 @@ void *scan_ports_thread(void *args) {
             atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
             break;
 
+        atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
+
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) {
             continue;
@@ -253,8 +270,8 @@ void *scan_ports_thread(void *args) {
         FD_ZERO(&wfds);
         FD_SET(sockfd, &wfds);
         struct timeval tv;
-        tv.tv_sec = 1;  // 1 second timeout (can be reduced)
-        tv.tv_usec = 0;
+        tv.tv_sec = SCAN_CONNECT_TIMEOUT_MS / 1000;
+        tv.tv_usec = (SCAN_CONNECT_TIMEOUT_MS % 1000) * 1000;
 
         int sel = select(sockfd + 1, NULL, &wfds, NULL, &tv);
         if (sel > 0 && FD_ISSET(sockfd, &wfds)) {
@@ -313,14 +330,15 @@ int portscanner(const char *target_ip) {
     portscanner_interrupt_requested = 0;
     atomic_init(&scan_cancel_requested, 0);
     atomic_init(&latest_probe_port, 0);
+    atomic_init(&ports_scanned, 0);
 
     if (pthread_mutex_init(&ports_mutex, NULL) != 0) {
         fprintf(stderr, "[-] Failed to initialize mutex.\n");
         return -1;
     }
 
-    int ports_per_thread = 65535 / NUM_THREADS;
-    if (ports_per_thread == 0) ports_per_thread = 65535;
+    int ports_per_thread = SCAN_TOTAL_PORTS / NUM_THREADS;
+    if (ports_per_thread == 0) ports_per_thread = SCAN_TOTAL_PORTS;
 
     nero_operation_ui ui = {0};
     char operation_detail[96];
@@ -340,7 +358,7 @@ int portscanner(const char *target_ip) {
     int threads_created = 0;
     for (int i = 0; i < NUM_THREADS; i++) {
         t_args[i].start_port = (i * ports_per_thread) + 1;
-        if (i == NUM_THREADS - 1) t_args[i].end_port = 65535;
+        if (i == NUM_THREADS - 1) t_args[i].end_port = SCAN_TOTAL_PORTS;
         else t_args[i].end_port = (i + 1) * ports_per_thread;
 
         if (pthread_create(&threads[i], NULL, scan_ports_thread, &t_args[i]) != 0) {
@@ -357,8 +375,13 @@ int portscanner(const char *target_ip) {
     atomic_init(&animation.stop, 0);
     pthread_t animation_thread;
     int animation_started = 0;
+    int discovery_raw = 0;
 
     if (isatty(STDIN_FILENO)) {
+        /* Enter raw mode before the worker starts reading keys, otherwise
+         * Esc/q cancellation sits in the terminal's line buffer until Enter
+         * and the scan cannot be interrupted during discovery. */
+        discovery_raw = (enable_raw_mode() == 0);
         animation_started = pthread_create(
             &animation_thread,
             NULL,
@@ -366,7 +389,10 @@ int portscanner(const char *target_ip) {
             &animation
         ) == 0;
     }
-    if (!animation_started || !animation.animate)
+    /* When the worker runs it is the sole discovery writer (animated or not);
+     * only the non-interactive fallback uses the static loader, so the two
+     * never draw to the terminal at the same time. */
+    if (!animation_started)
         nero_operation_loader("Scanning", target_ip, 6);
 
     /* Join only successfully created workers. Their socket/result accesses
@@ -379,6 +405,10 @@ int portscanner(const char *target_ip) {
         atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
         pthread_join(animation_thread, NULL);
     }
+    /* Restore cooked mode before the selection menu re-enters raw mode, so the
+     * menu saves the user's real terminal state rather than our raw one. */
+    if (discovery_raw)
+        disable_raw_mode();
     if (portscanner_interrupt_requested ||
         atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed)) {
         pthread_mutex_destroy(&ports_mutex);

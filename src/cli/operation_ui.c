@@ -244,6 +244,12 @@ void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, in
 {
     ui->controls = "↑↓ · Move   Enter · Select   Esc · Back";
     if (!body(ui)) return;
+    if (ui->interactive) {
+        /* Discovery parked a progress bar on the last row and the controls one
+         * row above it; clear both before the selection menu redraws. */
+        position(ui->rows - 1, 1); fputs("\033[2K", stdout);
+        position(ui->rows, 1); fputs("\033[2K", stdout);
+    }
     int visible = ui->interactive ? ui->content_bottom - ui->content_top - 2 : count;
     if (selected < ui->scroll_offset) ui->scroll_offset = selected;
     if (selected >= ui->scroll_offset + visible) ui->scroll_offset = selected - visible + 1;
@@ -274,8 +280,33 @@ void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned att
     fflush(stdout);
 }
 
+/* Full-width progress bar on the terminal's last row. Filled cells use the
+ * UI accent; the percentage is printed at the right. The last column is left
+ * untouched so writing the bar never triggers an auto-wrap scroll. */
+static void draw_progress_bar(nero_operation_ui *ui, int percent)
+{
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+
+    char suffix[8];
+    int suffix_len = snprintf(suffix, sizeof(suffix), " %3d%%", percent);
+    int usable = ui->columns - 1;            /* keep the final column empty */
+    int bar_cells = usable - suffix_len;
+    if (bar_cells < 1) return;               /* too narrow for a meaningful bar */
+    int filled = (int)((long)bar_cells * percent / 100);
+
+    position(ui->rows, 1);
+    fputs("\033[2K", stdout);
+    if (ui->color) fputs("\033[35m", stdout);
+    for (int cell = 0; cell < filled; ++cell) fputs("█", stdout);
+    if (ui->color) fputs("\033[2m", stdout);
+    for (int cell = filled; cell < bar_cells; ++cell) fputs("░", stdout);
+    if (ui->color) fputs("\033[0m", stdout);
+    fputs(suffix, stdout);
+}
+
 void nero_operation_discovery(const int *recent, int recent_count, int total,
-                              unsigned frame, int latest_port)
+                              unsigned frame, int latest_port, int percent)
 {
     nero_operation_loader("Scanning", NULL, frame);
     nero_operation_ui *ui = current_ui;
@@ -302,6 +333,15 @@ void nero_operation_discovery(const int *recent, int recent_count, int total,
     for (int index = start; index < recent_count; ++index) {
         port_table_row(ui, ui->content_top + 4 + index - start, recent[index], 0);
     }
+    /* Controls hint on the second-to-last row, with the full-width progress
+     * bar pinned to the very bottom row, directly beneath it. */
+    position(ui->rows - 1, 1);
+    fputs("\033[2K", stdout);
+    position(ui->rows - 1, 3);
+    if (ui->color) fputs("\033[2m", stdout);
+    printf("%.*s", ui->columns - 4, ui->controls ? ui->controls : "Esc · Back");
+    if (ui->color) fputs("\033[0m", stdout);
+    draw_progress_bar(ui, percent);
     fflush(stdout);
 }
 

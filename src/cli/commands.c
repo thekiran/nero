@@ -348,8 +348,8 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
         return CLI_CMD_INVALID;
     }
 
-    /* Pass the target IP and selected port to TCP diagnostics. */
-    SYN_Flood(tokens[0]);
+    /* Run the port scanner against the target. */
+    portscanner(tokens[0]);
 
     return CLI_CMD_CONTINUE;
 }
