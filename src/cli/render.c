@@ -155,3 +155,13 @@ void cli_show_help(void)
     fflush(stdout);
     pthread_mutex_unlock(&ekran_mutex);
 }
+
+/* -Syn has no linked network engine; report which build is running. */
+void cli_show_syn_status(void)
+{
+#if defined(NERO_SAFE_TEST)
+    puts("-Syn: safe test mode; no network traffic generated.");
+#else
+    puts("-Syn: network diagnostics unavailable.");
+#endif
+}

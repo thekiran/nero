@@ -7,9 +7,12 @@
 #include <string.h>
 #include <sys/socket.h>
 
-static struct ifaddrs entries[132];
+/* More records than the adapter's 512-entry cap, so "limit" proves truncation. */
+#define FIXTURE_COUNT 520
+
+static struct ifaddrs entries[FIXTURE_COUNT];
 static struct sockaddr link_address;
-static char names[132][80];
+static char names[FIXTURE_COUNT][80];
 static int freed;
 
 static int fixture_getifaddrs(struct ifaddrs **result)
@@ -24,11 +27,11 @@ static int fixture_getifaddrs(struct ifaddrs **result)
         return 0;
     }
     link_address.sa_family = AF_LINK;
-    for (int i = 0; i < 132; ++i) {
+    for (int i = 0; i < FIXTURE_COUNT; ++i) {
         snprintf(names[i], sizeof(names[i]), "fixture%d", i);
         entries[i].ifa_name = names[i];
         entries[i].ifa_addr = &link_address;
-        entries[i].ifa_next = i < 131 ? &entries[i + 1] : NULL;
+        entries[i].ifa_next = i < FIXTURE_COUNT - 1 ? &entries[i + 1] : NULL;
     }
     if (!mode || strcmp(mode, "limit") != 0) {
         entries[0].ifa_flags = IFF_LOOPBACK;

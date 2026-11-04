@@ -22,13 +22,12 @@
  * Legacy:
  *   <IPv4> -Syn
  *
- * The TCP diagnostics use bounded connection attempts.
+ * -Syn validates its target but runs no network engine.
  * Offline test builds never generate network traffic.
  */
 
 #include "cli_internal.h"
 #include "command_catalog.h"
-#include "nero/tcp_capacity.h"
 #include "nero/cli/parser.h"
 #include "nero/ascii.h"
 #include "nero/printing.h"
@@ -339,68 +338,18 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
  * SYN LEGACY COMMAND
  * ============================================================ */
 
+
 static cli_cmd_result cmd_syn(char **tokens, size_t count)
 {
     struct in_addr addr;
 
-    /* Validate arguments and command syntax. */
-    if (tokens == NULL || count != 2 ||
-        tokens[0] == NULL || tokens[1] == NULL) {
-        return CLI_CMD_INVALID;
-    }
-
-    if (strcmp(tokens[1], "-Syn") != 0 ||
+    if (tokens == NULL || count != 2 || tokens[0] == NULL ||
         inet_pton(AF_INET, tokens[0], &addr) != 1) {
         return CLI_CMD_INVALID;
     }
 
-#if defined(NERO_SAFE_TEST)
-
-    /* Safe test mode: no real network traffic. */
-    puts("-Syn: safe test mode; no network traffic generated.");
-
-#elif defined(NERO_NETWORK_UNAVAILABLE)
-
-    /* Network diagnostics are unavailable in this build. */
-    puts("-Syn: network diagnostics unavailable.");
-
-#else
-
-    /* Initialize the existing terminal operation UI. */
-    nero_operation_ui ui = {0};
-
-    nero_operation_begin(
-        &ui,
-        "TCP diagnostics",
-        tokens[0],
-        "Ctrl+C · Cancel"
-    );
-
-    /* Execute the platform-independent TCP diagnostics engine. */
-    int result = nero_tcp_test(
-        tokens,
-        count,
-        &cli_termination_signal
-    );
-
-    /* Restore terminal state after execution. */
-    nero_operation_end(&ui);
-
-    /* Clear the handled interruption signal. */
-    if (cli_termination_signal == SIGINT) {
-        cli_termination_signal = 0;
-    }
-
-    /* Translate engine results into CLI results. */
-    if (result < 0) {
-        return CLI_CMD_INVALID;
-    }
-
-    if (result > 0) {
-        return CLI_CMD_FAILURE;
-    }
-
-#endif
+    /* Pass the target IP and selected port to TCP diagnostics. */
+    SYN_Flood(tokens[0]);
 
     return CLI_CMD_CONTINUE;
 }

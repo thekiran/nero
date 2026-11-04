@@ -43,7 +43,7 @@ class SafeTests(unittest.TestCase):
     def test_disabled_network_command(self):
         self.assert_no_network_symbols("nero-safe")
         output = self.cli(b"192.0.2.1 -Syn\n192.0.2.1 -mode\nexit\n")
-        self.assertIn(b"-Syn: unsupported in this build; no network traffic is generated.", output)
+        self.assertIn(b"-Syn: safe test mode; no network traffic generated.", output)
         self.assertIn(b"Network diagnostics: ON", output)
         self.assertNotIn(b"-Syn operation failed", output)
         self.assertIn(b"Exiting", output)
@@ -90,7 +90,7 @@ class SafeTests(unittest.TestCase):
             ("normal", b"3\n", 1, b""),
             ("empty", b"", 1, b""),
             ("error", b"", 1, b"getifaddrs"),
-            ("limit", b"128\n", 0, b"SELECTED:fixture99"),
+            ("limit", b"512\n", 0, b"SELECTED:fixture99"),
         ):
             result = subprocess.run([str(ROOT / "interfaces-mock")], input=data,
                                     capture_output=True, timeout=10,

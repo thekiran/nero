@@ -51,14 +51,14 @@ class TerminalQuality(unittest.TestCase):
                 b"  192.0.2.1   -Syn  \n198.51.100.1\t-Syn\nexit\n")
         output = self.output(data)
         self.assertEqual(output.count(b"Invalid command parameters"), 8)
-        self.assertEqual(output.count(b"MOCK_SYN:"), 2)
-        self.assertIn(b"MOCK_SYN:192.0.2.1", output)
-        self.assertIn(b"MOCK_SYN:198.51.100.1", output)
+        # Both well-formed -Syn lines dispatch; offline builds send no traffic.
+        self.assertEqual(output.count(b"-Syn: safe test mode; no network traffic generated."), 2)
+        self.assertNotIn(b"MOCK_SYN:", output)
 
     def test_oversize_line_is_not_dispatched(self):
         output = self.output(b"192.0.2.1 -Syn " + b" " * 4096 + b"\nversion\nexit\n")
         self.assertIn(b"Command too long", output)
-        self.assertNotIn(b"MOCK_SYN:", output)
+        self.assertNotIn(b"-Syn: safe test mode", output)
         self.assertIn(b"version 1.0", output)
 
     def test_cursor_insert_delete_backspace(self):
