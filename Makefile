@@ -29,18 +29,19 @@ COMMON_SOURCES := \
     src/modules/portscanner.c
 
 ifeq ($(UNAME_S),Darwin)
-    INTERFACE_SOURCE := src/platform/macos/select_interface_macos.c
+    PLATFORM_SOURCES := src/platform/macos/select_interface_macos.c \
+                        src/modules/syn_flood_powered.c
     MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
     LDLIBS += $(MACOS_FRAMEWORKS)
 else ifeq ($(UNAME_S),Linux)
-    INTERFACE_SOURCE := src/platform/linux/select_interface.c
+    PLATFORM_SOURCES := src/platform/linux/select_interface.c
     CFLAGS += -D_POSIX_C_SOURCE=199309L -I/usr/include/ldns
     LDLIBS += -lcurl -lcjson -lldns -lncurses
 else
     $(error Unsupported platform: $(UNAME_S))
 endif
 
-SRCS := $(COMMON_SOURCES) $(INTERFACE_SOURCE)
+SRCS := $(COMMON_SOURCES) $(PLATFORM_SOURCES)
 
 BUILD_DIR := .build
 OBJS := $(addprefix $(BUILD_DIR)/obj/,$(SRCS:.c=.o))

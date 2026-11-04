@@ -1,4 +1,3 @@
-
 /*
  * Nero CLI command dispatcher.
  *
@@ -52,6 +51,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <stddef.h>     /* size_t */
 
 #include <time.h>
 
@@ -340,11 +340,19 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
 
 
 static cli_cmd_result cmd_syn(char **tokens, size_t count) {
-    // ... mevcut kontroller ...
-    
-    /* SYN flood'u başlat */
-    SYN_Flood(tokens[0]);
-    
+    (void)count;  /* parametre kullanılmadığında -Wextra -Werror uyarısını bastırır */
+
+    if (tokens == NULL || tokens[0] == NULL || tokens[0][0] == '\0') {
+        fprintf(stderr, "Usage: -Syn <target_ip>\n");
+        return CLI_CMD_CONTINUE;
+    }
+
+    /* SYN flood'u başlat. Port taraması SYN_Flood içinde port_get()
+     * üzerinden portscanner() ile yapılır, burada ayrıca çağırmayın. */
+    if (SYN_Flood(tokens[0]) != 0) {
+        fprintf(stderr, "SYN flood failed for %s\n", tokens[0]);
+    }
+
     return CLI_CMD_CONTINUE;
 }
 
