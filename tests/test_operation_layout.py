@@ -41,7 +41,7 @@ def check(binary, plain=False):
             initial += collect()
         assert logo in initial
         assert b"Latest probe  TCP / 8197" in initial
-        assert b"TCP   " in initial and b"OPEN" in initial
+        assert b"SERVICE" in initial and b"OPEN" in initial
         assert (b"\x1b[35m" in initial) == (not plain)
         os.write(master, b"\x1b[B" * 80)
         moved = collect(0.6)

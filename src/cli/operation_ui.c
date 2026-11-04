@@ -275,23 +275,87 @@ void nero_operation_end(nero_operation_ui *ui)
 
 /* Discovery and selection share column widths, so the same result keeps its
  * visual position when the operation changes from scanning to choosing. */
+/* Well-known TCP service names for the SERVICE column. Static lookup only,
+ * no network traffic. Unknown ports return "" (blank). */
+const char *nero_service_name(int port)
+{
+    switch (port) {
+    case 20: case 21: return "ftp";
+    case 22: return "ssh";
+    case 23: return "telnet";
+    case 25: return "smtp";
+    case 53: return "dns";
+    case 67: case 68: return "dhcp";
+    case 69: return "tftp";
+    case 80: return "http";
+    case 110: return "pop3";
+    case 111: return "rpcbind";
+    case 123: return "ntp";
+    case 135: return "msrpc";
+    case 137: case 138: case 139: return "netbios";
+    case 143: return "imap";
+    case 161: case 162: return "snmp";
+    case 389: return "ldap";
+    case 443: return "https";
+    case 445: return "smb";
+    case 465: return "smtps";
+    case 514: return "syslog";
+    case 515: return "printer";
+    case 548: return "afp";
+    case 554: return "rtsp";
+    case 587: return "submission";
+    case 631: return "ipp";
+    case 636: return "ldaps";
+    case 993: return "imaps";
+    case 995: return "pop3s";
+    case 1080: return "socks";
+    case 1433: return "mssql";
+    case 1521: return "oracle";
+    case 1723: return "pptp";
+    case 1883: return "mqtt";
+    case 2049: return "nfs";
+    case 3128: return "proxy";
+    case 3306: return "mysql";
+    case 3389: return "rdp";
+    case 5000: return "upnp";
+    case 5060: return "sip";
+    case 5353: return "mdns";
+    case 5432: return "postgres";
+    case 5900: case 5901: return "vnc";
+    case 6379: return "redis";
+    case 7000: return "airplay";
+    case 8000: case 8080: case 8888: return "http-alt";
+    case 8443: return "https-alt";
+    case 9000: return "http-alt";
+    case 9200: return "elastic";
+    case 11211: return "memcache";
+    case 27017: return "mongodb";
+    case 62078: return "lockdownd"; /* iOS usbmux */
+    default: return "";
+    }
+}
+
 static void port_table_header(nero_operation_ui *ui, int row)
 {
     if (ui->interactive) position(row, 1);
     else putchar('\n');
     if (ui->color) fputs("\033[2m", stdout);
-    printf("  %-9s%-13s%s", "PORT", "PROTOCOL", "STATUS");
+    printf("  %-8s%-14s%s", "PORT", "SERVICE", "STATUS");
     if (ui->color) fputs("\033[0m", stdout);
 }
 
 static void port_table_row(nero_operation_ui *ui, int row, int port, int selected)
 {
+    const char *svc = nero_service_name(port);
+    char svc_field[14];
+    /* Unknown ports show a dim dash so the column never looks broken. */
+    snprintf(svc_field, sizeof svc_field, "%-13s", svc[0] ? svc : "-");
     if (ui->interactive) position(row, 1);
     else putchar('\n');
     if (ui->color) fputs(selected ? "\033[1;35m" : "\033[1m", stdout);
-    printf("%s %-9d", selected ? ">" : " ", port);
-    if (ui->color) fputs("\033[0;2m", stdout);
-    printf("%-13s", "TCP");
+    printf("%s %-8d", selected ? ">" : " ", port);
+    if (ui->color) fputs("\033[0;36m", stdout);
+    printf("%s", svc_field);
     if (ui->color) fputs("\033[0;35m", stdout);
     fputs("OPEN", stdout);
     if (ui->color) fputs("\033[0m", stdout);
@@ -373,6 +437,25 @@ void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, in
         port_table_row(ui, ui->content_top + index + 3, ports[item], item == selected);
     }
     draw_scrollbar(ui, ui->content_top + 3, visible, count, ui->scroll_offset);
+    /* Banner/version detail for the selected port on the second-to-last row,
+     * looked up by port value (independent of the list's sort order). */
+    if (ui->interactive && ui->banner_count > 0 && ui->banner_ports &&
+        ui->banner_texts && count > 0) {
+        const char *banner = NULL;
+        for (int i = 0; i < ui->banner_count; ++i) {
+            if (ui->banner_ports[i] == ports[selected]) {
+                banner = ui->banner_texts[i];
+                break;
+            }
+        }
+        position(ui->rows - 1, 1); fputs("\033[2K", stdout);
+        if (banner && banner[0]) {
+            position(ui->rows - 1, 3);
+            if (ui->color) fputs("\033[2m", stdout);
+            printf("%.*s", ui->columns - 4, banner);
+            if (ui->color) fputs("\033[0m", stdout);
+        }
+    }
     if (ui->interactive) {
         position(ui->rows, 3);
         printf("%.*s", ui->columns - 4, ui->controls);

@@ -12,6 +12,13 @@ typedef struct {
     int color, compact;
     int unicode; /* 0 on non-UTF-8 locales or NERO_ASCII: ASCII glyphs only */
     const char *title, *detail, *controls;
+    /* Optional banner lookup for the selected port in nero_operation_ports.
+     * banner_ports[i] pairs with banner_texts[i]; the selected port's text is
+     * shown on a detail line. Looked up by port value, so it is independent of
+     * any sort applied to the displayed `ports` array. NULL/0 disables it. */
+    const int *banner_ports;
+    const char *const *banner_texts;
+    int banner_count;
 } nero_operation_ui;
 
 /* Scroll units for nero_operation_discovery's scroll_delta. Plain values move
@@ -81,6 +88,10 @@ void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned att
 void nero_operation_menu(nero_operation_ui *ui, const char *heading,
                          const char *const *labels, const char *const *values,
                          int count, int selected);
+
+/* Well-known TCP service name for a port, e.g. 22 -> "ssh". Static lookup,
+ * no network. Returns "" for unknown ports. */
+const char *nero_service_name(int port);
 
 /* Decodes a standalone Escape separately from CSI/SS3 arrow sequences.
  * timeout_ms < 0 waits indefinitely; zero performs a non-blocking poll. */

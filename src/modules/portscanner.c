@@ -460,6 +460,111 @@ void *deep_scan_thread(void *args) {
     pthread_exit(NULL);
 }
 
+/* --- Banner / sürüm yakalama ---
+ * Açık bir porta bağlanıp gelen ilk satırı (banner) okur. SSH/FTP/SMTP/POP3/
+ * IMAP gibi servisler bağlantıda kendiliğinden banner yollar; HTTP portlarına
+ * küçük bir istek gönderilir. Yazdırılamayan baytlar '.' ile değiştirilir ve
+ * yalnızca ilk satır, kısaltılarak saklanır. */
+#define BANNER_MAX 72
+
+static int is_http_port(int port) {
+    return port == 80 || port == 8080 || port == 8000 || port == 8888 ||
+           port == 9000 || port == 591 || port == 8008;
+}
+
+static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
+    if (outsz == 0) return;
+    out[0] = '\0';
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return;
+    int fl = fcntl(fd, F_GETFL, 0);
+    if (fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+
+    int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (r < 0 && errno == EINPROGRESS) {
+        struct pollfd p = { fd, POLLOUT, 0 };
+        int pr;
+        do { pr = poll(&p, 1, 1200); } while (pr < 0 && errno == EINTR);
+        if (pr <= 0) { close(fd); return; }
+        int se = 0; socklen_t l = sizeof(se);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &se, &l) != 0 || se != 0) { close(fd); return; }
+    } else if (r < 0) {
+        close(fd);
+        return;
+    }
+
+    /* Bloklamaya dön ve bir okuma zaman aşımı koy. */
+    if (fl >= 0) fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+    struct timeval tv = { 1, 200000 }; /* 1.2 sn */
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    if (is_http_port(port)) {
+        const char *req = "HEAD / HTTP/1.0\r\n\r\n";
+        (void)send(fd, req, strlen(req), 0);
+    }
+
+    char buf[256];
+    ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+    close(fd);
+    if (n <= 0) return;
+
+    size_t o = 0;
+    for (ssize_t i = 0; i < n && o < outsz - 1; ++i) {
+        unsigned char c = (unsigned char)buf[i];
+        if (c == '\r' || c == '\n') break;         /* yalnızca ilk satır */
+        out[o++] = (c >= 32 && c < 127) ? (char)c : '.';
+    }
+    out[o] = '\0';
+}
+
+typedef struct {
+    const char *ip;
+    const int *ports;
+    int start, end;
+    char (*store)[BANNER_MAX];
+} banner_args;
+
+static void *banner_worker(void *p) {
+    banner_args *b = p;
+    for (int i = b->start; i < b->end; ++i) {
+        if (portscanner_interrupt_requested ||
+            atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
+            break;
+        grab_banner(b->ip, b->ports[i], b->store[i], BANNER_MAX);
+    }
+    return NULL;
+}
+
+/* Açık portlar için banner'ları paralel yakalar (çok iş parçacığı, her biri
+ * kendi dizin aralığına yazar; kilit gerekmez). En çok `cap` port denenir. */
+#define BANNER_THREADS 12
+#define BANNER_PORT_CAP 128
+static void grab_banners(const char *ip, const int *ports, int count,
+                         char (*store)[BANNER_MAX]) {
+    if (count <= 0) return;
+    int threads = count < BANNER_THREADS ? count : BANNER_THREADS;
+    pthread_t tids[BANNER_THREADS];
+    banner_args args[BANNER_THREADS];
+    int created = 0;
+    for (int i = 0; i < threads; ++i) {
+        args[i].ip = ip;
+        args[i].ports = ports;
+        args[i].store = store;
+        args[i].start = (i * count) / threads;
+        args[i].end   = ((i + 1) * count) / threads;
+        if (pthread_create(&tids[i], NULL, banner_worker, &args[i]) != 0) break;
+        created++;
+    }
+    for (int i = 0; i < created; ++i) pthread_join(tids[i], NULL);
+}
+
 /* --- Hızlı erişilebilirlik ön kontrolü ---
  * Tam 65535 portu taramadan önce, hostun orada olup olmadığını birkaç yüz
  * ms'de anlar: yaygın portlara eşzamanlı SYN gönderir. Herhangi bir porttan
@@ -879,7 +984,38 @@ int portscanner(const char *target_ip) {
     }
     nero_operation_status("32", "Scan complete", result_detail);
 
+    /* Açık portlar için servis banner'larını yakala (varsa menüde gösterilir).
+     * Port değerine göre arandığından menüdeki sıralamadan bağımsızdır. */
+    int *banner_port_list = NULL;
+    char (*banner_store)[BANNER_MAX] = NULL;
+    const char **banner_texts = NULL;
+    int banner_n = open_count < BANNER_PORT_CAP ? open_count : BANNER_PORT_CAP;
+    if (open_ports && banner_n > 0) {
+        banner_port_list = malloc(banner_n * sizeof(int));
+        banner_store = malloc(banner_n * sizeof(*banner_store));
+        banner_texts = malloc(banner_n * sizeof(*banner_texts));
+        if (banner_port_list && banner_store && banner_texts) {
+            for (int i = 0; i < banner_n; ++i) {
+                banner_port_list[i] = open_ports[i];
+                banner_store[i][0] = '\0';
+            }
+            nero_operation_status("36", "Servis bilgileri toplaniyor", result_detail);
+            grab_banners(target_ip, banner_port_list, banner_n, banner_store);
+            for (int i = 0; i < banner_n; ++i) banner_texts[i] = banner_store[i];
+            ui.banner_ports = banner_port_list;
+            ui.banner_texts = (const char *const *)banner_texts;
+            ui.banner_count = banner_n;
+            nero_operation_status("32", "Scan complete", result_detail);
+        } else {
+            free(banner_port_list); free(banner_store); free(banner_texts);
+            banner_port_list = NULL; banner_store = NULL; banner_texts = NULL;
+        }
+    }
+
     int selected_port = select_port_menu_in_ui(open_ports, open_count, &ui);
+    free(banner_port_list);
+    free(banner_store);
+    free(banner_texts);
     free(open_ports);
     free(results_list);
     results_list = NULL;
