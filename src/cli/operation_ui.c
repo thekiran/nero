@@ -29,6 +29,7 @@ static int discovery_follow = 1;
  * screen edge, so the eye does not have to travel across an empty row. */
 #define SCROLLBAR_COLUMN 33
 
+/* Move the cursor to a 1-based (row, column) on the terminal. */
 static void position(int row, int column)
 {
     printf("\033[%d;%dH", row, column);
@@ -64,11 +65,14 @@ static int glyphs_unicode(void)
     return 1;
 }
 
+/* Pick the UTF-8 glyph on capable terminals, else the ASCII fallback. */
 static const char *glyph(const nero_operation_ui *ui, const char *utf8, const char *ascii)
 {
     return ui && ui->unicode ? utf8 : ascii;
 }
 
+/* Draw the fixed frame once: brand logo, title, detail and footer controls.
+ * The operation body is painted separately and never overwrites these. */
 static void paint_layout(nero_operation_ui *ui)
 {
     if (!ui->interactive)
@@ -102,6 +106,8 @@ static void paint_layout(nero_operation_ui *ui)
     if (ui->color) fputs("\033[0m", stdout);
 }
 
+/* Re-read the terminal size and, only when it changed, recompute the body
+ * bounds and repaint the fixed frame. A no-op when the size is unchanged. */
 static void refresh_layout(nero_operation_ui *ui)
 {
     struct winsize size = {0};
@@ -221,6 +227,7 @@ void nero_operation_begin(
     fflush(stdout);
 }
 
+/* Print a section heading at the top of the operation body. */
 void nero_operation_section(const char *label)
 {
     if (!body(current_ui)) return;
@@ -259,6 +266,8 @@ void nero_operation_status(const char *color, const char *label, const char *det
     fflush(stdout);
 }
 
+/* Close the operation surface: restore the alternate screen (interactive) or
+ * emit a trailing newline (redirected). Idempotent via ui->active. */
 void nero_operation_end(nero_operation_ui *ui)
 {
     if (ui == NULL || !ui->active)
@@ -335,6 +344,7 @@ const char *nero_service_name(int port)
     }
 }
 
+/* Column header shared by the live discovery view and the selection menu. */
 static void port_table_header(nero_operation_ui *ui, int row)
 {
     if (ui->interactive) position(row, 1);
@@ -344,6 +354,7 @@ static void port_table_header(nero_operation_ui *ui, int row)
     if (ui->color) fputs("\033[0m", stdout);
 }
 
+/* One port row: number, well-known service name (or "-"), and OPEN status. */
 static void port_table_row(nero_operation_ui *ui, int row, int port, int selected)
 {
     const char *svc = nero_service_name(port);
@@ -398,6 +409,9 @@ static void draw_scrollbar(nero_operation_ui *ui, int first_row, int visible,
     }
 }
 
+/* Render the interactive port-selection list: heading, columns, scrollable
+ * rows, scrollbar, and — when ui->banner_* is set — a banner detail line for
+ * the selected port. See the header for the public contract. */
 void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, int selected)
 {
     ui->controls = ui->unicode
@@ -514,6 +528,8 @@ void nero_operation_menu(nero_operation_ui *ui, const char *heading,
     fflush(stdout);
 }
 
+/* Legacy three-row connection-test frames; falls back to a plain text counter
+ * when color, Unicode or animation is unavailable. */
 void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned attempt)
 {
     if (!body(ui)) return;
@@ -646,6 +662,8 @@ static nero_ui_key wheel_key(int button)
     }
 }
 
+/* Read and decode one key or mouse-wheel event. See the header for the timeout
+ * contract; the body documents the Escape/CSI/SS3/mouse sequence handling. */
 nero_ui_key nero_operation_read_key(int timeout_ms)
 {
     char byte;

@@ -103,6 +103,8 @@ typedef struct {
     int animate;
 } scan_animation_state;
 
+/* Animasyon yalnızca gerçek bir terminalde, NERO_REDUCE_MOTION tanımsızken ve
+ * TERM "dumb" değilken etkindir. */
 static int scan_motion_enabled(void) {
     const char *reduced = getenv("NERO_REDUCE_MOTION");
     const char *term = getenv("TERM");
@@ -110,6 +112,9 @@ static int scan_motion_enabled(void) {
            (term == NULL || strcmp(term, "dumb") != 0);
 }
 
+/* Tarama sırasında ekranı canlı tutan iş parçacığı: keşfedilen portları çizer,
+ * ilerlemeyi günceller, tekerlek/ok ile kaydırmayı ve Esc ile iptali işler.
+ * Hem hızlı hem derin aşama boyunca çalışır, sonunda bir kez durdurulur. */
 static void *scan_animation_worker(void *arg) {
     scan_animation_state *state = arg;
     const struct timespec frame_delay = {0, SCAN_FRAME_NANOSECONDS};
@@ -155,12 +160,15 @@ static void *scan_animation_worker(void *arg) {
     return NULL;
 }
 
+/* Terminali, kaydedilen ayarlara (satır modu) geri döndürür. Idempotent. */
 void disable_raw_mode(void) {
     if (!raw_mode_active) return;
     tcsetattr(STDIN_FILENO, TCSADRAIN, &orig_termios);
     raw_mode_active = 0;
 }
 
+/* Anlık tuş/fare girişi için raw moda geçer; orijinal termios ayarlarını saklar
+ * ve normal çıkışta eski haline döndürmek için bir kez atexit kaydı yapar. */
 int enable_raw_mode(void) {
     static int atexit_installed = 0;
     if (!isatty(STDIN_FILENO)) return -1;
@@ -175,11 +183,14 @@ int enable_raw_mode(void) {
     return 0;
 }
 
+/* SGR (1006) + normal (1000) fare raporlamasını açar/kapatır; liste
+ * kaydırmada tekerleği okuyabilmek için. */
 static void set_mouse_reporting(int enable) {
     fputs(enable ? "\033[?1000h\033[?1006h" : "\033[?1006l\033[?1000l", stdout);
     fflush(stdout);
 }
 
+/* Port listesini artan sırada göstermek için qsort karşılaştırıcısı. */
 static int compare_ports_asc(const void *a, const void *b) {
     return (*(const int *)a - *(const int *)b);
 }
@@ -231,6 +242,7 @@ static int select_port_menu_in_ui(int *open_ports, int count, nero_operation_ui 
     return open_ports[current_selection];
 }
 
+/* Kendi operasyon yüzeyini açıp port seçim menüsünü gösteren genel sarmalayıcı. */
 int select_port_menu(int *open_ports, int count) {
     nero_operation_ui ui = {0};
     nero_operation_begin(&ui, "PORT SELECTION", "Choose an open port", "Esc · Back");
@@ -262,6 +274,8 @@ static void add_open_result(int port) {
     pthread_mutex_unlock(&results_mutex);
 }
 
+/* Yanıt vermeyen (filtrelenmiş olabilecek) bir portu, derin taramada yeniden
+ * denenmek üzere aday olarak kaydeder. Aynı port zaten varsa tekrar eklenmez. */
 static void add_filtered_candidate(int port) {
     pthread_mutex_lock(&results_mutex);
     for (int i = 0; i < result_count; ++i) {
@@ -467,11 +481,15 @@ void *deep_scan_thread(void *args) {
  * yalnızca ilk satır, kısaltılarak saklanır. */
 #define BANNER_MAX 72
 
+/* Banner için küçük bir HTTP isteği gönderilecek yaygın düz-metin HTTP portları. */
 static int is_http_port(int port) {
     return port == 80 || port == 8080 || port == 8000 || port == 8888 ||
            port == 9000 || port == 591 || port == 8008;
 }
 
+/* Tek bir açık porttan ilk banner satırını `out`'a (en çok outsz-1 bayt) yazar;
+ * yanıt yoksa boş bırakır. Bağlantı non-blocking connect+poll ile, okuma ise
+ * SO_RCVTIMEO zaman aşımıyla yapılır. */
 static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
     if (outsz == 0) return;
     out[0] = '\0';
@@ -531,6 +549,8 @@ typedef struct {
     char (*store)[BANNER_MAX];
 } banner_args;
 
+/* Banner yakalamayı paralelleştiren iş parçacığı: kendine düşen port aralığını
+ * işler ve yalnızca kendi store[] satırlarına yazdığından kilit gerekmez. */
 static void *banner_worker(void *p) {
     banner_args *b = p;
     for (int i = b->start; i < b->end; ++i) {
