@@ -10,8 +10,15 @@ typedef struct {
     int content_top, content_bottom;
     int scroll_offset;
     int color, compact;
+    int unicode; /* 0 on non-UTF-8 locales or NERO_ASCII: ASCII glyphs only */
     const char *title, *detail, *controls;
 } nero_operation_ui;
+
+/* Scroll units for nero_operation_discovery's scroll_delta. Plain values move
+ * by lines; multiples of NERO_UI_SCROLL_PAGE move by whole viewport pages and
+ * NERO_UI_SCROLL_EDGE jumps to the top (negative) or bottom (positive). */
+#define NERO_UI_SCROLL_PAGE 10000
+#define NERO_UI_SCROLL_EDGE 100000000
 
 /* NONE means no input yet; EOF means input is unavailable. CANCEL unifies
  * standalone Escape, Q and a literal Ctrl+C byte for operation callers. */
@@ -24,6 +31,10 @@ typedef enum {
     NERO_UI_KEY_EOF,
     NERO_UI_KEY_WHEEL_UP,
     NERO_UI_KEY_WHEEL_DOWN,
+    NERO_UI_KEY_PAGE_UP,
+    NERO_UI_KEY_PAGE_DOWN,
+    NERO_UI_KEY_HOME,
+    NERO_UI_KEY_END,
     NERO_UI_KEY_OTHER
 } nero_ui_key;
 

@@ -1,7 +1,8 @@
-/* Concurrent TCP discovery and port selection.
- * Workers own their sockets; the controller owns the result buffer, mutex
- * and operation surface. UI input is consumed by one animation worker during
- * discovery, then by the selection menu after that worker has joined. */
+/* Concurrent TCP discovery with iOS-focused adaptive scanning.
+ * Fast phase and deep phase use event-driven select() batching:
+ * each worker thread manages BATCH_SIZE sockets concurrently,
+ * so 8 threads * 400 sockets = 3200 simultaneous probes without
+ * spawning thousands of threads or hitting macOS ulimit -n. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,50 +14,79 @@
 #include <termios.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <fcntl.h>      // for fcntl
-#include <sys/select.h> // for select
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/resource.h>
 #include <time.h>
+#include <stdint.h>
 
 #include "nero/operation_ui.h"
 #include "nero/portscanner.h"
 
-#define NUM_THREADS 200 // can be lowered if needed
+/* iOS odaklı öncelikli portlar */
+static const int IOS_PRIORITY_PORTS[] = { 62078, 49152, 32498 };
+#define IOS_PRIORITY_COUNT (sizeof(IOS_PRIORITY_PORTS) / sizeof(IOS_PRIORITY_PORTS[0]))
 
-/* Per-port connect() wait. Ports are probed sequentially within each worker,
- * so a filtered host that drops SYNs costs this long for every unanswered
- * port; keep it short enough that a full range stays responsive. */
-#define SCAN_CONNECT_TIMEOUT_MS 400
+/* Batch scanner parametreleri.
+ * 8 thread * 400 soket = 3200 eşzamanlı probe.
+ * macOS'ta FD_SETSIZE 1024'tür, BATCH_SIZE bunun çok altında kalmalı.
+ * ulimit -n değerinin en az 4000 olduğundan emin olun:
+ *   ulimit -n 8192 */
+#define FAST_BATCH_THREADS 8
+#define FAST_BATCH_SIZE    400
+#define FAST_TIMEOUT_MS    1200
 
-/* Full TCP port range probed by the workers (ports 1..65535). Used both to
- * partition work across threads and to turn the probe count into a percentage. */
+#define DEEP_BATCH_THREADS 4
+#define DEEP_BATCH_SIZE    200
+#define DEEP_TIMEOUT_MS    2500
+
+/* Çok fazla "filtered" varsa deep scan anlamsız olur; bu eşiğin
+ * üzerinde atla. */
+#define DEEP_SCAN_MAX_CANDIDATES 5000
+
 #define SCAN_TOTAL_PORTS 65535
-
-/* Upper bound on how many discovered ports the live view copies per frame.
- * The selection menu still receives the full list; this only caps the amount
- * scrolled through during the scan so the per-frame copy stays cheap. */
 #define DISCOVERY_VIEW_CAP 512
 
-// --- Global Variables ---
+/* Port başına kesin probe sonucu. */
+typedef enum {
+    PROBE_OPEN     =  1,
+    PROBE_CLOSED   =  0,
+    PROBE_FILTERED = -1,
+    PROBE_ERROR    = -2
+} probe_status;
+
+typedef struct {
+    int port;
+    int filtered;
+} port_result;
+
+typedef struct {
+    int start_port;
+    int end_port;
+    int timeout_ms;
+} batch_thread_args;
+
+typedef struct {
+    int start_idx;
+    int end_idx;
+    int timeout_ms;
+} deep_batch_args;
+
 static struct termios orig_termios;
-int *open_ports_list = NULL;
-int port_counter = 0;
+static port_result *results_list = NULL;
+static int result_count = 0;
+static int *candidates = NULL;
+static int candidate_count = 0;
 static int scan_alloc_failed = 0;
 volatile sig_atomic_t portscanner_interrupt_requested = 0;
-/* Keyboard cancellation crosses threads through an atomic flag; signal
- * cancellation uses the separate sig_atomic_t flag above. */
 static atomic_int scan_cancel_requested;
-/* Monotonic count of ports probed across all workers; turns into the progress
- * bar's percentage against SCAN_TOTAL_PORTS. */
 static atomic_int ports_scanned;
-/* Latest started probe is a sample, not a sequential progress counter:
- * multiple workers scan different ranges concurrently. */
 static atomic_int latest_probe_port;
-const char *target_ip_global;
-pthread_mutex_t ports_mutex;
+static const char *target_ip_global;
+static pthread_mutex_t results_mutex;
 
-// --- Terminal Functions ---
+/* --- Terminal yardımcıları --- */
 static int raw_mode_active = 0;
-
 #define SCAN_FRAME_NANOSECONDS 70000000L
 
 typedef struct {
@@ -65,45 +95,37 @@ typedef struct {
     int animate;
 } scan_animation_state;
 
-/* Reduce Motion preserves input handling while suppressing animated frames. */
-static int scan_motion_enabled(void)
-{
+static int scan_motion_enabled(void) {
     const char *reduced = getenv("NERO_REDUCE_MOTION");
     const char *term = getenv("TERM");
-    return isatty(STDOUT_FILENO) &&
-           reduced == NULL &&
+    return isatty(STDOUT_FILENO) && reduced == NULL &&
            (term == NULL || strcmp(term, "dumb") != 0);
 }
 
-/* This worker is the sole discovery UI writer and keyboard reader. It must
- * finish before the controller redraws results or releases its stack state. */
-static void *scan_animation_worker(void *arg)
-{
+static void *scan_animation_worker(void *arg) {
     scan_animation_state *state = arg;
-    const struct timespec frame_delay = {
-        .tv_sec = 0,
-        .tv_nsec = SCAN_FRAME_NANOSECONDS
-    };
+    const struct timespec frame_delay = {0, SCAN_FRAME_NANOSECONDS};
     unsigned frame = 0;
 
     while (!atomic_load_explicit(&state->stop, memory_order_relaxed)) {
-        /* Copy the discovered list while locked; terminal writes must never
-         * block network workers or retain pointers across reallocations. The
-         * copy is capped so the live view stays cheap on noisy hosts. */
         int ports[DISCOVERY_VIEW_CAP];
-        pthread_mutex_lock(&ports_mutex);
-        int total = port_counter;
-        int shown = total < DISCOVERY_VIEW_CAP ? total : DISCOVERY_VIEW_CAP;
-        if (shown > 0)
-            memcpy(ports, open_ports_list, (size_t)shown * sizeof(*ports));
-        pthread_mutex_unlock(&ports_mutex);
+        int total_open = 0;
+        int shown = 0;
+
+        pthread_mutex_lock(&results_mutex);
+        for (int i = 0; i < result_count; ++i) {
+            if (!results_list[i].filtered) {
+                if (shown < DISCOVERY_VIEW_CAP)
+                    ports[shown++] = results_list[i].port;
+                total_open++;
+            }
+        }
+        pthread_mutex_unlock(&results_mutex);
 
         int scanned = atomic_load_explicit(&ports_scanned, memory_order_relaxed);
         int permille = (int)((long)scanned * 1000 / SCAN_TOTAL_PORTS);
         if (permille > 1000) permille = 1000;
 
-        /* One key per frame drives cancellation and manual scrolling of the
-         * live results; wheel and arrows move the discovery viewport. */
         int scroll_delta = 0;
         switch (nero_operation_read_key(0)) {
         case NERO_UI_KEY_CANCEL:
@@ -116,76 +138,65 @@ static void *scan_animation_worker(void *arg)
         default: break;
         }
 
-        nero_operation_discovery(ports, shown, total, state->animate ? frame : 6,
+        nero_operation_discovery(ports, shown, total_open, state->animate ? frame : 6,
             atomic_load_explicit(&latest_probe_port, memory_order_relaxed),
             permille, scroll_delta);
         frame = (frame + 1) % 6;
-
         nanosleep(&frame_delay, NULL);
     }
     return NULL;
 }
 
 void disable_raw_mode(void) {
-    if (!raw_mode_active)
-        return;
+    if (!raw_mode_active) return;
     tcsetattr(STDIN_FILENO, TCSADRAIN, &orig_termios);
     raw_mode_active = 0;
 }
 
 int enable_raw_mode(void) {
-    /* The shell in terminal.c already installs its own atexit cleanup; register
-     * our fallback only once so repeated port scans do not stack duplicate
-     * entries on the atexit list. */
     static int atexit_installed = 0;
-    if (!isatty(STDIN_FILENO))
-        return -1;
-    if (tcgetattr(STDIN_FILENO, &orig_termios) != 0)
-        return -1;
+    if (!isatty(STDIN_FILENO)) return -1;
+    if (tcgetattr(STDIN_FILENO, &orig_termios) != 0) return -1;
     struct termios raw = orig_termios;
     raw.c_lflag &= ~(ECHO | ICANON);
-    if (tcsetattr(STDIN_FILENO, TCSADRAIN, &raw) != 0)
-        return -1;
+    if (tcsetattr(STDIN_FILENO, TCSADRAIN, &raw) != 0) return -1;
     raw_mode_active = 1;
     if (!atexit_installed) {
-        if (atexit(disable_raw_mode) == 0)
-            atexit_installed = 1;
+        if (atexit(disable_raw_mode) == 0) atexit_installed = 1;
     }
     return 0;
 }
 
-/* SGR mouse reporting lets the selection menu receive wheel events. Toggled
- * only alongside raw mode, so redirected (non-terminal) output never receives
- * these control codes. */
-static void set_mouse_reporting(int enable)
-{
+static void set_mouse_reporting(int enable) {
     fputs(enable ? "\033[?1000h\033[?1006h" : "\033[?1006l\033[?1000l", stdout);
     fflush(stdout);
 }
 
-/* Ascending numeric order gives the selection menu a stable initial item. */
 static int compare_ports_asc(const void *a, const void *b) {
     return (*(const int *)a - *(const int *)b);
 }
 
-// --- Port Menu (sorted entries) ---
-/* A selection borrows the controller's result buffer. Enter confirms a port;
- * cancellation and input failure remain distinct negative return values. */
-static int select_port_menu_in_ui(
-    int *open_ports,
-    int count,
-    nero_operation_ui *ui
-) {
-    if (count == 0) {
-        return 0;
-    }
+/* Bir batch taraması aynı anda binlerce soket açabilir. Varsayılan
+ * RLIMIT_NOFILE (macOS'ta sıklıkla 256) buna yetmez ve socket() EMFILE ile
+ * başarısız olur. Soft limiti, hard limiti aşmadan ihtiyaç kadar yükselt. */
+static void raise_fd_limit(void) {
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return;
+    rlim_t needed = (rlim_t)FAST_BATCH_THREADS * FAST_BATCH_SIZE + 64;
+    if (rl.rlim_cur >= needed) return;
+    rlim_t target = needed;
+    if (rl.rlim_max != RLIM_INFINITY && target > rl.rlim_max)
+        target = rl.rlim_max;
+    rl.rlim_cur = target;
+    setrlimit(RLIMIT_NOFILE, &rl);
+}
 
-    // Sort ports before displaying the menu
+/* --- Port seçim menüsü --- */
+static int select_port_menu_in_ui(int *open_ports, int count, nero_operation_ui *ui) {
+    if (count == 0) return 0;
     qsort(open_ports, count, sizeof(int), compare_ports_asc);
-
     int raw_mode = enable_raw_mode() == 0;
-    if (raw_mode)
-        set_mouse_reporting(1);
+    if (raw_mode) set_mouse_reporting(1);
     int current_selection = 0;
     int input_ok = 1;
 
@@ -196,313 +207,485 @@ static int select_port_menu_in_ui(
             return PORTSCANNER_CANCELLED;
         }
         nero_ui_key key = nero_operation_read_key(100);
-        if (key == NERO_UI_KEY_EOF) {
-            input_ok = 0;
-            break;
-        }
+        if (key == NERO_UI_KEY_EOF) { input_ok = 0; break; }
         if (key == NERO_UI_KEY_CANCEL) {
             if (raw_mode) { set_mouse_reporting(0); disable_raw_mode(); }
             return PORTSCANNER_CANCELLED;
         }
-        if (key == NERO_UI_KEY_UP && current_selection > 0)
-            current_selection--;
-        else if (key == NERO_UI_KEY_DOWN && current_selection < count - 1)
-            current_selection++;
-        else if (key == NERO_UI_KEY_WHEEL_UP) {
-            current_selection -= 1;
-            if (current_selection < 0) current_selection = 0;
-        }
-        else if (key == NERO_UI_KEY_WHEEL_DOWN) {
-            current_selection += 1;
-            if (current_selection > count - 1) current_selection = count - 1;
-        }
-        else if (key == NERO_UI_KEY_ENTER)
-            break;
+        if (key == NERO_UI_KEY_UP && current_selection > 0) current_selection--;
+        else if (key == NERO_UI_KEY_DOWN && current_selection < count - 1) current_selection++;
+        else if (key == NERO_UI_KEY_WHEEL_UP) { current_selection--; if (current_selection < 0) current_selection = 0; }
+        else if (key == NERO_UI_KEY_WHEEL_DOWN) { current_selection++; if (current_selection > count - 1) current_selection = count - 1; }
+        else if (key == NERO_UI_KEY_ENTER) break;
     }
-    if (raw_mode) {
-        set_mouse_reporting(0);
-        disable_raw_mode();
-    }
-    if (!input_ok) {
-        printf("[!] Port selection aborted (input ended).\n");
-        return -1;
-    }
+    if (raw_mode) { set_mouse_reporting(0); disable_raw_mode(); }
+    if (!input_ok) { printf("[!] Port selection aborted (input ended).\n"); return -1; }
     return open_ports[current_selection];
 }
 
-int select_port_menu(int *open_ports, int count)
-{
+int select_port_menu(int *open_ports, int count) {
     nero_operation_ui ui = {0};
-    nero_operation_begin(
-        &ui,
-        "PORT SELECTION",
-        "Choose an open port",
-        "Esc · Back"
-    );
+    nero_operation_begin(&ui, "PORT SELECTION", "Choose an open port", "Esc · Back");
     int result = select_port_menu_in_ui(open_ports, count, &ui);
     nero_operation_end(&ui);
     return result;
 }
 
-// Thread args struct
-typedef struct {
-    int start_port;
-    int end_port;
-} thread_args;
-
-// Thread function for scanning with non-blocking connect + select
-void *scan_ports_thread(void *args) {
-    thread_args *t_args = (thread_args *)args;
+/* --- Tek port probe (yalnızca iOS öncelikli portlar için kullanılır) --- */
+static probe_status probe_single_port(const char *ip, int port, int timeout_ms) {
     struct sockaddr_in addr;
-    int sockfd;
-
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    if (inet_pton(AF_INET, target_ip_global, &addr.sin_addr) != 1) {
-        // Invalid IP, just exit
-        pthread_exit(NULL);
+    addr.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return PROBE_ERROR;
+
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) return PROBE_ERROR;
+
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags < 0) { close(sockfd); return PROBE_ERROR; }
+    if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) { close(sockfd); return PROBE_ERROR; }
+
+    int ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret == 0) { close(sockfd); return PROBE_OPEN; }
+    if (ret < 0) {
+        if (errno == ECONNREFUSED) { close(sockfd); return PROBE_CLOSED; }
+        if (errno != EINPROGRESS) { close(sockfd); return PROBE_ERROR; }
     }
 
-    for (int port = t_args->start_port; port <= t_args->end_port; port++) {
+    /* poll() yerine select() kullanmamanın nedeni: fd değeri FD_SETSIZE'ı
+     * aşarsa select/FD_SET tanımsız davranıştır. poll bu sınırdan muaftır. */
+    struct pollfd pfd = { sockfd, POLLOUT, 0 };
+    int pret;
+    do { pret = poll(&pfd, 1, timeout_ms); } while (pret < 0 && errno == EINTR);
+    if (pret < 0) { close(sockfd); return PROBE_ERROR; }
+    if (pret == 0) { close(sockfd); return PROBE_FILTERED; }
+
+    int so_error = 0;
+    socklen_t len = sizeof(so_error);
+    if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) != 0) {
+        close(sockfd);
+        return PROBE_ERROR;
+    }
+    close(sockfd);
+
+    if (so_error == 0)           return PROBE_OPEN;
+    if (so_error == ECONNREFUSED) return PROBE_CLOSED;
+    if (so_error == ETIMEDOUT)    return PROBE_FILTERED;
+    return PROBE_ERROR;
+}
+
+/* --- Idempotent sonuç ekleme --- */
+static void add_open_result(int port) {
+    pthread_mutex_lock(&results_mutex);
+    for (int i = 0; i < result_count; ++i) {
+        if (results_list[i].port == port) {
+            results_list[i].filtered = 0;
+            pthread_mutex_unlock(&results_mutex);
+            return;
+        }
+    }
+    port_result *tmp = realloc(results_list, (result_count + 1) * sizeof(port_result));
+    if (!tmp) {
+        scan_alloc_failed = 1;
+        pthread_mutex_unlock(&results_mutex);
+        return;
+    }
+    results_list = tmp;
+    results_list[result_count].port = port;
+    results_list[result_count].filtered = 0;
+    result_count++;
+    pthread_mutex_unlock(&results_mutex);
+}
+
+static void add_filtered_candidate(int port) {
+    pthread_mutex_lock(&results_mutex);
+    for (int i = 0; i < result_count; ++i) {
+        if (results_list[i].port == port) {
+            pthread_mutex_unlock(&results_mutex);
+            return;
+        }
+    }
+    port_result *tmp = realloc(results_list, (result_count + 1) * sizeof(port_result));
+    if (!tmp) {
+        scan_alloc_failed = 1;
+        pthread_mutex_unlock(&results_mutex);
+        return;
+    }
+    results_list = tmp;
+    results_list[result_count].port = port;
+    results_list[result_count].filtered = 1;
+    result_count++;
+    pthread_mutex_unlock(&results_mutex);
+}
+
+/* --- Batch select ile eşzamanlı port tarama ---
+ *
+ * Her çağrıda `ports[]` dizisindeki portlar için bir soket açar,
+ * hepsine non-blocking connect() gönderir, sonra tek bir select()
+ * ile yanıtları bekler. Bu sayede aynı anda yüzlerce port probe
+ * edilir; tek tek 1500 ms beklemek yerine toplu bekleriz. */
+static void scan_ports_batch(
+    const char *ip,
+    const int *ports,
+    int count,
+    int timeout_ms
+) {
+    if (count > FAST_BATCH_SIZE) count = FAST_BATCH_SIZE;
+    if (count <= 0) return;
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
+
+    struct pollfd pfds[FAST_BATCH_SIZE];
+    int slot_port[FAST_BATCH_SIZE];
+    int nfds = 0;
+
+    /* 1. Soketleri aç ve non-blocking connect() başlat. */
+    for (int i = 0; i < count; ++i) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) {
+            /* Tanımlayıcı tükendi: portu sessizce "kapalı" saymak yerine
+             * belirsiz (filtered) olarak işaretle; derin tarama yeniden dener. */
+            if (errno == EMFILE || errno == ENFILE)
+                add_filtered_candidate(ports[i]);
+            continue;
+        }
+
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+            close(fd);
+            continue;
+        }
+
+        addr.sin_port = htons((uint16_t)ports[i]);
+        atomic_store_explicit(&latest_probe_port, ports[i], memory_order_relaxed);
+
+        int ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+        if (ret == 0) {
+            /* Anında açık */
+            add_open_result(ports[i]);
+            close(fd);
+            continue;
+        }
+        if (ret < 0 && errno == ECONNREFUSED) {
+            /* Anında kapalı — listeye ekleme */
+            close(fd);
+            continue;
+        }
+        if (ret < 0 && errno != EINPROGRESS) {
+            close(fd);
+            continue;
+        }
+
+        pfds[nfds].fd = fd;
+        pfds[nfds].events = POLLOUT;
+        pfds[nfds].revents = 0;
+        slot_port[nfds] = ports[i];
+        nfds++;
+    }
+
+    if (nfds == 0) return;
+
+    /* 2. Bekleyen connect'leri son-tarihe kadar poll() ile çöz. poll()'un
+     * FD_SETSIZE sınırı yoktur; binlerce eşzamanlı tanımlayıcı güvenlidir —
+     * select()'te değeri FD_SETSIZE'ı aşan bir tanımlayıcı fd_set'i bozar.
+     *
+     * ÖNEMLİ: Tek bir poll() geçişiyle yetinilemez. Kapalı portlar connect
+     * sonrası neredeyse anında POLLERR verir; poll onlar hazır olur olmaz
+     * döner. O an hâlâ bağlanmakta olan açık bir portun revents'i 0 olabilir.
+     * Tek geçiş bunu yanlışlıkla "zaman aşımı" sayıp açık portu kaçırırdı.
+     * Bu yüzden çözülen soketleri (fd = -1 ile) poll'dan çıkarıp kalanları
+     * gerçek zaman aşımına kadar yeniden bekleriz. */
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    int remaining = nfds;
+
+    while (remaining > 0) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed_ms = (now.tv_sec - start.tv_sec) * 1000L
+                        + (now.tv_nsec - start.tv_nsec) / 1000000L;
+        int wait_ms = timeout_ms - (int)elapsed_ms;
+        if (wait_ms <= 0) break;
+
+        int ready;
+        do {
+            ready = poll(pfds, (nfds_t)nfds, wait_ms);
+        } while (ready < 0 && errno == EINTR);
+        if (ready <= 0) break; /* hata veya zaman aşımı → kalanlar filtered */
+
+        for (int s = 0; s < nfds && ready > 0; ++s) {
+            if (pfds[s].fd < 0 || pfds[s].revents == 0) continue;
+            ready--;
+            int so_error = 0;
+            socklen_t len = sizeof(so_error);
+            if (getsockopt(pfds[s].fd, SOL_SOCKET, SO_ERROR, &so_error, &len) == 0) {
+                if (so_error == 0)
+                    add_open_result(slot_port[s]);
+                else if (so_error != ECONNREFUSED)
+                    /* ETIMEDOUT, EHOSTUNREACH vb. → filtrelenmiş aday */
+                    add_filtered_candidate(slot_port[s]);
+                /* ECONNREFUSED → kapalı → listeye ekleme */
+            } else {
+                add_filtered_candidate(slot_port[s]);
+            }
+            close(pfds[s].fd);
+            pfds[s].fd = -1; /* poll bundan sonra yok sayar (revents=0) */
+            remaining--;
+        }
+    }
+
+    /* 3. Zaman aşımına kadar yanıt vermeyen soketler → sessiz → filtered. */
+    for (int s = 0; s < nfds; ++s) {
+        if (pfds[s].fd < 0) continue;
+        add_filtered_candidate(slot_port[s]);
+        close(pfds[s].fd);
+    }
+}
+
+/* --- Fast batch thread --- */
+void *fast_scan_thread(void *args) {
+    batch_thread_args *t = args;
+    int ports[FAST_BATCH_SIZE];
+
+    for (int base = t->start_port; base <= t->end_port; base += FAST_BATCH_SIZE) {
         if (portscanner_interrupt_requested ||
             atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
             break;
 
-        /* Probe one port inside a do/while so every exit path falls through to
-         * the counter bump below. The count therefore advances when a probe
-         * FINISHES (including its connect-timeout wait), not when it starts, so
-         * the percentage reflects real progress instead of racing ahead. */
-        do {
-            sockfd = socket(AF_INET, SOCK_STREAM, 0);
-            if (sockfd < 0)
-                break;
+        int count = 0;
+        int end = base + FAST_BATCH_SIZE - 1;
+        if (end > t->end_port) end = t->end_port;
 
-            addr.sin_port = htons(port);
+        for (int port = base; port <= end; ++port)
+            ports[count++] = port;
 
-            // Make the socket non-blocking
-            int flags = fcntl(sockfd, F_GETFL, 0);
-            if (flags < 0) { close(sockfd); break; }
-            if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) { close(sockfd); break; }
-
-            atomic_store_explicit(&latest_probe_port, port, memory_order_relaxed);
-            int ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
-            if (ret == 0) {
-                // Connected immediately
-                pthread_mutex_lock(&ports_mutex);
-                int *tmp = realloc(open_ports_list, (port_counter + 1) * sizeof(int));
-                if (!tmp) {
-                    scan_alloc_failed = 1;
-                    pthread_mutex_unlock(&ports_mutex);
-                    close(sockfd);
-                    pthread_exit(NULL);
-                }
-                open_ports_list = tmp;
-                open_ports_list[port_counter++] = port;
-                pthread_mutex_unlock(&ports_mutex);
-                close(sockfd);
-                break;
-            } else if (ret < 0 && errno != EINPROGRESS) {
-                // Immediate error (e.g., connection refused)
-                close(sockfd);
-                break;
-            }
-
-            // connect returned EINPROGRESS -> wait with select
-            fd_set wfds;
-            FD_ZERO(&wfds);
-            FD_SET(sockfd, &wfds);
-            struct timeval tv;
-            tv.tv_sec = SCAN_CONNECT_TIMEOUT_MS / 1000;
-            tv.tv_usec = (SCAN_CONNECT_TIMEOUT_MS % 1000) * 1000;
-
-            int sel = select(sockfd + 1, NULL, &wfds, NULL, &tv);
-            if (sel > 0 && FD_ISSET(sockfd, &wfds)) {
-                // Check for errors
-                int so_error = 0;
-                socklen_t len = sizeof(so_error);
-                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) < 0) {
-                    close(sockfd);
-                    break;
-                }
-                if (so_error == 0) {
-                    // Connection successful
-                    pthread_mutex_lock(&ports_mutex);
-                    int *tmp = realloc(open_ports_list, (port_counter + 1) * sizeof(int));
-                    if (!tmp) {
-                        scan_alloc_failed = 1;
-                        pthread_mutex_unlock(&ports_mutex);
-                        close(sockfd);
-                        pthread_exit(NULL);
-                    }
-                    open_ports_list = tmp;
-                    open_ports_list[port_counter++] = port;
-                    pthread_mutex_unlock(&ports_mutex);
-                }
-            }
-            // Close the socket
-            close(sockfd);
-        } while (0);
-
-        atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
+        scan_ports_batch(target_ip_global, ports, count, t->timeout_ms);
+        atomic_fetch_add_explicit(&ports_scanned, count, memory_order_relaxed);
     }
     pthread_exit(NULL);
 }
 
-// Function to clear lines
-void clear_lines(int n) {
-    if (n <= 0) return;
-    printf("\x1b[%dA", n);
-    for (int i = 0; i < n; i++) {
-        printf("\x1b[2K");
-        printf("\x1b[1B");
+/* --- Deep batch thread (yalnızca candidates üzerinde) --- */
+void *deep_scan_thread(void *args) {
+    deep_batch_args *t = args;
+    int ports[DEEP_BATCH_SIZE];
+
+    for (int base = t->start_idx; base < t->end_idx; base += DEEP_BATCH_SIZE) {
+        if (portscanner_interrupt_requested ||
+            atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
+            break;
+
+        int end = base + DEEP_BATCH_SIZE;
+        if (end > t->end_idx) end = t->end_idx;
+
+        int count = 0;
+        for (int i = base; i < end && i < candidate_count; ++i)
+            ports[count++] = candidates[i];
+
+        if (count == 0) continue;
+
+        scan_ports_batch(target_ip_global, ports, count, t->timeout_ms);
+        atomic_fetch_add_explicit(&ports_scanned, count, memory_order_relaxed);
     }
-    printf("\x1b[%dA", n);
-    fflush(stdout);
+    pthread_exit(NULL);
 }
 
-/* Session controller: initialize, discover, join, select, then release.
- * Returns a positive selected port, zero for an empty result, -2 for user
- * cancellation or -1 for failure. Partial scans never become valid results. */
+/* --- Ana kontrolcü --- */
 int portscanner(const char *target_ip) {
     target_ip_global = target_ip;
-    pthread_t threads[NUM_THREADS];
-    thread_args t_args[NUM_THREADS];
-
-    // Initial setup
-    open_ports_list = NULL;
-    port_counter = 0;
+    results_list = NULL;
+    result_count = 0;
+    candidates = NULL;
+    candidate_count = 0;
     scan_alloc_failed = 0;
     portscanner_interrupt_requested = 0;
     atomic_init(&scan_cancel_requested, 0);
     atomic_init(&latest_probe_port, 0);
     atomic_init(&ports_scanned, 0);
 
-    if (pthread_mutex_init(&ports_mutex, NULL) != 0) {
+    if (pthread_mutex_init(&results_mutex, NULL) != 0) {
         fprintf(stderr, "[-] Failed to initialize mutex.\n");
         return -1;
     }
 
-    int ports_per_thread = SCAN_TOTAL_PORTS / NUM_THREADS;
-    if (ports_per_thread == 0) ports_per_thread = SCAN_TOTAL_PORTS;
+    raise_fd_limit();
 
     nero_operation_ui ui = {0};
-    char operation_detail[96];
-    snprintf(
-        operation_detail,
-        sizeof(operation_detail),
-        "%s",
-        target_ip
-    );
-    nero_operation_begin(
-        &ui,
-        "Port scan",
-        operation_detail,
-        "Esc · Back"
-    );
+    char detail[96];
+    snprintf(detail, sizeof(detail), "%s", target_ip);
+    nero_operation_begin(&ui, "Port scan", detail, "Esc · Back");
 
-    int threads_created = 0;
-    for (int i = 0; i < NUM_THREADS; i++) {
-        t_args[i].start_port = (i * ports_per_thread) + 1;
-        if (i == NUM_THREADS - 1) t_args[i].end_port = SCAN_TOTAL_PORTS;
-        else t_args[i].end_port = (i + 1) * ports_per_thread;
-
-        if (pthread_create(&threads[i], NULL, scan_ports_thread, &t_args[i]) != 0) {
-            fprintf(stderr, "[-] Failed to create thread %d.\n", i);
-            break;
+    /* Aşama 0: iOS öncelikli portları tek tek dene (yalnızca 3 port) */
+    for (size_t i = 0; i < IOS_PRIORITY_COUNT; ++i) {
+        int port = IOS_PRIORITY_PORTS[i];
+        probe_status status = probe_single_port(target_ip, port, FAST_TIMEOUT_MS);
+        if (status == PROBE_OPEN) {
+            add_open_result(port);
+        } else if (status == PROBE_FILTERED) {
+            add_filtered_candidate(port);
         }
-        threads_created++;
+        atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
     }
 
-    scan_animation_state animation = {
-        .target_ip = target_ip,
-        .animate = scan_motion_enabled()
-    };
+    /* Aşama 1: Event-driven batch hızlı keşif */
+    pthread_t fast_threads[FAST_BATCH_THREADS];
+    batch_thread_args fast_args[FAST_BATCH_THREADS];
+    int ports_per_fast = SCAN_TOTAL_PORTS / FAST_BATCH_THREADS;
+    if (ports_per_fast == 0) ports_per_fast = SCAN_TOTAL_PORTS;
+
+    for (int i = 0; i < FAST_BATCH_THREADS; ++i) {
+        fast_args[i].start_port = (i * ports_per_fast) + 1;
+        fast_args[i].end_port = (i == FAST_BATCH_THREADS - 1)
+            ? SCAN_TOTAL_PORTS
+            : (i + 1) * ports_per_fast;
+        fast_args[i].timeout_ms = FAST_TIMEOUT_MS;
+        if (pthread_create(&fast_threads[i], NULL, fast_scan_thread, &fast_args[i]) != 0) {
+            fprintf(stderr, "[-] Failed to create fast thread %d.\n", i);
+            break;
+        }
+    }
+
+    scan_animation_state animation = { .target_ip = target_ip, .animate = scan_motion_enabled() };
     atomic_init(&animation.stop, 0);
     pthread_t animation_thread;
     int animation_started = 0;
     int discovery_raw = 0;
 
     if (isatty(STDIN_FILENO)) {
-        /* Enter raw mode before the worker starts reading keys, otherwise
-         * Esc/q cancellation sits in the terminal's line buffer until Enter
-         * and the scan cannot be interrupted during discovery. */
         discovery_raw = (enable_raw_mode() == 0);
-        if (discovery_raw)
-            set_mouse_reporting(1);
-        animation_started = pthread_create(
-            &animation_thread,
-            NULL,
-            scan_animation_worker,
-            &animation
-        ) == 0;
+        if (discovery_raw) set_mouse_reporting(1);
+        animation_started = pthread_create(&animation_thread, NULL, scan_animation_worker, &animation) == 0;
     }
-    /* When the worker runs it is the sole discovery writer (animated or not);
-     * only the non-interactive fallback uses the static loader, so the two
-     * never draw to the terminal at the same time. */
-    if (!animation_started)
-        nero_operation_loader("Scanning", target_ip, 6);
+    if (!animation_started) nero_operation_loader("Scanning", target_ip, 6);
 
-    /* Join only successfully created workers. Their socket/result accesses
-     * must end before the mutex or shared result buffer can be released. */
-    for (int i = 0; i < threads_created; i++) {
-        pthread_join(threads[i], NULL);
-    }
+    for (int i = 0; i < FAST_BATCH_THREADS; ++i) pthread_join(fast_threads[i], NULL);
 
-    if (animation_started) {
-        atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
-        pthread_join(animation_thread, NULL);
-    }
-    /* Restore cooked mode before the selection menu re-enters raw mode, so the
-     * menu saves the user's real terminal state rather than our raw one. */
-    if (discovery_raw) {
-        set_mouse_reporting(0);
-        disable_raw_mode();
-    }
-    if (portscanner_interrupt_requested ||
-        atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed)) {
-        pthread_mutex_destroy(&ports_mutex);
-        free(open_ports_list);
-        open_ports_list = NULL;
-        port_counter = 0;
+    /* İptal edildiyse önce animasyon/girdi thread'ini durdur ki temizlik
+     * sırasında serbest bırakılan belleğe erişmesin. */
+    if (portscanner_interrupt_requested || atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed)) {
+        if (animation_started) {
+            atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
+            pthread_join(animation_thread, NULL);
+        }
+        if (discovery_raw) { set_mouse_reporting(0); disable_raw_mode(); }
+        pthread_mutex_destroy(&results_mutex);
+        free(results_list);
+        results_list = NULL;
+        result_count = 0;
+        free(candidates);
+        candidates = NULL;
+        candidate_count = 0;
         nero_operation_end(&ui);
         puts("Scan cancelled. Returned to terminal.");
         return PORTSCANNER_CANCELLED;
     }
 
-    pthread_mutex_destroy(&ports_mutex);
+    /* Candidates dizisini oluştur: yalnızca filtrelenmiş portlar.
+     * Animasyon thread'i candidate oluşturma sırasında results_list'i okur;
+     * tutarlı bir anlık görüntü için kilit altında topla. */
+    pthread_mutex_lock(&results_mutex);
+    int filtered_total = 0;
+    for (int i = 0; i < result_count; ++i)
+        if (results_list[i].filtered) filtered_total++;
 
-    if (threads_created != NUM_THREADS) {
+    if (filtered_total > 0 && filtered_total <= DEEP_SCAN_MAX_CANDIDATES) {
+        candidates = malloc(filtered_total * sizeof(int));
+        if (candidates) {
+            int idx = 0;
+            for (int i = 0; i < result_count; ++i) {
+                if (results_list[i].filtered)
+                    candidates[idx++] = results_list[i].port;
+            }
+            candidate_count = filtered_total;
+        }
+    }
+    pthread_mutex_unlock(&results_mutex);
+
+    /* Aşama 2: Event-driven batch derin tarama. Animasyon/girdi thread'i
+     * çalışmaya devam eder; böylece ekran donmaz ve kullanıcı bu aşamada da
+     * iptal edebilir. İlerleme çubuğu hızlı aşamada doldu; derin aşamada
+     * latest_probe_port canlı etkinliği gösterir. */
+    if (candidate_count > 0 && candidates) {
+        pthread_t deep_threads[DEEP_BATCH_THREADS];
+        deep_batch_args deep_args[DEEP_BATCH_THREADS];
+        int created = 0;
+
+        for (int i = 0; i < DEEP_BATCH_THREADS; ++i) {
+            deep_args[i].start_idx = (i * candidate_count) / DEEP_BATCH_THREADS;
+            deep_args[i].end_idx   = ((i + 1) * candidate_count) / DEEP_BATCH_THREADS;
+            deep_args[i].timeout_ms = DEEP_TIMEOUT_MS;
+            if (pthread_create(&deep_threads[i], NULL, deep_scan_thread, &deep_args[i]) != 0)
+                break;
+            created++;
+        }
+        for (int i = 0; i < created; ++i) pthread_join(deep_threads[i], NULL);
+
+        pthread_mutex_lock(&results_mutex);
+        free(candidates);
+        candidates = NULL;
+        candidate_count = 0;
+        pthread_mutex_unlock(&results_mutex);
+    }
+
+    /* Her iki tarama aşaması bitti: animasyon/girdi thread'ini şimdi durdur. */
+    if (animation_started) {
+        atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
+        pthread_join(animation_thread, NULL);
+    }
+    if (discovery_raw) { set_mouse_reporting(0); disable_raw_mode(); }
+
+    pthread_mutex_destroy(&results_mutex);
+
+    /* Kullanıcı derin tarama sırasında iptal ettiyse menüyü atla. */
+    if (portscanner_interrupt_requested || atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed)) {
+        free(results_list);
+        results_list = NULL;
+        result_count = 0;
         nero_operation_end(&ui);
-        fprintf(stderr, "[-] Scan incomplete: only %d of %d workers started.\n",
-                threads_created, NUM_THREADS);
-        free(open_ports_list);
-        open_ports_list = NULL;
-        port_counter = 0;
-        return -1;
+        puts("Scan cancelled. Returned to terminal.");
+        return PORTSCANNER_CANCELLED;
     }
 
     if (scan_alloc_failed) {
         nero_operation_end(&ui);
         fprintf(stderr, "[-] Memory allocation failed during scan.\n");
-        free(open_ports_list);
-        open_ports_list = NULL;
-        port_counter = 0;
+        free(results_list);
+        results_list = NULL;
+        result_count = 0;
         return -1;
     }
 
-    char result_detail[64];
-    snprintf(
-        result_detail,
-        sizeof(result_detail),
-        "%d open port%s found",
-        port_counter,
-        port_counter == 1 ? "" : "s"
-    );
+    /* Menü için yalnızca açık portları topla */
+    int *open_ports = NULL;
+    int open_count = 0;
+    if (result_count > 0) {
+        open_ports = malloc(result_count * sizeof(int));
+        if (open_ports) {
+            for (int i = 0; i < result_count; ++i) {
+                if (!results_list[i].filtered)
+                    open_ports[open_count++] = results_list[i].port;
+            }
+        }
+    }
+
+    char result_detail[96];
+    if (filtered_total > 0) {
+        snprintf(result_detail, sizeof(result_detail),
+            "%d open, %d filtered (not shown)", open_count, filtered_total);
+    } else {
+        snprintf(result_detail, sizeof(result_detail),
+            "%d open port%s found", open_count, open_count == 1 ? "" : "s");
+    }
     nero_operation_status("32", "Scan complete", result_detail);
 
-    int selected_port = select_port_menu_in_ui(open_ports_list, port_counter, &ui);
-    free(open_ports_list);
-    open_ports_list = NULL;
+    int selected_port = select_port_menu_in_ui(open_ports, open_count, &ui);
+    free(open_ports);
+    free(results_list);
+    results_list = NULL;
     nero_operation_end(&ui);
     if (selected_port == PORTSCANNER_CANCELLED)
         puts("Port selection cancelled. Returned to terminal.");

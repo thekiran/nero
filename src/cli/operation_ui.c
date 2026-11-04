@@ -24,9 +24,49 @@ static nero_operation_ui *current_ui;
 static int discovery_scroll = 0;
 static int discovery_follow = 1;
 
+/* The scrollbar sits directly beside the port table (whose widest line,
+ * "  PORT     PROTOCOL     STATUS", ends at column 30) instead of at the far
+ * screen edge, so the eye does not have to travel across an empty row. */
+#define SCROLLBAR_COLUMN 33
+
 static void position(int row, int column)
 {
     printf("\033[%d;%dH", row, column);
+}
+
+/* Case-insensitive "contains UTF-8/UTF8" without non-C11 strcasestr. */
+static int names_utf8(const char *value)
+{
+    for (const char *p = value; *p; ++p) {
+        if ((p[0] == 'u' || p[0] == 'U') && (p[1] == 't' || p[1] == 'T') &&
+            (p[2] == 'f' || p[2] == 'F')) {
+            const char *q = p + 3;
+            if (*q == '-' || *q == '_') ++q;
+            if (q[0] == '8') return 1;
+        }
+    }
+    return 0;
+}
+
+/* Block and box glyphs are multi-byte UTF-8. On a non-UTF-8 locale (LC_ALL=C,
+ * ISO-8859-x, some serial/legacy consoles) they print as several garbage
+ * cells and break every column calculation, so fall back to plain ASCII.
+ * NERO_ASCII forces the fallback, e.g. for CJK "ambiguous = wide" terminals
+ * where these glyphs occupy two cells. Unset locale assumes modern UTF-8. */
+static int glyphs_unicode(void)
+{
+    if (getenv("NERO_ASCII") != NULL) return 0;
+    const char *names[] = {"LC_ALL", "LC_CTYPE", "LANG"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        const char *value = getenv(names[i]);
+        if (value && value[0]) return names_utf8(value);
+    }
+    return 1;
+}
+
+static const char *glyph(const nero_operation_ui *ui, const char *utf8, const char *ascii)
+{
+    return ui && ui->unicode ? utf8 : ascii;
 }
 
 static void paint_layout(nero_operation_ui *ui)
@@ -41,7 +81,12 @@ static void paint_layout(nero_operation_ui *ui)
         return;
     }
     if (ui->color) fputs("\033[35m", stdout);
-    fputs(NERO_ASCII_LOGO, stdout);
+    if (ui->unicode) {
+        fputs(NERO_ASCII_LOGO, stdout);
+    } else {
+        position(6, 3);
+        fputs("N E R O", stdout);
+    }
     if (ui->color) fputs("\033[0m", stdout);
     position(14, 3);
     if (ui->color) fputs("\033[1m", stdout);
@@ -95,7 +140,10 @@ static void restore_operation_surface(void)
 {
     if (!alternate_screen_active)
         return;
-    fputs("\033[0m\033[?1049l", stdout);
+    /* Also turn off mouse reporting here so any exit path (including the atexit
+     * fallback after an error) never leaves the terminal emitting mouse codes
+     * into the user's shell. Disabling an already-off mode is a harmless no-op. */
+    fputs("\033[0m\033[?1006l\033[?1000l\033[?1049l", stdout);
     fflush(stdout);
     alternate_screen_active = 0;
     fputs("\033[?25h", stdout);
@@ -138,6 +186,7 @@ void nero_operation_begin(
     ui->title = title;
     ui->detail = detail;
     ui->controls = controls;
+    ui->unicode = glyphs_unicode();
     ui->rows = ui->columns = ui->scroll_offset = 0;
     discovery_scroll = 0;
     discovery_follow = 1;
@@ -157,7 +206,7 @@ void nero_operation_begin(
     }
 
     /* Redirected output is a plain transcript, with no cursor or color codes. */
-    fputs(NERO_ASCII_LOGO, stdout);
+    fputs(ui->unicode ? NERO_ASCII_LOGO : "  N E R O\n", stdout);
     putchar('\n');
 
     /* Keep operation metadata light so the shared logo remains the heading. */
@@ -189,7 +238,7 @@ void nero_operation_loader(const char *label, const char *detail, unsigned frame
     for (unsigned index = 0; index < OPERATION_DOT_COUNT; ++index) {
         int color = current_ui && current_ui->color;
         if (color) fputs(index == frame ? "\033[35m" : "\033[2m", stdout);
-        fputs(index == frame ? "●" : "·", stdout);
+        fputs(index == frame ? glyph(current_ui, "●", "o") : glyph(current_ui, "·", "."), stdout);
         if (color) fputs("\033[0m", stdout);
     }
     fflush(stdout);
@@ -248,48 +297,75 @@ static void port_table_row(nero_operation_ui *ui, int row, int port, int selecte
     if (ui->color) fputs("\033[0m", stdout);
 }
 
-/* Vertical scrollbar in the right margin: a dim track with an accent thumb,
- * shown only when the list is taller than its viewport. first_row is the top
- * list row; visible is how many rows fit; offset is the current top index. */
+/* Vertical scrollbar directly beside the port table: a dim track with an
+ * accent thumb, shown only when the list is taller than its viewport.
+ * first_row is the top list row; visible is how many rows fit; offset is the
+ * current top index. */
 static void draw_scrollbar(nero_operation_ui *ui, int first_row, int visible,
                            int count, int offset)
 {
     if (!ui->interactive || ui->compact || visible <= 0 || count <= visible)
         return;
-    int bar_col = ui->columns - 2;
-    int thumb = (int)((long)visible * visible / count);
+    int bar_col = SCROLLBAR_COLUMN;
+    if (bar_col > ui->columns - 1) bar_col = ui->columns - 1;
+    int max_off = count - visible;
+    if (offset < 0) offset = 0;
+    if (offset > max_off) offset = max_off;
+
+    /* Thumb length is proportional to the visible share (rounded, >= 1). */
+    int thumb = (int)(((long)visible * visible + count / 2) / count);
     if (thumb < 1) thumb = 1;
     if (thumb > visible) thumb = visible;
-    int max_off = count - visible;
-    int thumb_pos = (int)((long)offset * (visible - thumb) / max_off);
-    if (thumb_pos < 0) thumb_pos = 0;
-    if (thumb_pos > visible - thumb) thumb_pos = visible - thumb;
+    int track = visible - thumb;
+    int thumb_pos = track > 0 ? (int)(((long)offset * track + max_off / 2) / max_off) : 0;
+    /* The thumb touches an end only when the list really is at that end, so
+     * "there is more above/below" is never hidden by rounding. */
+    if (track > 1) {
+        if (offset > 0 && thumb_pos == 0) thumb_pos = 1;
+        if (offset < max_off && thumb_pos == track) thumb_pos = track - 1;
+    }
+
     for (int r = 0; r < visible; ++r) {
         int on = (r >= thumb_pos && r < thumb_pos + thumb);
         position(first_row + r, bar_col);
         if (ui->color) fputs(on ? "\033[35m" : "\033[2m", stdout);
-        fputs(on ? "█" : "│", stdout);
+        fputs(on ? glyph(ui, "█", "#") : glyph(ui, "│", "|"), stdout);
         if (ui->color) fputs("\033[0m", stdout);
     }
 }
 
 void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, int selected)
 {
-    ui->controls = "↑↓ · Move   Enter · Select   Esc · Back";
+    ui->controls = ui->unicode
+        ? "↑↓ PgUp PgDn · Move   Enter · Select   Esc · Back"
+        : "Up/Down PgUp/PgDn: Move   Enter: Select   Esc: Back";
     if (!body(ui)) return;
     if (ui->interactive) {
         /* Discovery parked a progress bar on the last row and the controls one
          * row above it; clear both before the selection menu redraws. */
         position(ui->rows - 1, 1); fputs("\033[2K", stdout);
         position(ui->rows, 1); fputs("\033[2K", stdout);
+        /* Clearing the footer moved the cursor to the last row; without this
+         * the "Choose a port" heading was printed there and then overwritten
+         * by the controls, leaving a stray "Ch" in the bottom-left corner. */
+        position(ui->content_top, 3);
     }
+    if (count < 0) count = 0;
+    if (selected >= count) selected = count - 1;
+    if (selected < 0) selected = 0;
     int visible = ui->interactive ? ui->content_bottom - ui->content_top - 2 : count;
+    if (visible < 1) visible = 1;
     if (selected < ui->scroll_offset) ui->scroll_offset = selected;
     if (selected >= ui->scroll_offset + visible) ui->scroll_offset = selected - visible + 1;
+    /* After a resize to a taller window, pull the window back down so rows are
+     * never left empty below the last item while items above stay hidden. */
+    int max_off = count > visible ? count - visible : 0;
+    if (ui->scroll_offset > max_off) ui->scroll_offset = max_off;
+    if (ui->scroll_offset < 0) ui->scroll_offset = 0;
     if (ui->color) fputs("\033[1m", stdout);
     printf("Choose a port");
     if (ui->color) fputs("\033[0;2m", stdout);
-    printf("     %d / %d", selected + 1, count);
+    printf("     %d / %d", count ? selected + 1 : 0, count);
     if (ui->color) fputs("\033[0m", stdout);
     port_table_header(ui, ui->content_top + 2);
     for (int index = 0; index < visible && ui->scroll_offset + index < count; ++index) {
@@ -299,7 +375,7 @@ void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, in
     draw_scrollbar(ui, ui->content_top + 3, visible, count, ui->scroll_offset);
     if (ui->interactive) {
         position(ui->rows, 3);
-        printf("%s", ui->controls);
+        printf("%.*s", ui->columns - 4, ui->controls);
     }
     fflush(stdout);
 }
@@ -307,7 +383,7 @@ void nero_operation_ports(nero_operation_ui *ui, const int *ports, int count, in
 void nero_operation_frame(nero_operation_ui *ui, const char *frame, unsigned attempt)
 {
     if (!body(ui)) return;
-    if (ui->color && getenv("NERO_REDUCE_MOTION") == NULL)
+    if (ui->color && ui->unicode && getenv("NERO_REDUCE_MOTION") == NULL)
         fputs(frame, stdout); /* Existing frames occupy three bounded body rows. */
     else
         printf("Connection test %u/4", attempt);
@@ -331,15 +407,27 @@ static void draw_progress_bar(nero_operation_ui *ui, int permille)
     int bar_cells = usable - suffix_len;
     if (bar_cells < 1) return;               /* too narrow for a meaningful bar */
     int filled = (int)((long)bar_cells * permille / 1000);
+    const char *full = glyph(ui, "█", "#");
+    const char *empty = glyph(ui, "░", "-");
 
     position(ui->rows, 1);
     fputs("\033[2K", stdout);
     if (ui->color) fputs("\033[35m", stdout);
-    for (int cell = 0; cell < filled; ++cell) fputs("█", stdout);
-    if (ui->color) fputs("\033[2m", stdout);
-    for (int cell = filled; cell < bar_cells; ++cell) fputs("░", stdout);
+    for (int cell = 0; cell < filled; ++cell) fputs(full, stdout);
+    if (ui->color) fputs("\033[0;2m", stdout);
+    for (int cell = filled; cell < bar_cells; ++cell) fputs(empty, stdout);
     if (ui->color) fputs("\033[0m", stdout);
     fputs(suffix, stdout);
+}
+
+/* Convert line/page/edge units (see NERO_UI_SCROLL_*) into list lines. */
+static long scroll_lines(int delta, int visible)
+{
+    if (delta >= NERO_UI_SCROLL_EDGE / 2 || delta <= -NERO_UI_SCROLL_EDGE / 2)
+        return delta > 0 ? 0x7fffffffL : -0x7fffffffL;
+    long pages = delta / NERO_UI_SCROLL_PAGE;
+    long lines = delta % NERO_UI_SCROLL_PAGE;
+    return pages * (visible > 1 ? visible - 1 : 1) + lines;
 }
 
 void nero_operation_discovery(const int *ports, int count, int total,
@@ -349,6 +437,25 @@ void nero_operation_discovery(const int *ports, int count, int total,
     nero_operation_loader("Scanning", NULL, frame);
     nero_operation_ui *ui = current_ui;
     if (!ui || !ui->interactive || ui->compact) return;
+    if (count < 0) count = 0;
+
+    int visible = ui->content_bottom - ui->content_top - 3;
+    if (visible < 1) visible = 1;
+
+    /* Follow the newest results until the user scrolls up with the wheel,
+     * arrows or PgUp; resume following once they scroll back to the bottom
+     * (or press End). Clamp in long so huge page/edge deltas cannot overflow. */
+    int max_off = count > visible ? count - visible : 0;
+    if (scroll_delta != 0 && max_off > 0) {
+        long next = (long)discovery_scroll + scroll_lines(scroll_delta, visible);
+        if (discovery_follow) next = (long)max_off + scroll_lines(scroll_delta, visible);
+        if (next < 0) next = 0;
+        discovery_follow = next >= max_off;
+        discovery_scroll = next >= max_off ? max_off : (int)next;
+    }
+    if (discovery_follow || discovery_scroll > max_off)
+        discovery_scroll = max_off;
+
     position(ui->content_top + 1, 3);
     if (ui->color) fputs("\033[2m", stdout);
     if (latest_port > 0)
@@ -363,26 +470,15 @@ void nero_operation_discovery(const int *ports, int count, int total,
     printf("  %d", total);
     if (ui->color) fputs("\033[0;2m", stdout);
     printf(" open port%s", total == 1 ? "" : "s");
+    /* Where the viewport is, and whether it stopped following new results. */
+    if (max_off > 0) {
+        int last = discovery_scroll + visible;
+        if (last > count) last = count;
+        printf("   %d-%d / %d", discovery_scroll + 1, last, count);
+        if (!discovery_follow) fputs("   End: follow", stdout);
+    }
     if (ui->color) fputs("\033[0m", stdout);
     port_table_header(ui, ui->content_top + 3);
-
-    int visible = ui->content_bottom - ui->content_top - 3;
-    if (visible < 1) visible = 1;
-
-    /* Follow the newest results until the user scrolls up with the wheel or
-     * arrows; resume following once they scroll back to the bottom. */
-    int max_off = count > visible ? count - visible : 0;
-    if (scroll_delta != 0 && max_off > 0) {
-        discovery_follow = 0;
-        discovery_scroll += scroll_delta;
-        if (discovery_scroll < 0) discovery_scroll = 0;
-        if (discovery_scroll >= max_off) {
-            discovery_scroll = max_off;
-            discovery_follow = 1;
-        }
-    }
-    if (discovery_follow || discovery_scroll > max_off)
-        discovery_scroll = max_off;
 
     for (int index = 0; index < visible && discovery_scroll + index < count; ++index) {
         int item = discovery_scroll + index;
@@ -392,14 +488,28 @@ void nero_operation_discovery(const int *ports, int count, int total,
 
     /* Controls hint on the second-to-last row, with the full-width progress
      * bar pinned to the very bottom row, directly beneath it. */
+    const char *hint = ui->unicode ? "↑↓ PgUp PgDn · Scroll   Esc · Back"
+                                   : "Up/Down PgUp/PgDn: Scroll   Esc: Back";
     position(ui->rows - 1, 1);
     fputs("\033[2K", stdout);
     position(ui->rows - 1, 3);
     if (ui->color) fputs("\033[2m", stdout);
-    printf("%.*s", ui->columns - 4, ui->controls ? ui->controls : "Esc · Back");
+    printf("%.*s", ui->columns - 4, hint);
     if (ui->color) fputs("\033[0m", stdout);
     draw_progress_bar(ui, permille);
     fflush(stdout);
+}
+
+/* Mouse wheel buttons carry modifier bits (Shift 4, Meta 8, Ctrl 16) and
+ * some terminals set the motion bit (32); strip them before matching. */
+static nero_ui_key wheel_key(int button)
+{
+    if (button < 64 || button > 127) return NERO_UI_KEY_NONE;
+    switch (button & ~(4 | 8 | 16 | 32)) {
+    case 64: return NERO_UI_KEY_WHEEL_UP;
+    case 65: return NERO_UI_KEY_WHEEL_DOWN;
+    default: return NERO_UI_KEY_NONE; /* 66/67: horizontal wheel */
+    }
 }
 
 nero_ui_key nero_operation_read_key(int timeout_ms)
@@ -414,6 +524,9 @@ nero_ui_key nero_operation_read_key(int timeout_ms)
         return NERO_UI_KEY_CANCEL;
     if (byte == '\n' || byte == '\r')
         return NERO_UI_KEY_ENTER;
+    /* vi-style keys for terminals/multiplexers that swallow arrow keys. */
+    if (byte == 'k') return NERO_UI_KEY_UP;
+    if (byte == 'j') return NERO_UI_KEY_DOWN;
     if ((unsigned char)byte != 27)
         return NERO_UI_KEY_OTHER;
 
@@ -424,14 +537,15 @@ nero_ui_key nero_operation_read_key(int timeout_ms)
         return NERO_UI_KEY_CANCEL;
     if (status < 0 || (byte != '[' && byte != 'O'))
         return NERO_UI_KEY_CANCEL;
+    int ss3 = byte == 'O';
 
     /* Bound malformed sequences so terminal input cannot monopolize the UI.
-     * Capture parameter bytes up to the final control byte, then map arrows
-     * and SGR mouse-wheel reports (ESC [ < button ; col ; row M|m). */
-    char params[16];
+     * Capture parameter bytes up to the final control byte, then map arrows,
+     * paging keys and mouse-wheel reports. */
+    char params[24];
     int params_len = 0;
     char final = 0;
-    for (int index = 0; index < 20; ++index) {
+    for (int index = 0; index < 32; ++index) {
         status = read_byte(&byte, ESCAPE_CONTINUATION_MS);
         if (status <= 0)
             return NERO_UI_KEY_OTHER;
@@ -443,24 +557,51 @@ nero_ui_key nero_operation_read_key(int timeout_ms)
             params[params_len++] = byte;
     }
     params[params_len] = '\0';
+    if (final == 0)
+        return NERO_UI_KEY_OTHER;
 
-    /* SGR mouse report: wheel up reports button 64 and wheel down 65 on press
-     * (final 'M'). Ignore clicks, releases and motion so only the wheel scrolls
-     * the list. */
-    if (params_len > 0 && params[0] == '<') {
-        if (final == 'M') {
-            int button = atoi(params + 1);
-            if (button == 64)
-                return NERO_UI_KEY_WHEEL_UP;
-            if (button == 65)
-                return NERO_UI_KEY_WHEEL_DOWN;
-        }
-        return NERO_UI_KEY_NONE;
+    /* X10/normal mouse report (terminals without SGR 1006 support, e.g. older
+     * Terminal.app/PuTTY): ESC [ M followed by three raw bytes (button+32,
+     * col+32, row+32). Always consume all three so they never leak back as
+     * stray keystrokes. */
+    if (!ss3 && final == 'M' && params_len == 0) {
+        char mb;
+        if (read_byte(&mb, ESCAPE_CONTINUATION_MS) <= 0)
+            return NERO_UI_KEY_NONE;
+        int button = (int)(unsigned char)mb - 32;
+        if (read_byte(&mb, ESCAPE_CONTINUATION_MS) <= 0 ||
+            read_byte(&mb, ESCAPE_CONTINUATION_MS) <= 0)
+            return NERO_UI_KEY_NONE;
+        return wheel_key(button);
     }
 
-    if (final == 'A')
-        return NERO_UI_KEY_UP;
-    if (final == 'B')
-        return NERO_UI_KEY_DOWN;
-    return NERO_UI_KEY_OTHER;
+    /* SGR mouse report: ESC [ < button ; col ; row M|m. Only wheel presses
+     * scroll; clicks, releases and motion are ignored. */
+    if (params_len > 0 && params[0] == '<')
+        return final == 'M' ? wheel_key(atoi(params + 1)) : NERO_UI_KEY_NONE;
+
+    /* urxvt 1015 mouse report: ESC [ button+32 ; col ; row M. */
+    if (!ss3 && final == 'M' && params_len > 0)
+        return wheel_key(atoi(params) - 32);
+
+    if (ss3 && final == 'M')
+        return NERO_UI_KEY_ENTER; /* keypad Enter in application keypad mode */
+
+    switch (final) {
+    case 'A': return NERO_UI_KEY_UP;   /* CSI A, CSI 1;5A, SS3 A */
+    case 'B': return NERO_UI_KEY_DOWN;
+    case 'H': return NERO_UI_KEY_HOME; /* CSI H, SS3 H */
+    case 'F': return NERO_UI_KEY_END;  /* CSI F, SS3 F */
+    case '~':
+        /* VT220 editing keys; 1/7 Home and 4/8 End vary by terminal family. */
+        switch (atoi(params)) {
+        case 1: case 7: return NERO_UI_KEY_HOME;
+        case 4: case 8: return NERO_UI_KEY_END;
+        case 5: return NERO_UI_KEY_PAGE_UP;
+        case 6: return NERO_UI_KEY_PAGE_DOWN;
+        default: return NERO_UI_KEY_OTHER;
+        }
+    default:
+        return NERO_UI_KEY_OTHER;
+    }
 }
