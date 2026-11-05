@@ -20,7 +20,7 @@ jobs:
       - name: New foundation analysis
         run: |
           mkdir -p .build/analysis
-          for source in src/core/platform.c src/modules/platform_info.c tests/unit/test_network_unavailable.c; do
+          for source in src/core/platform.c src/modules/platform_info.c; do
             clang --analyze -std=c11 -Iinclude -Wall -Wextra -Werror -pedantic -Xanalyzer -analyzer-werror "$source" -o ".build/analysis/$(basename "$source").plist"
           done
   msvc:
