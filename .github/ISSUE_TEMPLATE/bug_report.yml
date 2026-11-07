@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible CLI, platform, installation or package defect.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "For sensitive security reports, use SECURITY.md. Do not include credentials, personal data or third-party targets."
+  - type: input
+    id: version
+    attributes:
+      label: Version or full commit SHA
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS version, CPU architecture and terminal
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use offline input or an isolated local fixture; do not generate network load.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs and toolchain
+      description: Include the install/build method, exit status and redacted error output.
+      render: text

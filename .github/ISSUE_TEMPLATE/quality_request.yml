@@ -1,0 +1,22 @@
+name: Quality improvement
+description: Propose reliability, testing, documentation or developer workflow work.
+title: "[Quality]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and affected users
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Observable acceptance criteria
+      description: Describe how a maintainer can verify completion and the affected platforms.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope and related roadmap issue
+      description: Explain tradeoffs and what would need separate work.
