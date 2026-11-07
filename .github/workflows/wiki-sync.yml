@@ -1,0 +1,114 @@
+name: Documentation and Wiki Sync
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+      - 'ROADMAP.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'docs/**'
+      - 'scripts/docs/**'
+      - 'tests/test_wiki_sync.py'
+      - '.github/workflows/wiki-sync.yml'
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'ROADMAP.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'docs/**'
+      - 'scripts/docs/**'
+      - 'tests/test_wiki_sync.py'
+      - '.github/workflows/wiki-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate documentation & Wiki generation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.12'
+
+      - name: Run documentation and link audit
+        run: python3 scripts/docs/wiki_sync.py --check
+
+      - name: Run Wiki sync unit tests
+        run: python3 -m unittest tests/test_wiki_sync.py
+
+      - name: Build Wiki artifacts
+        run: python3 scripts/docs/wiki_sync.py --build .build/wiki
+
+      - name: Archive generated Wiki pages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wiki-pages
+          path: .build/wiki/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to GitHub Wiki
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.12'
+
+      - name: Check publication secret availability
+        id: auth-check
+        env:
+          WIKI_TOKEN: ${{ secrets.WIKI_PUSH_TOKEN }}
+        run: |
+          if [ -z "$WIKI_TOKEN" ]; then
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Missing Secret::WIKI_PUSH_TOKEN secret is not configured in this repository. Wiki publication was skipped. Configure WIKI_PUSH_TOKEN with repository write scope to enable automated publishing."
+          else
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Clone and sync Wiki repository
+        if: steps.auth-check.outputs.has_token == 'true'
+        env:
+          WIKI_TOKEN: ${{ secrets.WIKI_PUSH_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WIKI_URL="https://x-access-token:${WIKI_TOKEN}@github.com/${REPO}.wiki.git"
+
+          echo "Cloning Wiki repository..."
+          if ! git clone "$WIKI_URL" wiki_repo 2>clone_err.log; then
+            echo "::warning title=Wiki Not Initialized::Failed to clone the Wiki Git repository. If the Wiki has never been opened in GitHub, navigate to https://github.com/${REPO}/wiki and click 'Create the first page' once to initialize it."
+            cat clone_err.log || true
+            exit 0
+          fi
+
+          echo "Synchronizing documentation to Wiki Git repository..."
+          python3 scripts/docs/wiki_sync.py --sync wiki_repo --push
