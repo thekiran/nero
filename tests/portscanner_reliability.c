@@ -33,12 +33,16 @@ static int fake_poll(struct pollfd *, nfds_t, int);
 static int fake_clock(clockid_t, struct timespec *);
 static int fake_sleep(const struct timespec *, struct timespec *);
 static int fake_thread_create(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+static int fake_mutex_init(pthread_mutex_t *, const pthread_mutexattr_t *);
 #ifndef _WIN32
 static int fake_fcntl(int, int, ...);
 #else
 static int fake_ioctl(SOCKET, long, u_long *);
 #endif
 /* Retain a non-macro path to the real pthread implementation. */
+static int real_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
+    return pthread_mutex_init(m,a);
+}
 static int real_thread_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *p) {
     return pthread_create(t, a, fn, p);
 }
@@ -55,6 +59,7 @@ static int real_thread_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)
 #define clock_gettime fake_clock
 #define nanosleep fake_sleep
 #define pthread_create fake_thread_create
+#define pthread_mutex_init fake_mutex_init
 #ifndef _WIN32
 #define fcntl fake_fcntl
 #else
@@ -62,6 +67,7 @@ static int real_thread_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)
 #endif
 #include "../src/modules/portscanner.c"
 #undef pthread_create
+#undef pthread_mutex_init
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while (0)
 #define FAKE_HANDLES 1024
@@ -77,6 +83,7 @@ static int attempts_seen[SCAN_TOTAL_PORTS + 1];
 static atomic_llong fake_time;
 static int scenario, failures, active_handles, peak_handles, thread_failure_after;
 static atomic_int thread_creates;
+static int mutex_init_failure;
 enum { CLOSED, TIMEOUT, DELAYED, RESOURCE, MIXED, CANCEL, POLL_FAILURE,
        GETSOCKOPT_FAILURE, INVALID_EVENT, PENDING_EVENT, NONBLOCK_FAILURE, ROUTE_FAILURE,
        INTERRUPTED_POLL, ERROR_EVENT, TRANSIENT_RESOURCE, TRANSIENT_POLL, ALWAYS_INTERRUPTED };
@@ -186,6 +193,9 @@ static int fake_thread_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)
     int n=atomic_fetch_add(&thread_creates,1);
     if (thread_failure_after>=0 && n>=thread_failure_after) return EAGAIN;
     return real_thread_create(t,a,fn,p);
+}
+static int fake_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
+    return mutex_init_failure ? EAGAIN : real_mutex_init(m,a);
 }
 static void setup(int kind) {
     scenario=kind; failures=0; active_handles=peak_handles=0; thread_failure_after=-1;
@@ -324,12 +334,32 @@ static void test_error_diagnostics(void) {
     teardown();
     puts("PASS error diagnostics: operation/errno counts, retry replacement and unresolved readiness");
 }
+static void test_initialization_error_logs(void) {
+    setup(CLOSED); teardown();
+    CHECK(nero_log_clear()==0);
+    mutex_init_failure=1;
+    CHECK(portscanner("192.0.2.10")==PORTSCANNER_FAILED);
+    CHECK(results_list==NULL && active_handles==0);
+    mutex_init_failure=0;
+    thread_failure_after=0; atomic_store(&thread_creates,0);
+    int ports[]={443}; char store[1][BANNER_MAX]={{0}};
+    grab_banners("192.0.2.10",ports,1,store);
+    FILE *capture=tmpfile(); CHECK(capture);
+    nero_log_dump(capture,1); rewind(capture);
+    char output[4096]={0};
+    CHECK(fread(output,1,sizeof(output)-1,capture)>0); fclose(capture);
+    CHECK(strstr(output,"Scan mutex initialization failed")!=NULL);
+    CHECK(strstr(output,"Banner worker creation failed")!=NULL);
+    CHECK(active_handles==0);
+    puts("PASS scanner mutex/banner initialization failures reach error logs");
+}
 int main(void) {
 #ifdef _WIN32
     _putenv_s("NERO_SCAN_ICMP", "");
 #else
     unsetenv("NERO_SCAN_ICMP");
 #endif
+    test_initialization_error_logs();
     test_error_diagnostics();
     test_full_coverage(); test_discovery_and_deep(); test_batch_outcomes();
     test_full_timeouts(); test_cancel(); test_resource_recovery();

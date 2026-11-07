@@ -182,14 +182,18 @@ int terminal_code(void)
 
 input_end:
     restoreBuffering(&old);
+    /* Flush while session handlers still own SIGPIPE. A broken output pipe
+     * must be logged before restoring the caller's default signal actions. */
+    int output_error = ferror(stdout) != 0;
+    if (fflush(stdout) == EOF) output_error = 1;
     if (signals_saved && cli_signal_mode(0) != 0)
         terminal_error = 1;
     signals_saved = 0;
-    nero_log_write(terminal_error ? NERO_LOG_ERROR :
+    int status = cli_termination_signal ? 128 + cli_termination_signal :
+        (terminal_error || output_error ? 1 : 0);
+    nero_log_write(terminal_error || output_error ? NERO_LOG_ERROR :
                    (cli_termination_signal ? NERO_LOG_WARN : NERO_LOG_INFO), "session",
-                   "NERO terminal session ended: signal=%d status=%d",
-                   (int)cli_termination_signal, terminal_error);
-    if (cli_termination_signal)
-        return 128 + cli_termination_signal;
-    return terminal_error || ferror(stdout) ? 1 : 0;
+                   "NERO terminal session ended: signal=%d status=%d stdout_error=%d",
+                   (int)cli_termination_signal, status, output_error);
+    return status;
 }

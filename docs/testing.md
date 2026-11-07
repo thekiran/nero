@@ -158,3 +158,11 @@ that the latest 256 entries remain intact. The scanner fixture also verifies
 that grouped socket errors reach the error log. Make/CTest include these checks;
 ASan/UBSan cover them and `make test-tsan` additionally stresses the logger.
 Tests use temporary paths or `NERO_LOG_FILE=:memory:` to avoid user log files.
+
+
+Logging recovery regressions additionally cover partial trailing records,
+clearing after transient/permanent storage failures, preserving current records
+when a backup cannot be cleared, read-only stdout, FIFO/Windows device targets,
+and pre-existing oversized current/backup files. The scanner fixture injects
+mutex and banner worker initialization failures and verifies their log records.
+These cases require no real device or remote network traffic.
