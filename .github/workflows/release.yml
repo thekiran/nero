@@ -116,7 +116,6 @@ jobs:
         run: |
           make test CC=${{ matrix.cc }}
           make test-sanitize CC=${{ matrix.cc }}
-          make analyze
       - name: CMake regression tests and sanitizers
         run: |
           cmake --preset ${{ matrix.preset }}

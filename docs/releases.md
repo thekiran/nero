@@ -102,7 +102,8 @@ ctest --preset linux
 
 The authoritative application target is `make`. CMake provides separate offline
 regression targets; `nero-safe` and `nero-platform-info` are never distributed as
-the CLI. Existing CI and static-analysis workflows remain in place.
+the CLI. Existing CI and static-analysis workflows remain in place. Static analysis is
+reported by its own workflow; it is not a release-package gate.
 
 1. Merge the release workflow and documentation into `main`.
 2. On a clean checkout of the intended commit, create and push a version tag:
@@ -118,7 +119,7 @@ the CLI. Existing CI and static-analysis workflows remain in place.
    platforms pass. No release is published automatically.
 
 3. Watch **Actions → Release packages**. Four native runners execute Make tests,
-   Make ASan/UBSan tests, static analysis, CMake tests and CMake sanitizer tests.
+   Make ASan/UBSan tests, CMake tests and CMake sanitizer tests.
    A failing check prevents package publication. CTest logs are retained as
    artifacts, including on failure; Make test output is in the job logs.
 4. Each runner builds the real CLI, checks its architecture and dependencies,
