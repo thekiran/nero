@@ -135,3 +135,14 @@ GitHub Actions enforces strict quality gates for every pull request and push to 
 * **`ci.yml` (Cross-Platform Foundation):** Runs CMake presets, unit tests, sanitizer builds, and legacy Make paths across Ubuntu x86-64, Ubuntu ARM64, macOS, and Windows.
 * **`release.yml` (Package Verification):** Compiles and packages native artifacts for all 5 platform targets, builds release binaries, verifies system installation scripts in isolated staging environments, and tests standalone executables.
 * **`static-analysis.yml`:** Checks code formatting (`clang-format`) and static analysis rules.
+
+
+## TCP scanner reliability
+
+The production scanner is tested with synthetic socket/poll outcomes and real
+worker threads, without creating real sockets. See the [reliability report](portscanner-reliability.md)
+for coverage, the complete-port invariant and validation limits. `make test`
+and CTest include this fixture. `make test-sanitize` runs it under ASan/UBSan;
+`make test-tsan` runs the scanner fixture separately under ThreadSanitizer on
+supported POSIX toolchains. Windows native MinGW runs the same fixture via CTest.
+Optional ICMP discovery is disabled in these tests.
