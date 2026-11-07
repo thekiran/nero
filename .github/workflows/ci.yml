@@ -65,3 +65,36 @@ jobs:
       - name: Windows scope
         if: runner.os == 'Windows'
         run: Write-Output 'Foundation tests only. Nero CLI, Win32 console and interface enumeration remain Unsupported.'
+  # Native MinGW-w64 leg on every push/PR (the MSVC foundation leg above does
+  # not build the scanner). Same toolchain and pinned actions as the release
+  # workflow's Windows job, without packaging. Runs the synthetic scanner
+  # fixture (pointer-sized SOCKET handles above INT_MAX), WSAPoll/console
+  # adapter fixtures and the native CLI smoke test. No remote traffic.
+  windows-mingw:
+    name: windows-latest - mingw-w64
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up native MinGW toolchain
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+      - name: Build CLI and offline test targets
+        run: |
+          gcc --version
+          cmake -S . -B .build/windows-mingw -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc -DBUILD_TESTING=ON
+          cmake --build .build/windows-mingw --parallel 4
+      - name: Run offline regression tests
+        run: ctest --test-dir .build/windows-mingw --output-on-failure --no-tests=error
