@@ -12,6 +12,7 @@
 
 #define CLI_HELP_ENTRIES(X) \
     X("<network IP> -Syn", ": Run SYN/UDP packet flood (authorized targets)") \
+    X("-Syn <network IP>", ": Alias for the SYN/UDP packet flood") \
     X("help", ": Show this help message") \
     X("help -All", ": Show this help message") \
     X("exit", ": Quit the shell") \

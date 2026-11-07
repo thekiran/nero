@@ -542,8 +542,17 @@ int cli_dispatch_command(const char *command)
 
     cli_cmd_result result;
 
+    /* Accept both the documented "<ip> -Syn" order and the common
+     * "-Syn <ip>" alias.  The same applies to -Sc. */
+    if (count == 2 && strcmp(tokens[0], "-Syn") == 0) {
+        char *alias_tokens[2] = {tokens[1], tokens[0]};
+        result = cmd_syn(alias_tokens, 2);
+    } else if (count == 2 && strcmp(tokens[0], "-Sc") == 0) {
+        char *alias_tokens[2] = {tokens[1], tokens[0]};
+        result = cmd_scan(alias_tokens, 2);
+
     /* IPv4 + SYN */
-    if (count >= 2 &&
+    } else if (count >= 2 &&
         strcmp(tokens[1], "-Syn") == 0) {
 
         result = cmd_syn(tokens, count);
