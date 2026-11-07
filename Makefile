@@ -120,12 +120,18 @@ $(TEST_DIR)/operation-layout: tests/operation_layout_fixture.c src/cli/operation
 $(TEST_DIR)/portscanner-reliability: tests/portscanner_reliability.c src/modules/portscanner.c src/cli/operation_ui.c src/core/log.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/portscanner_reliability.c src/cli/operation_ui.c src/core/log.c -o $@ -pthread
 
+# Production scanner against real 127.0.0.1 sockets and ptys (Linux, macOS).
+# A connect() guard aborts the fixture on any non-loopback destination.
+$(TEST_DIR)/scanner-runtime: tests/linux/scanner_runtime.c src/modules/portscanner.c src/cli/operation_ui.c src/core/log.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/linux/scanner_runtime.c src/cli/operation_ui.c src/core/log.c -o $@ -pthread
+
 $(TEST_DIR)/logging-fixture: tests/logging_fixture.c src/core/log.c include/nero/log.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/logging_fixture.c src/core/log.c -o $@ -pthread
 
 TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
              $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults \
-             $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability $(TEST_DIR)/logging-fixture
+             $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability $(TEST_DIR)/logging-fixture \
+             $(TEST_DIR)/scanner-runtime
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
@@ -136,6 +142,7 @@ endif
 test: $(TEST_BINS)
 	python3 tests/test_logging.py $(TEST_DIR)/nero-safe $(TEST_DIR)/logging-fixture
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/portscanner-reliability
+	NERO_LOG_FILE=:memory: $(TEST_DIR)/scanner-runtime
 	NERO_LOG_FILE=:memory: python3 tests/test_safe.py $(TEST_DIR)
 	NERO_LOG_FILE=:memory: python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
 	NERO_LOG_FILE=:memory: python3 tests/test_operation_layout.py $(TEST_DIR)/operation-layout
@@ -146,6 +153,8 @@ test-sanitize:
 test-tsan:
 	$(MAKE) $(BUILD_DIR)/tsan/portscanner-reliability TEST_DIR=$(BUILD_DIR)/tsan SANITIZERS="-fsanitize=thread -fno-omit-frame-pointer"
 	NERO_LOG_FILE=:memory: $(BUILD_DIR)/tsan/portscanner-reliability
+	$(MAKE) $(BUILD_DIR)/tsan/scanner-runtime TEST_DIR=$(BUILD_DIR)/tsan SANITIZERS="-fsanitize=thread -fno-omit-frame-pointer"
+	NERO_LOG_FILE=:memory: $(BUILD_DIR)/tsan/scanner-runtime
 	$(MAKE) $(BUILD_DIR)/tsan/logging-fixture TEST_DIR=$(BUILD_DIR)/tsan SANITIZERS="-fsanitize=thread -fno-omit-frame-pointer"
 	NERO_LOG_FILE=:memory: $(BUILD_DIR)/tsan/logging-fixture stress > /dev/null
 
