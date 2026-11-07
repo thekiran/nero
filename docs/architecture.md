@@ -27,21 +27,28 @@ Make object and dependency files live in `.build/obj/`, outside the source tree.
 macOS raw sockets require root. The offline-safe executables use
 `NERO_NETWORK_UNAVAILABLE` in `commands.c` and never link a network engine.
 Mock executables retain their mock handler calls.
-Windows currently supports only the
-platform foundation; `src/platform/windows/` reserves space for future adapters.
+Windows has a native MinGW x86-64 CLI. `src/platform/windows/` provides a
+Win32 console/Winsock adapter and interface enumeration. The Windows CLI excludes
+the raw packet engine explicitly; its support scope differs from macOS/Linux.
+`include/nero/socket_handle.h` keeps SOCKET values pointer-sized on Windows and
+integer-sized on POSIX. CRT stdin polling and socket polling use separate paths.
+Console snapshots preserve the full Win32 mode for exact restoration; process
+cleanup restores the output mode and code page changed during startup.
 
 Bundled cJSON is unchanged under `third_party/cjson/` and built by Make.
-CMake builds the offline CLI on POSIX and the platform foundation on all supported
-platforms. Shared compiler settings live in `cmake/NeroTargets.cmake`.
-The three existing CI workflows continue to use Make and CMake presets.
+CMake builds the offline CLI on POSIX, the native CLI with MinGW on Windows,
+and the platform foundation on all supported platforms. Shared compiler settings live in `cmake/NeroTargets.cmake`.
+The foundation, compatibility and static-analysis workflows use Make/CMake
+presets. The release workflow additionally verifies all five native packages and
+their installers; its aggregate Release checks job gates pull requests.
 
 ## Integrity records
 
 `tests/baseline.json` retains the historical snapshot and declarations.
 `tests/layout-baseline.json` maps those entries to their current locations,
 retaining historical hashes, hashes immediately before this layout migration
-(including existing user edits), and hashes after the migration. The foundation
-test verifies the mapping, current contents and absence of old source locations.
+(including existing user edits), and hashes after the migration. An optional informational source audit records drift; it is separate from the
+behavioral foundation test.
 This replaces a reference to the absent `terminal-quality-baseline.json` file.
 `tests/readability-baseline.json` records the subsequent CLI extraction and build
 changes separately; the layout and historical snapshots are not rewritten.
@@ -54,4 +61,5 @@ Integrity checks do not replace compilation, terminal regression or platform tes
 Run `make`, `make test`, `make test-sanitize` and `make analyze` on macOS.
 CMake: configure, build and test with the `macos` or `macos-sanitize` presets.
 Linux and Windows use their respective CI presets; a macOS pass does not certify
-those systems. The Windows CLI and interface enumeration remain unsupported.
+those systems. Windows MinGW has native CLI, adapter, synthetic boundary,
+real console-restoration and isolated loopback tests. MSVC remains foundation-only.

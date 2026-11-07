@@ -1,53 +1,41 @@
 # Platform support and validation
 
-Experimental, authorized laboratory development only. A configured target is not
-a verified platform. Directory and CLI organization changes preserve existing behavior.
+NERO is experimental. A successful build does not certify every network feature.
+The native package workflow covers the following combinations:
 
-| Feature | Linux x86_64 / ARM64 | macOS ARM64 | Windows x64 |
+| Capability | macOS ARM64 / Intel | Linux x86-64 / ARM64 | Windows x86-64 |
 | --- | --- | --- | --- |
-| Existing Make path | Preserved; local runtime NOT TESTED | PASS | Unsupported |
-| Existing CLI / history / colors | Preserved; NOT TESTED locally | PASS, existing safe tests | Unsupported |
-| Local interface listing | Existing sysfs; NOT TESTED locally | PASS, getifaddrs + fixtures | Unsupported |
-| New platform report | Configured, NOT TESTED | Direct Clang build and smoke PASS | Configured, NOT TESTED |
-| CMake configure/build | NOT TESTED | PASS: configure, build and 4 CTest groups | NOT TESTED |
-| CMake traffic generation / scanning | Unsupported | Unsupported | Unsupported |
-| Legacy Linux engine | Behavior preserved; intentionally not executed | Excluded | Excluded |
-| Win32 console / Winsock | N/A | N/A | Not implemented; no support claim |
+| Native CLI / history / rendering | Make | Make | CMake + MinGW UCRT64 |
+| Interface enumeration | getifaddrs + fixtures | sysfs + offline tests | GetAdaptersAddresses + selection tests |
+| Offline CLI tests | Make + CMake | Make + CMake | Native pipe/EOF/input tests |
+| Terminal tests | POSIX PTY | POSIX PTY | Synthetic and real Win32 console mode restoration |
+| ASan / UBSan | Offline targets | Offline targets | Not claimed for MinGW |
+| Socket adapter tests | POSIX path retained | POSIX path retained | Synthetic 64-bit handles and one bounded loopback TCP exchange |
+| Raw packet engine | Included in Make build; not exercised by CI | Included in Make build; not exercised by CI | Explicitly unavailable |
+| System command installation | `/usr/local/bin/nero` | `/usr/local/bin/nero` | User or machine PATH |
+| MSVC foundation report | N/A | N/A | Separate foundation-only preset |
 
-## Reproduction
+Windows ARM64 has no native release package. WSL2 follows the matching Linux
+architecture. macOS packages target macOS 15+; Linux packages target Ubuntu 24.04
+compatible runtime libraries. See [installation and release scope](releases.md).
 
-With CMake 3.21+ and Python 3 installed, select `macos`, `linux` or `windows`:
+## Evidence
 
-```sh
-cmake --preset macos
-cmake --build --preset macos
-ctest --preset macos
-```
+The v0.1.2 package workflow passed on all five platforms:
+[run 42378472442](https://github.com/thekiran/nero/actions/runs/42378472442).
+That run predates the v0.1.3 socket/console boundary regressions. Consult the
+stability pull request and its checks for evidence of those fixes; the presence
+of a test or workflow alone is not a passing result.
 
-POSIX sanitizer presets: `macos-sanitize`, `linux-sanitize`.
-Windows static-analysis preset: `windows-analysis` (/analyze).
-Windows tests cover only the foundation report, source integrity and unavailable
-network adapter. They are not Windows CLI smoke tests. No POSIX PTY tests are
-silently skipped to claim Windows CLI compatibility; that executable is absent.
+## Reproduce
 
-CMake omits unused bundled cJSON from development targets, matching the established
-CLI test scope. The legacy Make build still includes it unchanged. cJSON sanitizer
-validation remains incomplete from the previous phase. Existing linker alignment
-warnings, scanner/header issues, signal restoration limits and engine risks are
-listed in platform-compatibility.md and were not introduced here.
+On macOS/Linux, run `make test`, `make test-sanitize` and the host CMake test
+preset. Windows uses the MinGW commands in [building.md](building.md).
+Windows native tests are additional suites; POSIX PTY tests are not silently
+skipped to claim equivalent Windows terminal coverage.
 
-## Local phase results
-
-- Baseline and final Make/CLI regression, ASan/UBSan and Clang analysis: PASS on macOS.
-- New platform report and unavailable adapter: direct Clang build, runtime checks,
-  ASan/UBSan and Clang analysis performed locally; results recorded in task report.
-- New integration suite: platform/architecture report and all original C/header/
-  Makefile hashes checked.
-- CMake macOS configure, build and all four CTest groups passed using an isolated
-  CMake installation. It is a development tool, not a runtime dependency.
-- Windows/MSVC, Linux/GCC runtime and new remote CI: NOT TESTED.
-
-CI adds ubuntu-latest, ubuntu-24.04-arm, macos-latest and windows-latest. The existing
-compatibility workflow is retained during migration. Runners may change hardware;
-actual architecture is checked against the platform report in tests. No push or
-workflow dispatch was performed for this phase. Full acceptance remains pending.
+Tests never run the raw packet engine or contact third-party targets. The new
+Windows loopback fixture opens one ephemeral TCP listener bound to 127.0.0.1,
+exchanges one byte locally, and closes its sockets. Synthetic tests exercise
+handle values above INT_MAX without opening sockets. Full scanner and network
+engine runtime behavior remains outside this validation claim.
