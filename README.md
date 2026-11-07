@@ -14,8 +14,7 @@ and network diagnostics—without hiding the implementation behind a framework.
   <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-MIT-1F2937?style=flat-square" alt="MIT license"></a>
 </p>
 
-[**Overview**](#overview) &nbsp;·&nbsp;
-[**Quick start**](#quick-start) &nbsp;·&nbsp;
+[**Download & Install**](#download--install) &nbsp;·&nbsp;
 [**Commands**](#command-reference) &nbsp;·&nbsp;
 [**Architecture**](#architecture) &nbsp;·&nbsp;
 [**Development**](#development) &nbsp;·&nbsp;
@@ -43,7 +42,7 @@ visible, inspectable, and testable.
 | **Terminal experience** | Interactive CLI, ASCII visuals, ANSI colors, keyboard input, and command history |
 | **Systems programming** | C11, POSIX interfaces, terminal state, signal handling, and platform adapters |
 | **Network diagnostics** | IPv4 command handling, TCP connectivity checks, and experimental network modules |
-| **Cross-platform development** | macOS and Linux builds, plus a limited Windows CMake foundation |
+| **Cross-platform development** | Native macOS/Linux builds and Windows access through WSL2; a separate limited Windows CMake foundation |
 | **Validation** | Offline regression tests, sanitizers, and Clang static analysis |
 
 > [!IMPORTANT]
@@ -51,58 +50,133 @@ visible, inspectable, and testable.
 > Network features must only be used in isolated labs or against systems you are
 > explicitly authorized to test.
 
-## Quick start
+## Download & Install
 
-### macOS
+<div align="center">
 
-**Requirements:** Apple Command Line Tools, Make, and Python 3 for testing.
+[**Download Source (.zip)**](https://github.com/thekiran/nero/archive/refs/heads/main.zip) &nbsp;·&nbsp;
+[**Clone Repository**](https://github.com/thekiran/nero) &nbsp;·&nbsp;
+[**GitHub Releases**](https://github.com/thekiran/nero/releases)
 
-```bash
-# Install the Apple build tools if needed
-xcode-select --install
+<sub>The ZIP contains source code, not a ready-to-run application. Prebuilt release
+packages are a future distribution goal; check Releases for any published assets.</sub>
 
-# Get the source
-git clone https://github.com/thekiran/nero.git
-cd nero
-
-# Build and open the interactive terminal
-make CC=clang -j4
-./nero
-```
-
-### Linux (Debian / Ubuntu)
-
-<details>
-<summary><strong>Show dependencies and build instructions</strong></summary>
+</div>
 
 <br>
 
-```bash
-sudo apt update
-sudo apt install -y \
-  build-essential \
-  libcurl4-openssl-dev \
-  libcjson-dev \
-  libldns-dev \
-  libncurses-dev \
-  python3 \
-  clang
+Choose your operating system below. Each command block has GitHub's built-in
+**Copy** button so you can paste the steps directly into your terminal.
 
-git clone https://github.com/thekiran/nero.git
-cd nero
-make
-./nero
+### macOS — native
+
+**Requirements:** macOS, Apple Command Line Tools, and Git.
+
+<details>
+<summary>First time on macOS? Install developer tools</summary>
+
+Run this once in Terminal if the tools are missing:
+
+```bash
+xcode-select --install
 ```
 
 </details>
 
-Once NERO launches, type `help` to explore its available commands.
-You do **not** need administrator privileges to use basic terminal commands.
-Some experimental low-level network operations have additional platform and
-permission requirements.
+**1. Download and build:**
 
-See the [full build guide](docs/building.md) for CMake presets, sanitizer builds,
-and development prerequisites.
+```bash
+git clone https://github.com/thekiran/nero.git && cd nero && make CC=clang -j4
+```
+
+**2. Run:**
+
+```bash
+./nero
+```
+
+Works with the macOS native CLI. Some experimental network functions may need
+additional permissions and may behave differently across OS versions.
+
+### Linux — native
+
+**Recommended:** Ubuntu or Debian-based distributions. Other Linux
+distributions may require different dependency package names.
+
+**1. Install build dependencies:**
+
+```bash
+sudo apt update && sudo apt install -y git build-essential libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev python3 clang
+```
+
+**2. Download and build:**
+
+```bash
+git clone https://github.com/thekiran/nero.git && cd nero && make -j"$(nproc)"
+```
+
+**3. Run:**
+
+```bash
+./nero
+```
+
+The Linux build includes experimental network modules. A successful build is
+not a guarantee that every feature works in your environment.
+
+### Windows 11 — through WSL2
+
+> [!NOTE]
+> **Native Windows support is not implemented.** The existing Windows CMake
+> target is for the platform foundation only: it does not build the interactive
+> NERO CLI. On Windows, use Ubuntu in WSL2 to build the Linux CLI.
+
+**1.** In **PowerShell as Administrator**, install Ubuntu under WSL:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Restart Windows if prompted, open **Ubuntu**, and finish its initial account
+setup. All remaining commands run **inside the Ubuntu terminal**, not PowerShell.
+
+**2. Install dependencies in Ubuntu:**
+
+```bash
+sudo apt update && sudo apt install -y git build-essential libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev python3 clang
+```
+
+**3. Download, build, and launch:**
+
+```bash
+git clone https://github.com/thekiran/nero.git && cd nero && make -j"$(nproc)" && ./nero
+```
+
+WSL2 provides a Linux environment, not a native Windows build. Raw-socket and
+other low-level networking behavior may be restricted or different under WSL2.
+
+### For developers
+
+Prefer Git? This single command downloads the complete repository on any
+system with Git installed:
+
+```bash
+git clone https://github.com/thekiran/nero.git
+```
+
+Prefer a ZIP? Use **[Download Source ZIP](https://github.com/thekiran/nero/archive/refs/heads/main.zip)**,
+then extract it and follow the relevant platform's build steps.
+
+For CMake, static analysis, sanitizers and test presets, consult the
+[development and build guide](docs/building.md).
+
+### A note on easy installation
+
+The professional distribution path is **versioned GitHub Releases** with
+tested binaries for each supported OS/CPU, checksums, and automated build
+workflows. Package managers such as Homebrew, APT and WinGet can follow after
+those release artifacts exist. **NERO currently documents source builds rather
+than claiming downloadable Windows executables or unverified installers.**
 
 ## Command reference
 
@@ -189,7 +263,7 @@ only the platform foundation—not the interactive CLI.
 
 | Capability | macOS | Linux | Windows |
 | :--- | :---: | :---: | :---: |
-| Native interactive CLI | Yes | Yes | No |
+| Native interactive CLI | Yes | Yes | No (WSL2 for Linux CLI) |
 | Terminal rendering and history | Yes | Yes | No |
 | Offline development tests | Yes | Yes | Foundation only |
 | Make-based network modules | Included* | Included* | No |
