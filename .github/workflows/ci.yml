@@ -23,7 +23,7 @@ jobs:
           - os: windows-latest
             preset: windows
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Record toolchain
         run: cmake --version
       - name: Configure offline targets
