@@ -61,8 +61,11 @@ if(WIN32)
                 src/platform/windows/select_interface_windows.c)
             nero_target(win-interfaces)
             target_link_libraries(win-interfaces PRIVATE ws2_32 iphlpapi)
-            # Manual smoke binary: the selection prompt reads stdin, so it is
-            # not registered with ctest.
+            target_link_options(win-interfaces PRIVATE -static)
+            add_test(NAME windows-native-cli COMMAND ${Python3_EXECUTABLE}
+                "${PROJECT_SOURCE_DIR}/tests/windows/test_cli.py"
+                $<TARGET_FILE:nero> $<TARGET_FILE:win-interfaces>)
+            set_tests_properties(windows-native-cli PROPERTIES TIMEOUT 120)
         endif()
     else()
         message(STATUS "Windows foundation only: Nero CLI and interface listing are Unsupported")

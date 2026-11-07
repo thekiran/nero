@@ -9,7 +9,7 @@ and network diagnostics—without hiding the implementation behind a framework.
 
 <p>
   <a href="https://github.com/thekiran/nero"><img src="https://img.shields.io/badge/Language-C11-2563EB?style=flat-square&logo=c&logoColor=white" alt="C11"></a>
-  <a href="#platform-support"><img src="https://img.shields.io/badge/Platforms-macOS%20%7C%20Linux-1F2937?style=flat-square&logo=apple&logoColor=white" alt="macOS and Linux"></a>
+  <a href="#platform-support"><img src="https://img.shields.io/badge/Platforms-macOS%20%7C%20Linux%20%7C%20Windows-1F2937?style=flat-square&logo=apple&logoColor=white" alt="macOS, Linux and Windows"></a>
   <a href="#project-status"><img src="https://img.shields.io/badge/Status-Experimental-F59E0B?style=flat-square" alt="Experimental"></a>
   <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-MIT-1F2937?style=flat-square" alt="MIT license"></a>
 </p>
@@ -42,7 +42,7 @@ visible, inspectable, and testable.
 | **Terminal experience** | Interactive CLI, ASCII visuals, ANSI colors, keyboard input, and command history |
 | **Systems programming** | C11, POSIX interfaces, terminal state, signal handling, and platform adapters |
 | **Network diagnostics** | IPv4 command handling, TCP connectivity checks, and experimental network modules |
-| **Cross-platform development** | Native macOS/Linux builds and Windows access through WSL2; a separate limited Windows CMake foundation |
+| **Cross-platform development** | Native macOS/Linux and Windows x86-64 CLI builds; WSL2 is also available |
 | **Validation** | Offline regression tests, sanitizers, and Clang static analysis |
 
 > [!IMPORTANT]
@@ -58,7 +58,7 @@ visible, inspectable, and testable.
 [**Clone Repository**](https://github.com/thekiran/nero) &nbsp;·&nbsp;
 [**GitHub Releases**](https://github.com/thekiran/nero/releases)
 
-<sub>Versioned native packages for macOS and Linux are prepared by GitHub Actions.
+<sub>Versioned native packages for macOS, Linux and Windows are prepared by GitHub Actions.
 The first release stays a draft until reviewed; drafts are not public downloads.</sub>
 
 </div>
@@ -80,7 +80,7 @@ published version. Download the package matching your OS and CPU, plus its
 | macOS 15+, Intel | `nero-vX.Y.Z-macos-x86_64.tar.gz` |
 | Ubuntu 24.04 compatible, Intel/AMD | `nero-vX.Y.Z-linux-x86_64.tar.gz` |
 | Ubuntu 24.04 compatible, ARM64 | `nero-vX.Y.Z-linux-arm64.tar.gz` |
-| Windows 11 | Linux package inside **WSL2**, matching `uname -m`; no native `.exe` |
+| Windows 10/11, Intel/AMD | `nero-vX.Y.Z-windows-x86_64.zip` (native `nero.exe`) |
 
 Verify the downloaded archive before extracting:
 
@@ -152,36 +152,48 @@ git clone https://github.com/thekiran/nero.git && cd nero && make -j"$(nproc)"
 The Linux build includes experimental network modules. A successful build is
 not a guarantee that every feature works in your environment.
 
-### Windows 11 — through WSL2
+### Windows — native x86-64
 
-> [!NOTE]
-> **Native Windows support is not implemented.** The existing Windows CMake
-> target is for the platform foundation only: it does not build the interactive
-> NERO CLI. On Windows, use Ubuntu in WSL2 to build the Linux CLI.
+Download `nero-vX.Y.Z-windows-x86_64.zip` and its `.sha256` file from a published
+[release](https://github.com/thekiran/nero/releases). The ZIP contains a real
+MinGW-w64 Windows CLI, statically linked to its compiler runtime; no MSYS2 or
+WSL installation is needed to run the downloaded executable.
 
-**1.** In **PowerShell as Administrator**, install Ubuntu under WSL:
+In PowerShell, replace the example version with your downloaded version:
 
 ```powershell
-wsl --install -d Ubuntu
+$package = "nero-v0.1.1-windows-x86_64"
+$expected = ((Get-Content "$package.zip.sha256").Trim() -split '\s+')[0]
+$actual = (Get-FileHash "$package.zip" -Algorithm SHA256).Hash
+if ($actual -ne $expected) { throw "Checksum mismatch" }
+Expand-Archive "$package.zip" -DestinationPath .
+& ".\$package\bin\nero.exe"
 ```
 
-Restart Windows if prompted, open **Ubuntu**, and finish its initial account
-setup. All remaining commands run **inside the Ubuntu terminal**, not PowerShell.
+Use Windows Terminal / PowerShell for the interactive CLI. The binary is
+unsigned. Native Windows supports the terminal, interface selection and TCP
+code paths; the raw packet engine (`-Syn`) explicitly reports unsupported.
+The release tests exercise offline CLI behavior and adapter selection, not
+live scanning or raw traffic. Windows ARM64 has no native package.
 
-**2. Install dependencies in Ubuntu:**
+To build from source in an **MSYS2 UCRT64** shell:
 
 ```bash
-sudo apt update && sudo apt install -y git build-essential libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev python3 clang
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python
+git clone https://github.com/thekiran/nero.git
+cd nero
+cmake -S . -B .build/windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc
+cmake --build .build/windows --parallel 4
+ctest --test-dir .build/windows --output-on-failure
+./.build/windows/nero.exe
 ```
 
-**3. Download, build, and launch:**
+### Windows — optional WSL2 route
 
-```bash
-git clone https://github.com/thekiran/nero.git && cd nero && make -j"$(nproc)" && ./nero
-```
-
-WSL2 provides a Linux environment, not a native Windows build. Raw-socket and
-other low-level networking behavior may be restricted or different under WSL2.
+In Administrator PowerShell, run `wsl --install -d Ubuntu-24.04`, complete the
+Ubuntu setup, then follow the Linux installation steps inside Ubuntu. Choose
+the Linux package matching `uname -m`. WSL2 networking differs from native Linux.
+See the [complete installation guide](docs/releases.md#windows-11--wsl2).
 
 ### For developers
 
@@ -201,7 +213,7 @@ For CMake, static analysis, sanitizers and test presets, consult the
 ### Automated releases
 
 Version tags such as `v0.1.0` trigger native tests, ASan/UBSan checks, builds and
-packaging for all four platforms. Each archive includes build metadata and a
+packaging for all five platforms. Each archive includes build metadata and a
 SHA-256 sidecar; `SHA256SUMS` covers the complete release. Releases remain drafts
 for review. See the [maintainer release procedure](docs/releases.md#maintainer-release-procedure).
 
@@ -283,17 +295,17 @@ cmake --build --preset macos
 ctest --preset macos
 ```
 
-On Linux, use the `linux` preset instead. The Windows preset currently builds
-only the platform foundation—not the interactive CLI.
+On Linux, use the `linux` preset instead. The Windows Visual Studio preset builds
+only the foundation; the native CLI uses MinGW-w64, as documented above.
 
 ## Platform support
 
 | Capability | macOS | Linux | Windows |
 | :--- | :---: | :---: | :---: |
-| Native interactive CLI | Yes | Yes | No (WSL2 for Linux CLI) |
-| Terminal rendering and history | Yes | Yes | No |
-| Offline development tests | Yes | Yes | Foundation only |
-| Make-based network modules | Included* | Included* | No |
+| Native interactive CLI | Yes | Yes | Yes (x86-64 MinGW) |
+| Terminal rendering and history | Yes | Yes | Yes |
+| Offline development tests | Yes | Yes | Foundation + native CLI |
+| Network modules | Included* | Included* | TCP diagnostics/scanner; raw engine unavailable |
 | CMake platform foundation | Yes | Yes | Yes |
 
 <sub>* Availability at runtime depends on the build, dependencies, operating-system

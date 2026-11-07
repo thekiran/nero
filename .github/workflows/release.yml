@@ -152,9 +152,62 @@ jobs:
           retention-days: 14
           include-hidden-files: true
 
+  windows:
+    name: windows-x86_64
+    needs: prepare
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - name: Set up native MinGW toolchain
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+      - name: Build real Windows CLI and offline test targets
+        run: |
+          gcc --version
+          cmake -S . -B .build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DBUILD_TESTING=ON
+          cmake --build .build/windows-release --parallel 4
+      - name: Test native CLI and interface adapter
+        run: ctest --test-dir .build/windows-release --output-on-failure --no-tests=error
+      - name: Package and test extracted standalone executable
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: python scripts/release/package_windows.py --version "$VERSION" --commit "$COMMIT" --binary .build/windows-release/nero.exe
+      - name: Upload verified Windows package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-windows-x86_64
+          path: .build/release/*
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: true
+      - name: Preserve Windows CTest diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-windows-x86_64
+          path: .build/windows-release/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14
+          include-hidden-files: true
+
   draft:
     if: github.event_name != 'pull_request'
-    needs: [prepare, package]
+    needs: [prepare, package, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -165,7 +218,7 @@ jobs:
           pattern: package-*
           path: dist
           merge-multiple: true
-      - name: Verify four packages and create aggregate checksum
+      - name: Verify five packages and create aggregate checksum
         working-directory: dist
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -176,7 +229,11 @@ jobs:
             test -s "$archive"
             sha256sum --check "$archive.sha256"
           done
+          archive="nero-$VERSION-windows-x86_64.zip"
+          test -s "$archive"
+          sha256sum --check "$archive.sha256"
           test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
+          test "$(find . -maxdepth 1 -name '*.zip' | wc -l)" -eq 1
           cat ./*.sha256 | LC_ALL=C sort -k2 > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Create or update draft only
@@ -206,4 +263,4 @@ jobs:
             [[ "$VERSION" != *-* ]] || args+=(--prerelease)
             gh release create "$VERSION" dist/* --verify-tag --draft --title "NERO $VERSION" --generate-notes "${args[@]}"
           fi
-          echo "Draft prepared for $VERSION at $COMMIT. Review all four assets before publication." >> "$GITHUB_STEP_SUMMARY"
+          echo "Draft prepared for $VERSION at $COMMIT. Review all five packages before publication." >> "$GITHUB_STEP_SUMMARY"

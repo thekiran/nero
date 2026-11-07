@@ -131,10 +131,15 @@ static tcp_port_result tcp_port_check(
     if (fd < 0)
         return TCP_PORT_ERROR;
 
+#ifdef _WIN32
+    u_long nonblocking = 1;
+    if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) {
+#else
     int flags = fcntl(fd, F_GETFL, 0);
 
     if (flags < 0 ||
         fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+#endif
         close(fd);
         return TCP_PORT_ERROR;
     }
