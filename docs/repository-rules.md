@@ -6,9 +6,10 @@ repository administrator to apply it through Settings or an authenticated GitHub
 CLI with repository administration permission.
 
 It requires a pull request, an up-to-date branch, resolved conversations and
-successful `Release checks`, `clang` and `msvc` checks. Force pushes and deletion
+successful `Release checks`, `clang (ubuntu-latest)`, `clang (macos-latest)`
+and `msvc` checks. Force pushes and deletion
 are blocked; administrators are also subject to the rules. The aggregate Release
-checks job always runs and fails when any supported platform fails.
+checks job runs for every pull request and fails when any supported platform fails.
 
 The approval count is zero so a sole maintainer is not locked out of their own
 repository. Review is still expected before merging. Once an independent reviewer

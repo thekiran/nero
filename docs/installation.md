@@ -182,4 +182,3 @@ Version tags such as `v0.1.0` trigger native tests, ASan/UBSan checks, builds an
 packaging for all five platforms. Each archive includes build metadata and a
 SHA-256 sidecar; `SHA256SUMS` covers the complete release. Releases remain drafts
 for review. See the [maintainer release procedure](releases.md#maintainer-release-procedure).
-
