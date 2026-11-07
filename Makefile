@@ -92,8 +92,8 @@ endif
 
 SAFE_SOURCES := src/main.c $(CLI_SOURCES)
 MOCK_SOURCES := $(SAFE_SOURCES) tests/mocks/network_handler.c
-FAULT_SOURCES := src/main.c tests/mocks/terminal_faults.c \
-                 $(CLI_SUPPORT_SOURCES) tests/mocks/network_handler.c
+FAULT_SOURCES := src/main.c tests/mocks/terminal_faults.c tests/mocks/input_faults.c \
+                 $(filter-out src/cli/input.c,$(CLI_SUPPORT_SOURCES)) tests/mocks/network_handler.c
 
 TEST_DIR ?= $(BUILD_DIR)/tests
 SANITIZERS ?=
@@ -110,7 +110,7 @@ $(TEST_DIR)/interfaces: tests/interfaces.c $(INTERFACE_SOURCE) include/nero/sele
 $(TEST_DIR)/nero-mock: $(MOCK_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(MOCK_SOURCES) -o $@ -pthread
 
-$(TEST_DIR)/nero-faults: $(FAULT_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
+$(TEST_DIR)/nero-faults: $(FAULT_SOURCES) src/cli/input.c src/cli/terminal.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(FAULT_SOURCES) -o $@ -pthread
 
 $(TEST_DIR)/operation-layout: tests/operation_layout_fixture.c src/cli/operation_ui.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
