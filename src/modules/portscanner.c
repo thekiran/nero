@@ -315,6 +315,9 @@ static void scan_ports_batch(
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
+#if defined(__APPLE__)
+    addr.sin_len = sizeof(addr);
+#endif
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
 
     struct pollfd pfds[MAX_BATCH];
@@ -497,6 +500,9 @@ static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
+#if defined(__APPLE__)
+    addr.sin_len = sizeof(addr);
+#endif
     addr.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
 
@@ -599,6 +605,9 @@ static int host_probe_alive(const char *ip) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
+#if defined(__APPLE__)
+    addr.sin_len = sizeof(addr);
+#endif
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return 0;
 
     struct pollfd pfds[32];

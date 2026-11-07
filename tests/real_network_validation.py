@@ -50,8 +50,8 @@ for data, code in [(match[1]+b'\n', 0), (b'0\n', 1), (b'999\n', 1), (b'1junk\n',
     if code == 0: assert b'SELECTED:en0' in r.stdout
     print('PASS interface', data, 'exit', code)
 r = subprocess.run(['./nero'], input=b'version\n127.0.0.1 -Syn\nexit\n', capture_output=True, timeout=3)
-assert r.returncode == 0 and b'unsupported in this build' in r.stderr
-print('PASS production CLI unsupported command, exit 0')
+assert r.returncode == 0 and b'root' in r.stderr and b'sudo' in r.stderr
+print('PASS production CLI reports raw-socket privilege requirement, exit 0')
 for sig in (signal.SIGINT, signal.SIGTERM):
     p = subprocess.Popen(['./nero'], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:

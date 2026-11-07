@@ -68,8 +68,9 @@ cd nero
 
 ### macOS
 
-The macOS version runs the interactive development CLI and offline tests.
-It does not include the Linux network load engine or port scanner.
+The macOS version runs the interactive development CLI and includes the SYN/UDP
+packet engine and port scanner. Raw IPv4 sockets require administrator
+privileges, so launch with `sudo` before using `-Syn`.
 
 Install Apple's Command Line Tools if they are not already available:
 
@@ -77,16 +78,16 @@ Install Apple's Command Line Tools if they are not already available:
 xcode-select --install
 ```
 
-From the repository root, build and launch Nero (no `sudo` required):
+From the repository root, build and launch Nero:
 
 ```bash
-make CC=clang -j4 && ./nero
+make CC=clang -j4 && sudo ./nero
 ```
 
 At the `►` prompt, try `help`, `version`, `history`, and `exit`.
-In the standard macOS build, an IPv4 address followed by `-Syn` reports
-`unsupported in this build; no network traffic is generated.`
-This is expected platform behavior.
+An IPv4 address followed by `-Syn` scans the target for a port, then starts the
+SYN/UDP packet engine. The offline test and `nero-safe` targets remain
+network-free.
 
 Run the offline checks with Python 3 installed:
 

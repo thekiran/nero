@@ -73,7 +73,10 @@ static int scan_enabled = 1;
  * TCP DIAGNOSTICS
  * ============================================================ */
 
-#ifndef NERO_SAFE_TEST
+/* These helpers are only reachable from the live -Sc path.  Offline and
+ * network-unavailable builds must not compile them, otherwise -Werror flags
+ * the unused network code. */
+#if !defined(NERO_SAFE_TEST) && !defined(NERO_NETWORK_UNAVAILABLE)
 
 typedef enum {
     TCP_PORT_OPEN,
@@ -210,7 +213,7 @@ static tcp_port_result tcp_port_check(
     return TCP_PORT_ERROR;
 }
 
-#endif /* !NERO_SAFE_TEST */
+#endif /* !NERO_SAFE_TEST && !NERO_NETWORK_UNAVAILABLE */
 
 /* ============================================================
  * MODE COMMAND
@@ -339,19 +342,44 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
  * ============================================================ */
 
 
-static cli_cmd_result cmd_syn(char **tokens, size_t count) {
-    (void)count;  /* parametre kullanılmadığında -Wextra -Werror uyarısını bastırır */
+static cli_cmd_result cmd_syn(char **tokens, size_t count)
+{
+    struct in_addr addr;
 
-    if (tokens == NULL || tokens[0] == NULL || tokens[0][0] == '\0') {
-        fprintf(stderr, "Usage: -Syn <target_ip>\n");
-        return CLI_CMD_CONTINUE;
+    /* Validate arguments and command syntax before dispatching. */
+    if (tokens == NULL || count != 2 ||
+        tokens[0] == NULL || tokens[1] == NULL) {
+        return CLI_CMD_INVALID;
     }
+
+    if (strcmp(tokens[1], "-Syn") != 0 ||
+        inet_pton(AF_INET, tokens[0], &addr) != 1) {
+        return CLI_CMD_INVALID;
+    }
+
+#if defined(NERO_SAFE_TEST)
+
+    /* Safe test mode: no real network traffic. */
+    cli_show_syn_status();
+
+#elif defined(NERO_NETWORK_UNAVAILABLE)
+
+    /* Network diagnostics are unavailable in this build. */
+    fputs(
+        "-Syn: unsupported in this build; "
+        "no network traffic is generated.\n",
+        stderr
+    );
+
+#else
 
     /* SYN flood'u başlat. Port taraması SYN_Flood içinde port_get()
      * üzerinden portscanner() ile yapılır, burada ayrıca çağırmayın. */
     if (SYN_Flood(tokens[0]) != 0) {
         fprintf(stderr, "SYN flood failed for %s\n", tokens[0]);
     }
+
+#endif
 
     return CLI_CMD_CONTINUE;
 }

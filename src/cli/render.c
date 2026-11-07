@@ -125,7 +125,9 @@ void cli_show_help(void)
            "Isolated or explicitly authorized testing only. Not for public or production use.\n"
            "Use isolated or authorized test environments; public and production use is "
            "not permitted.\n");
-#if defined(__APPLE__) || defined(NERO_SAFE_TEST)
+#if defined(NERO_SAFE_TEST)
+    printf("-Syn: safe test mode; no network traffic generated.\n");
+#elif defined(NERO_NETWORK_UNAVAILABLE)
     printf("-Syn: unsupported in this build; no network traffic is generated.\n");
 #endif
     if (terminal_color_enabled())

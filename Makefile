@@ -26,15 +26,17 @@ COMMON_SOURCES := \
     src/main.c \
     third_party/cjson/cJSON.c \
     $(CLI_SOURCES) \
-    src/modules/portscanner.c
+    src/modules/portscanner.c \
+    src/modules/syn_flood_powered.c
 
 ifeq ($(UNAME_S),Darwin)
-    PLATFORM_SOURCES := src/platform/macos/select_interface_macos.c \
-                        src/modules/syn_flood_powered.c
+    INTERFACE_SOURCE := src/platform/macos/select_interface_macos.c
+    PLATFORM_SOURCES := $(INTERFACE_SOURCE)
     MACOS_FRAMEWORKS := -framework CoreFoundation -framework SystemConfiguration
     LDLIBS += $(MACOS_FRAMEWORKS)
 else ifeq ($(UNAME_S),Linux)
-    PLATFORM_SOURCES := src/platform/linux/select_interface.c
+    INTERFACE_SOURCE := src/platform/linux/select_interface.c
+    PLATFORM_SOURCES := $(INTERFACE_SOURCE)
     CFLAGS += -D_POSIX_C_SOURCE=199309L -I/usr/include/ldns
     LDLIBS += -lcurl -lcjson -lldns -lncurses
 else
@@ -91,3 +93,54 @@ FAULT_SOURCES := src/main.c tests/mocks/terminal_faults.c \
                  $(CLI_SUPPORT_SOURCES) tests/mocks/network_handler.c
 
 TEST_DIR ?= $(BUILD_DIR)/tests
+SANITIZERS ?=
+
+$(TEST_DIR):
+	@mkdir -p $@
+
+$(TEST_DIR)/nero-safe: $(SAFE_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) -DNERO_NETWORK_UNAVAILABLE $(SANITIZERS) $(SAFE_SOURCES) -o $@ -pthread
+
+$(TEST_DIR)/interfaces: tests/interfaces.c $(INTERFACE_SOURCE) include/nero/select_interface.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/interfaces.c $(INTERFACE_SOURCE) -o $@ $(MACOS_FRAMEWORKS)
+
+$(TEST_DIR)/nero-mock: $(MOCK_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(MOCK_SOURCES) -o $@ -pthread
+
+$(TEST_DIR)/nero-faults: $(FAULT_SOURCES) $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $(FAULT_SOURCES) -o $@ -pthread
+
+$(TEST_DIR)/operation-layout: tests/operation_layout_fixture.c src/cli/operation_ui.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/operation_layout_fixture.c src/cli/operation_ui.c -o $@
+
+TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
+             $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults \
+             $(TEST_DIR)/operation-layout
+
+ifeq ($(UNAME_S),Darwin)
+$(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) $< -o $@ $(MACOS_FRAMEWORKS)
+TEST_BINS += $(TEST_DIR)/interfaces-mock
+endif
+
+test: $(TEST_BINS)
+	python3 tests/test_safe.py $(TEST_DIR)
+	python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
+	python3 tests/test_operation_layout.py $(TEST_DIR)/operation-layout
+
+test-sanitize:
+	$(MAKE) test TEST_DIR=$(BUILD_DIR)/sanitize SANITIZERS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+
+analyze:
+	@mkdir -p $(BUILD_DIR)/analysis
+	@set -e; for source in $(SAFE_SOURCES) $(filter src/platform/macos/%,$(INTERFACE_SOURCE)); do \
+		clang --analyze $(SAFE_FLAGS) -DNERO_NETWORK_UNAVAILABLE -Xanalyzer -analyzer-werror $$source -o $(BUILD_DIR)/analysis/$$(basename $$source).plist; \
+	done
+
+help:
+	@echo "make                 Build the platform-specific executable"
+	@echo "make test            Run offline CLI regression tests"
+	@echo "make test-sanitize   Run offline tests with ASan/UBSan"
+	@echo "make analyze         Run Clang static analysis"
+	@echo "make clean           Remove generated build files"
+	@echo "Code map: docs/code-map.md"

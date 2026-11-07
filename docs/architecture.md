@@ -22,11 +22,10 @@ an application-wide header. Make and CMake share their CLI source lists between
 production and test targets; the fault fixture replaces only `terminal.c`.
 Make object and dependency files live in `.build/obj/`, outside the source tree.
 
-`src/modules/` also retains the Linux engine and scanner omitted from the example
-tree. Their header is retained as `include/nero/syn_flood_powered.h`.
-The Linux Make build keeps its previous source selection and link dependencies.
-The macOS Make build and offline CLI use `NERO_NETWORK_UNAVAILABLE` to report
-unavailability directly in `commands.c`, without linking a network engine.
+`src/modules/` holds the packet engine and scanner. Their header is retained as
+`include/nero/syn_flood_powered.h`. Both Linux and macOS Make builds link them;
+macOS raw sockets require root. The offline-safe executables use
+`NERO_NETWORK_UNAVAILABLE` in `commands.c` and never link a network engine.
 Mock executables retain their mock handler calls.
 Windows currently supports only the
 platform foundation; `src/platform/windows/` reserves space for future adapters.

@@ -11,7 +11,7 @@
     X(version, cmd_version)
 
 #define CLI_HELP_ENTRIES(X) \
-    X("<network IP> -Syn", ": Network operation (unavailable in this build)") \
+    X("<network IP> -Syn", ": Run SYN/UDP packet flood (authorized targets)") \
     X("help", ": Show this help message") \
     X("help -All", ": Show this help message") \
     X("exit", ": Quit the shell") \
