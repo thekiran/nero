@@ -112,8 +112,15 @@ class TerminalQuality(unittest.TestCase):
 
     def test_closed_stdin_error(self):
         try:
-            result = subprocess.run([str(BINARY)], capture_output=True, timeout=10, env=ENV,
-                                    preexec_fn=lambda: os.close(0))
+            # ASan can reuse fd 0 during startup if it is closed before exec.
+            # Occupy it with a write-only descriptor so read still gets EBADF,
+            # independently of sanitizer runtime and dynamic-loader behavior.
+            invalid_stdin = os.open(os.devnull, os.O_WRONLY)
+            try:
+                result = subprocess.run([str(BINARY)], stdin=invalid_stdin,
+                                        capture_output=True, timeout=10, env=ENV)
+            finally:
+                os.close(invalid_stdin)
         except subprocess.TimeoutExpired as error:
             self.fail(f"closed-stdin run hung: partial stdout={error.stdout!r} "
                       f"stderr={error.stderr!r}")

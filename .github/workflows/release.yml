@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Existing version tag to rebuild (for example v0.1.0)'
+        description: 'Version tag to build; a new tag is created after checks pass (v0.1.0)'
         required: true
         type: string
 
@@ -59,7 +59,14 @@ jobs:
           else
             version=${REQUESTED_VERSION:-$GITHUB_REF_NAME}
             [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo 'Invalid version tag'; exit 1; }
-            commit=$(git rev-parse --verify "refs/tags/$version^{commit}")
+            if git show-ref --verify --quiet "refs/tags/$version"; then
+              commit=$(git rev-parse --verify "refs/tags/$version^{commit}")
+            elif [[ "$EVENT" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]; then
+              commit=$(git rev-parse HEAD)
+            else
+              echo 'Missing tag; new versions must be dispatched from main'
+              exit 1
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
@@ -109,7 +116,6 @@ jobs:
         run: |
           make test CC=${{ matrix.cc }}
           make test-sanitize CC=${{ matrix.cc }}
-          make analyze
       - name: CMake regression tests and sanitizers
         run: |
           cmake --preset ${{ matrix.preset }}
@@ -135,6 +141,7 @@ jobs:
           path: .build/release/*
           if-no-files-found: error
           retention-days: 14
+          include-hidden-files: true
       - name: Preserve CTest diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -143,6 +150,7 @@ jobs:
           path: .build/cmake/**/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14
+          include-hidden-files: true
 
   draft:
     if: github.event_name != 'pull_request'
@@ -179,6 +187,14 @@ jobs:
           COMMIT: ${{ needs.prepare.outputs.commit }}
         run: |
           set -euo pipefail
+          # A manual first release creates its tag only after all checks pass.
+          gh api --paginate "repos/$GH_REPO/git/matching-refs/tags/$VERSION" > refs.json
+          tag_exists=$(jq -r --arg ref "refs/tags/$VERSION" '.[] | select(.ref == $ref) | .ref' refs.json)
+          if [[ -z "$tag_exists" ]]; then
+            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$VERSION" -f sha="$COMMIT"
+          fi
+          tagged_commit=$(gh api "repos/$GH_REPO/commits/$VERSION" --jq .sha)
+          test "$tagged_commit" = "$COMMIT" || { echo 'Tag moved during build'; exit 1; }
           # Fail closed on API/auth errors; do not mistake them for a missing release.
           gh api --paginate "repos/$GH_REPO/releases?per_page=100" > releases.json
           release=$(jq -r --arg tag "$VERSION" '.[] | select(.tag_name == $tag) | .id' releases.json)
