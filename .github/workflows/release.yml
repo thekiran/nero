@@ -1,0 +1,193 @@
+name: Release packages
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release/**'
+      - 'Makefile'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'src/**'
+      - 'include/**'
+      - 'third_party/**'
+      - 'tests/**'
+      - 'README.md'
+      - 'docs/releases.md'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing version tag to rebuild (for example v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.version || github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.ref.outputs.version }}
+      commit: ${{ steps.ref.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate version and resolve immutable source
+        id: ref
+        env:
+          EVENT: ${{ github.event_name }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == pull_request ]]; then
+            version=v0.0.0-ci
+            commit=$(git rev-parse HEAD)
+          else
+            version=${REQUESTED_VERSION:-$GITHUB_REF_NAME}
+            [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo 'Invalid version tag'; exit 1; }
+            commit=$(git rev-parse --verify "refs/tags/$version^{commit}")
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: prepare
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+            preset: macos
+            cc: clang
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            preset: macos
+            cc: clang
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+            preset: linux
+            cc: gcc
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            preset: linux
+            cc: gcc
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 clang libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev
+      - name: Record toolchain
+        run: |
+          uname -a
+          ${{ matrix.cc }} --version
+          cmake --version
+          python3 --version
+      - name: Make regression tests and sanitizers
+        run: |
+          make test CC=${{ matrix.cc }}
+          make test-sanitize CC=${{ matrix.cc }}
+          make analyze
+      - name: CMake regression tests and sanitizers
+        run: |
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }} --parallel 4
+          ctest --preset ${{ matrix.preset }} --no-tests=error
+          cmake --preset ${{ matrix.preset }}-sanitize
+          cmake --build --preset ${{ matrix.preset }}-sanitize --parallel 4
+          ctest --preset ${{ matrix.preset }}-sanitize --no-tests=error
+      - name: Build native release executable using authoritative Makefile
+        run: |
+          make CC=${{ matrix.cc }} -j4
+          file nero
+      - name: Package native executable and verify archive
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          PLATFORM: ${{ matrix.platform }}
+        run: python3 scripts/release/package.py --version "$VERSION" --platform "$PLATFORM" --commit "$COMMIT"
+      - name: Upload verified package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-${{ matrix.platform }}
+          path: .build/release/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve CTest diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-${{ matrix.platform }}
+          path: .build/cmake/**/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  draft:
+    if: github.event_name != 'pull_request'
+    needs: [prepare, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: Verify four packages and create aggregate checksum
+        working-directory: dist
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          for platform in macos-arm64 macos-x86_64 linux-x86_64 linux-arm64; do
+            archive="nero-$VERSION-$platform.tar.gz"
+            test -s "$archive"
+            sha256sum --check "$archive.sha256"
+          done
+          test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
+          cat ./*.sha256 | LC_ALL=C sort -k2 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Create or update draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # Fail closed on API/auth errors; do not mistake them for a missing release.
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" > releases.json
+          release=$(jq -r --arg tag "$VERSION" '.[] | select(.tag_name == $tag) | .id' releases.json)
+          if [[ -n "$release" ]]; then
+            test "$(gh api "repos/$GH_REPO/releases/$release" --jq .draft)" = true || { echo 'Refusing to modify a published release'; exit 1; }
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            args=()
+            [[ "$VERSION" != *-* ]] || args+=(--prerelease)
+            gh release create "$VERSION" dist/* --verify-tag --draft --title "NERO $VERSION" --generate-notes "${args[@]}"
+          fi
+          echo "Draft prepared for $VERSION at $COMMIT. Review all four assets before publication." >> "$GITHUB_STEP_SUMMARY"

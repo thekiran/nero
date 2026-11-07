@@ -3,20 +3,25 @@
  * each worker thread manages BATCH_SIZE sockets concurrently,
  * so 8 threads * 400 sockets = 3200 simultaneous probes without
  * spawning thousands of threads or hitting macOS ulimit -n. */
+#ifdef _WIN32
+#include "../platform/windows/nero_win_compat.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
-#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <errno.h>
 #include <termios.h>
+#include <poll.h>
+#include <sys/resource.h>
+#endif
+#include <unistd.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <fcntl.h>
-#include <poll.h>
-#include <sys/resource.h>
 #include <time.h>
 #include <stdint.h>
 
@@ -108,8 +113,15 @@ typedef struct {
 static int scan_motion_enabled(void) {
     const char *reduced = getenv("NERO_REDUCE_MOTION");
     const char *term = getenv("TERM");
+#ifdef _WIN32
+    /* Windows konsollarında TERM kuralı yoktur; VT çıkışı nero_windows_init()
+     * ile açılır, canlı konsol varsayılan olarak ANSI yeteneklidir. */
     return isatty(STDOUT_FILENO) && reduced == NULL &&
            (term == NULL || strcmp(term, "dumb") != 0);
+#else
+    return isatty(STDOUT_FILENO) && reduced == NULL &&
+           (term == NULL || strcmp(term, "dumb") != 0);
+#endif
 }
 
 /* Tarama sırasında ekranı canlı tutan iş parçacığı: keşfedilen portları çizer,
@@ -197,7 +209,9 @@ static int compare_ports_asc(const void *a, const void *b) {
 
 /* Bir batch taraması aynı anda binlerce soket açabilir. Varsayılan
  * RLIMIT_NOFILE (macOS'ta sıklıkla 256) buna yetmez ve socket() EMFILE ile
- * başarısız olur. Soft limiti, hard limiti aşmadan ihtiyaç kadar yükselt. */
+ * başarısız olur. Soft limiti, hard limiti aşmadan ihtiyaç kadar yükselt.
+ * Windows'ta RLIMIT_NOFILE yoktur; soket sınırı sistem belleğine bağlıdır. */
+#ifndef _WIN32
 static void raise_fd_limit(void) {
     struct rlimit rl;
     if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return;
@@ -209,6 +223,9 @@ static void raise_fd_limit(void) {
     rl.rlim_cur = target;
     setrlimit(RLIMIT_NOFILE, &rl);
 }
+#else
+static void raise_fd_limit(void) { /* no per-process fd limit on Windows */ }
+#endif
 
 /* --- Port seçim menüsü --- */
 static int select_port_menu_in_ui(int *open_ports, int count, nero_operation_ui *ui) {
@@ -335,11 +352,19 @@ static void scan_ports_batch(
             continue;
         }
 
+#ifdef _WIN32
+        u_long nonblocking = 1;
+        if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) {
+            close(fd);
+            continue;
+        }
+#else
         int flags = fcntl(fd, F_GETFL, 0);
         if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
             close(fd);
             continue;
         }
+#endif
 
         addr.sin_port = htons((uint16_t)ports[i]);
         atomic_store_explicit(&latest_probe_port, ports[i], memory_order_relaxed);
@@ -508,8 +533,13 @@ static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return;
+#ifdef _WIN32
+    u_long nonblocking = 1, blocking = 0;
+    if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) { close(fd); return; }
+#else
     int fl = fcntl(fd, F_GETFL, 0);
     if (fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+#endif
 
     int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
     if (r < 0 && errno == EINPROGRESS) {
@@ -525,9 +555,15 @@ static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
     }
 
     /* Bloklamaya dön ve bir okuma zaman aşımı koy. */
+#ifdef _WIN32
+    if (ioctlsocket((SOCKET)fd, FIONBIO, &blocking) != 0) { close(fd); return; }
+    DWORD tv = 1200; /* milisaniye: 1.2 sn */
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&tv, sizeof(tv));
+#else
     if (fl >= 0) fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
     struct timeval tv = { 1, 200000 }; /* 1.2 sn */
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
 
     if (is_http_port(port)) {
         const char *req = "HEAD / HTTP/1.0\r\n\r\n";
@@ -615,8 +651,13 @@ static int host_probe_alive(const char *ip) {
     for (int i = 0; i < n; ++i) {
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd < 0) continue;
+#ifdef _WIN32
+        u_long nonblocking = 1;
+        if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) { close(fd); continue; }
+#else
         int fl = fcntl(fd, F_GETFL, 0);
         if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0) { close(fd); continue; }
+#endif
         addr.sin_port = htons((uint16_t)probe_ports[i]);
         int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
         if (r == 0) { close(fd); return 1; }                       /* anında açık */
