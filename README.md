@@ -58,8 +58,8 @@ visible, inspectable, and testable.
 [**Clone Repository**](https://github.com/thekiran/nero) &nbsp;·&nbsp;
 [**GitHub Releases**](https://github.com/thekiran/nero/releases)
 
-<sub>The ZIP contains source code, not a ready-to-run application. Prebuilt release
-packages are a future distribution goal; check Releases for any published assets.</sub>
+<sub>Versioned native packages for macOS and Linux are prepared by GitHub Actions.
+The first release stays a draft until reviewed; drafts are not public downloads.</sub>
 
 </div>
 
@@ -67,6 +67,34 @@ packages are a future distribution goal; check Releases for any published assets
 
 Choose your operating system below. Each command block has GitHub's built-in
 **Copy** button so you can paste the steps directly into your terminal.
+
+### Prebuilt release packages
+
+Open **[GitHub Releases](https://github.com/thekiran/nero/releases)** and select a
+published version. Download the package matching your OS and CPU, plus its
+`.sha256` file. If no version is published yet, use the source instructions below.
+
+| Your system | Package |
+| :--- | :--- |
+| macOS 15+, Apple Silicon | `nero-vX.Y.Z-macos-arm64.tar.gz` |
+| macOS 15+, Intel | `nero-vX.Y.Z-macos-x86_64.tar.gz` |
+| Ubuntu 24.04 compatible, Intel/AMD | `nero-vX.Y.Z-linux-x86_64.tar.gz` |
+| Ubuntu 24.04 compatible, ARM64 | `nero-vX.Y.Z-linux-arm64.tar.gz` |
+| Windows 11 | Linux package inside **WSL2**, matching `uname -m`; no native `.exe` |
+
+Verify the downloaded archive before extracting:
+
+```bash
+# macOS (replace the filename with your downloaded package)
+shasum -a 256 -c nero-vX.Y.Z-macos-arm64.tar.gz.sha256
+# Linux / WSL2
+sha256sum -c nero-vX.Y.Z-linux-x86_64.tar.gz.sha256
+```
+
+Extract the selected archive and install its `bin/nero` to `~/.local/bin` or
+`/usr/local/bin`. Linux packages require runtime libraries; macOS packages are
+unsigned and use system frameworks. See the **[package installation guide](docs/releases.md)**
+for complete copyable commands, dependencies and supported OS versions.
 
 ### macOS — native
 
@@ -170,13 +198,12 @@ then extract it and follow the relevant platform's build steps.
 For CMake, static analysis, sanitizers and test presets, consult the
 [development and build guide](docs/building.md).
 
-### A note on easy installation
+### Automated releases
 
-The professional distribution path is **versioned GitHub Releases** with
-tested binaries for each supported OS/CPU, checksums, and automated build
-workflows. Package managers such as Homebrew, APT and WinGet can follow after
-those release artifacts exist. **NERO currently documents source builds rather
-than claiming downloadable Windows executables or unverified installers.**
+Version tags such as `v0.1.0` trigger native tests, ASan/UBSan checks, builds and
+packaging for all four platforms. Each archive includes build metadata and a
+SHA-256 sidecar; `SHA256SUMS` covers the complete release. Releases remain drafts
+for review. See the [maintainer release procedure](docs/releases.md#maintainer-release-procedure).
 
 ## Command reference
 
@@ -314,3 +341,4 @@ Copyright © 2025–2026 **Muhammed Emin Kıran**.
 <sub><strong>NERO</strong> — native C, terminal engineering, and responsible network research.</sub>
 
 </div>
+
