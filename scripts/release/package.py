@@ -9,6 +9,7 @@ import platform
 import re
 import subprocess
 import tarfile
+import tempfile
 
 
 def main():
@@ -50,7 +51,7 @@ def main():
         'runtime_dependencies': dependencies,
     }
     with tarfile.open(archive, 'w:gz') as tar:
-        for source, destination in [('nero', 'bin/nero'), ('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md')]:
+        for source, destination in [('nero', 'bin/nero'), ('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.sh', 'install.sh')]:
             tar.add(source, arcname=f'{root}/{destination}', recursive=False)
         data = (json.dumps(metadata, indent=2) + '\n').encode()
         info = tarfile.TarInfo(f'{root}/BUILD-INFO.json')
@@ -61,6 +62,17 @@ def main():
         member = tar.getmember(f'{root}/bin/nero')
         if not member.mode & 0o111 or tar.extractfile(member).read() != binary.read_bytes():
             raise RuntimeError('archive executable verification failed')
+        with tempfile.TemporaryDirectory() as temp:
+            tar.extractall(temp)
+            staging = Path(temp) / 'staging'
+            env = dict(os.environ, DESTDIR=str(staging), PREFIX='/usr/local')
+            subprocess.run(['sh', str(Path(temp) / root / 'install.sh')], env=env, check=True)
+            command_dir = staging / 'usr/local/bin'
+            env['PATH'] = str(command_dir) + os.pathsep + os.environ.get('PATH', '')
+            result = subprocess.run(['nero'], input=b'version\nexit\n', capture_output=True,
+                                    timeout=15, env=env, cwd=temp)
+            if result.returncode != 0 or b'version 1.0' not in result.stdout:
+                raise RuntimeError('installed nero command verification failed')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_name(archive.name + '.sha256').write_text(f'{digest}  {archive.name}\n')
     print(archive)

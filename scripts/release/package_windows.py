@@ -48,7 +48,7 @@ def main():
                 'raw_packet_engine': 'Unsupported', 'code_signed': False}
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(binary, f'{root}/bin/nero.exe')
-        for source, destination in [('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md')]:
+        for source, destination in [('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.ps1', 'install.ps1')]:
             zip_file.write(source, f'{root}/{destination}')
         zip_file.writestr(f'{root}/BUILD-INFO.json', json.dumps(metadata, indent=2) + '\n')
     with zipfile.ZipFile(archive) as zip_file:
@@ -66,6 +66,24 @@ def main():
                                     timeout=15, env=env, cwd=temp)
             if result.returncode != 0 or b'version 1.0' not in result.stdout:
                 raise RuntimeError(f'extracted standalone CLI failed: {result.returncode}: {result.stderr!r}')
+            # Test command installation from an unrelated working directory.
+            import shutil
+            powershell = shutil.which('powershell.exe')
+            if not powershell:
+                raise RuntimeError('PowerShell is required to verify the installer')
+            installer = Path(temp) / root / 'install.ps1'
+            installed = Path(temp) / 'installed-bin'
+            # Environment variables avoid interpolating filesystem paths as code.
+            install_env = dict(env, NERO_INSTALL_SCRIPT=str(installer), NERO_INSTALL_DIR=str(installed))
+            command = ("& $env:NERO_INSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
+                       "if (-not $?) { exit 1 }; "
+                       "$cmd = Get-Command nero -ErrorAction Stop; "
+                       "if ($cmd.Source -ne (Join-Path $env:NERO_INSTALL_DIR 'nero.exe')) { exit 1 }; "
+                       "'version','exit' | nero; exit $LASTEXITCODE")
+            check = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', command],
+                                   capture_output=True, timeout=30, env=install_env, cwd=temp)
+            if check.returncode != 0 or b'version 1.0' not in check.stdout:
+                raise RuntimeError(f'installed nero command failed: {check.stderr!r}')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_name(archive.name + '.sha256').write_text(f'{digest}  {archive.name}\n')
     print(archive)

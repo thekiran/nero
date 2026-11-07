@@ -45,9 +45,10 @@ VERSION=v0.1.0
 PACKAGE="nero-$VERSION-macos-arm64"
 shasum -a 256 -c "$PACKAGE.tar.gz.sha256"
 tar -xzf "$PACKAGE.tar.gz"
-mkdir -p "$HOME/.local/bin"
-install -m 755 "$PACKAGE/bin/nero" "$HOME/.local/bin/nero"
-"$HOME/.local/bin/nero"
+sudo sh "$PACKAGE/install.sh"
+nero
+# Administrator privileges when needed, from any directory:
+sudo nero
 ```
 
 Linux example (x86-64; use `linux-arm64` for ARM64):
@@ -57,16 +58,57 @@ VERSION=v0.1.0
 PACKAGE="nero-$VERSION-linux-x86_64"
 sha256sum -c "$PACKAGE.tar.gz.sha256"
 tar -xzf "$PACKAGE.tar.gz"
-mkdir -p "$HOME/.local/bin"
-install -m 755 "$PACKAGE/bin/nero" "$HOME/.local/bin/nero"
-"$HOME/.local/bin/nero"
+sudo sh "$PACKAGE/install.sh"
+nero
+# Administrator privileges when needed, from any directory:
+sudo nero
 ```
 
-Add `$HOME/.local/bin` to your shell's PATH to run `nero` by name. Alternatively,
-install system-wide with `sudo install -m 755 ... /usr/local/bin/nero`. Remove the
-installed file to uninstall. `SHA256SUMS` verifies all five archives together;
+The default system installation directory is `/usr/local/bin`, available to
+normal shells and the standard sudo PATH on macOS/Ubuntu. No shell alias or
+working directory is required. For custom systems where that directory is not
+in sudo's configured PATH, use `sudo /usr/local/bin/nero`; no sudo configuration
+is changed by this installer. Uninstall with `sudo rm /usr/local/bin/nero`.
+A source checkout uses `make` followed by `sudo make install`. Packaging tools
+can stage files with `make install DESTDIR=/path/to/staging PREFIX=/usr/local`.
+`INSTALL_DIR` remains available as an explicit override.
+
+`SHA256SUMS` verifies all five archives together;
 per-archive `.sha256` files are convenient when downloading just one platform.
 Checksums detect damaged downloads; they are not a separate code signature.
+
+## Native Windows command installation
+
+After checksum verification and extraction, run `install.ps1` in the extracted
+folder. The default installs for the current user and adds the directory to the
+persistent user PATH and the current PowerShell session. New terminal windows
+can run `nero` from any directory. The ZIP includes this installer.
+
+For all users, open Administrator PowerShell and run
+`.\install.ps1 -PathScope Machine`. The default destination is
+`%ProgramFiles%\Nero\bin`; the installer updates machine PATH.
+Windows does not require a `sudo` command: open Terminal as Administrator when
+elevated permissions are needed. WSL2 uses the Linux `sudo nero` installation.
+
+If PowerShell policy prevents running a downloaded script, these manual commands
+perform the user installation without changing the execution policy. Run them
+inside the extracted package folder:
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'Programs\Nero\bin'
+New-Item -ItemType Directory -Force $bin | Out-Null
+Copy-Item .\bin\nero.exe (Join-Path $bin 'nero.exe') -Force
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$entries = @($userPath -split ';' | Where-Object { $_ })
+if ($entries -notcontains $bin) {
+    [Environment]::SetEnvironmentVariable('Path', (($entries + $bin) -join ';'), 'User')
+}
+$env:Path = "$bin;$env:Path"
+nero
+```
+
+To uninstall, remove the installed `nero.exe` and remove its directory from your
+user or machine PATH using Windows Environment Variables settings.
 
 ## Windows 11 / WSL2
 
@@ -103,7 +145,8 @@ make test-sanitize
 cmake --preset linux
 cmake --build --preset linux --parallel 4
 ctest --preset linux
-./nero
+sudo make install
+nero
 ```
 
 ## Maintainer release procedure

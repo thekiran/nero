@@ -50,7 +50,9 @@ OBJS := $(addprefix $(BUILD_DIR)/obj/,$(SRCS:.c=.o))
 DEPS := $(OBJS:.o=.d)
 
 TARGET := nero
-INSTALL_DIR ?= /usr/local/bin
+PREFIX ?= /usr/local
+DESTDIR ?=
+INSTALL_DIR ?= $(PREFIX)/bin
 
 .PHONY: all clean install run help test test-sanitize analyze
 .DEFAULT_GOAL := all
@@ -73,7 +75,8 @@ run: $(TARGET)
 
 install: $(TARGET)
 	@echo "[INSTALL] Installing $(TARGET) to $(INSTALL_DIR)"
-	sudo install -m 755 $(TARGET) $(INSTALL_DIR)/$(TARGET)
+	install -d "$(DESTDIR)$(INSTALL_DIR)"
+	install -m 755 "$(TARGET)" "$(DESTDIR)$(INSTALL_DIR)/$(TARGET)"
 
 clean:
 	@echo "[CLEAN] Removing build artifacts and $(TARGET)"
@@ -139,6 +142,7 @@ analyze:
 
 help:
 	@echo "make                 Build the platform-specific executable"
+	@echo "sudo make install    Install nero to /usr/local/bin for all directories"
 	@echo "make test            Run offline CLI regression tests"
 	@echo "make test-sanitize   Run offline tests with ASan/UBSan"
 	@echo "make analyze         Run Clang static analysis"

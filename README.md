@@ -91,8 +91,9 @@ shasum -a 256 -c nero-vX.Y.Z-macos-arm64.tar.gz.sha256
 sha256sum -c nero-vX.Y.Z-linux-x86_64.tar.gz.sha256
 ```
 
-Extract the selected archive and install its `bin/nero` to `~/.local/bin` or
-`/usr/local/bin`. Linux packages require runtime libraries; macOS packages are
+Extract the selected archive. On macOS/Linux, run `sudo sh install.sh` inside
+its extracted folder to install `nero` into `/usr/local/bin`. You can then run
+`nero` or `sudo nero` from any directory. Linux packages require runtime libraries; macOS packages are
 unsigned and use system frameworks. See the **[package installation guide](docs/releases.md)**
 for complete copyable commands, dependencies and supported OS versions.
 
@@ -117,10 +118,13 @@ xcode-select --install
 git clone https://github.com/thekiran/nero.git && cd nero && make CC=clang -j4
 ```
 
-**2. Run:**
+**2. Install once, then run from any directory:**
 
 ```bash
-./nero
+sudo make install
+nero
+# For operations that require administrator privileges:
+sudo nero
 ```
 
 Works with the macOS native CLI. Some experimental network functions may need
@@ -143,10 +147,13 @@ sudo apt update && sudo apt install -y git build-essential libcurl4-openssl-dev 
 git clone https://github.com/thekiran/nero.git && cd nero && make -j"$(nproc)"
 ```
 
-**3. Run:**
+**3. Install once, then run from any directory:**
 
 ```bash
-./nero
+sudo make install
+nero
+# For operations that require administrator privileges:
+sudo nero
 ```
 
 The Linux build includes experimental network modules. A successful build is
@@ -167,8 +174,18 @@ $expected = ((Get-Content "$package.zip.sha256").Trim() -split '\s+')[0]
 $actual = (Get-FileHash "$package.zip" -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw "Checksum mismatch" }
 Expand-Archive "$package.zip" -DestinationPath .
-& ".\$package\bin\nero.exe"
+& ".\$package\install.ps1"
+nero
 ```
+
+The installer copies `nero.exe` to `%LOCALAPPDATA%\Programs\Nero\bin` and
+adds that directory to your user PATH. Open a new terminal after installation;
+`nero` then works from any directory. For all Windows users, run
+`install.ps1 -PathScope Machine` from Administrator PowerShell; this uses
+`%ProgramFiles%\Nero\bin` and the machine PATH. Windows elevation uses an
+Administrator terminal; `sudo` is not a requirement of the native Windows CLI.
+See [manual Windows installation](docs/releases.md#native-windows-command-installation)
+if your PowerShell script policy blocks the installer.
 
 Use Windows Terminal / PowerShell for the interactive CLI. The binary is
 unsigned. Native Windows supports the terminal, interface selection and TCP
@@ -185,7 +202,8 @@ cd nero
 cmake -S . -B .build/windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc
 cmake --build .build/windows --parallel 4
 ctest --test-dir .build/windows --output-on-failure
-./.build/windows/nero.exe
+powershell.exe -NoProfile -File scripts/install.ps1 -BinaryPath .build/windows/nero.exe
+nero
 ```
 
 ### Windows — optional WSL2 route

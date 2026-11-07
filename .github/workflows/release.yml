@@ -6,7 +6,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/release.yml'
-      - 'scripts/release/**'
+      - 'scripts/**'
       - 'Makefile'
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
@@ -128,6 +128,13 @@ jobs:
         run: |
           make CC=${{ matrix.cc }} -j4
           file nero
+      - name: Verify system command installation without modifying the runner
+        run: |
+          staging="$RUNNER_TEMP/nero-install"
+          make install DESTDIR="$staging"
+          test -x "$staging/usr/local/bin/nero"
+          cd "$RUNNER_TEMP"
+          printf 'version\nexit\n' | env PATH="$staging/usr/local/bin:$PATH" nero
       - name: Package native executable and verify archive
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
