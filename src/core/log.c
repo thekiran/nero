@@ -26,9 +26,10 @@
 #define LOG_LIMIT (1024L * 1024L)
 typedef struct { nero_log_level level; char text[LOG_LINE]; } log_entry;
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t log_once = PTHREAD_ONCE_INIT;
 static log_entry entries[LOG_CAPACITY];
 static size_t head, used;
-static int initialized, persistent, storage_error;
+static int persistent, storage_error;
 static char path[LOG_PATH], backup[LOG_PATH + 3];
 
 static void clean_text(char *out, size_t size, const char *in) {
@@ -69,24 +70,42 @@ static FILE *open_log(const char *name, int truncate, int reading) {
     if (!file) { int error = errno; log_close(fd); errno = error; }
     return file;
 }
+static void remember_import(char *line, size_t length) {
+    while (length && line[length - 1] == '\r') length--;
+    line[length] = '\0';
+    const char *prefix_end = strchr(line, ']');
+    nero_log_level level = prefix_end && strncmp(prefix_end, "] [ERROR] [", 11) == 0 ? NERO_LOG_ERROR :
+        (prefix_end && strncmp(prefix_end, "] [WARN] [", 10) == 0 ? NERO_LOG_WARN : NERO_LOG_INFO);
+    if (length) remember(level, line);
+}
+/* Called by pthread_once, before acquiring the writer lock. Import at most
+ * one MiB per file; avoid stream-position/EOF ambiguities after failed seeks. */
 static void load_recent(const char *name) {
     FILE *file = open_log(name, 0, 1);
     if (!file) return;
-    char line[LOG_LINE];
-    if (fseek(file, 0, SEEK_END) == 0) {
-        long bytes = ftell(file);
-        if (bytes > LOG_LIMIT) {
-            if (fseek(file, -LOG_LIMIT, SEEK_END) == 0) (void)fgets(line, sizeof(line), file);
-        } else rewind(file);
+    if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return; }
+    long end = ftell(file);
+    if (end < 0) { fclose(file); return; }
+    long start = end > LOG_LIMIT ? end - LOG_LIMIT : 0;
+    if (fseek(file, start, SEEK_SET) != 0) { fclose(file); return; }
+    long remaining = end - start;
+    int discard = start > 0;
+    char chunk[8192], line[LOG_LINE];
+    size_t length = 0;
+    while (remaining > 0) {
+        size_t wanted = remaining < (long)sizeof(chunk) ? (size_t)remaining : sizeof(chunk);
+        size_t read_count = fread(chunk, 1, wanted, file);
+        if (!read_count) break;
+        remaining -= (long)read_count;
+        for (size_t i = 0; i < read_count; ++i) {
+            if (chunk[i] == '\n') {
+                if (!discard) remember_import(line, length);
+                discard = 0; length = 0;
+            } else if (!discard && length + 1 < sizeof(line)) line[length++] = chunk[i];
+        }
+        if (read_count < wanted) break;
     }
-    while (fgets(line, sizeof(line), file)) {
-        size_t n = strlen(line);
-        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';
-        const char *prefix_end = strchr(line, ']');
-        nero_log_level level = prefix_end && strncmp(prefix_end, "] [ERROR] [", 11) == 0 ? NERO_LOG_ERROR :
-            (prefix_end && strncmp(prefix_end, "] [WARN] [", 10) == 0 ? NERO_LOG_WARN : NERO_LOG_INFO);
-        if (n) remember(level, line);
-    }
+    if (!discard && length) remember_import(line, length);
     fclose(file);
 }
 static int create_parent(void) {
@@ -106,8 +125,6 @@ static int create_parent(void) {
     return 0;
 }
 static void initialize(void) {
-    if (initialized) return;
-    initialized = 1;
     const char *override = getenv("NERO_LOG_FILE");
     if (override && strcmp(override, ":memory:") == 0) return;
     int length;
@@ -132,11 +149,14 @@ static void initialize(void) {
         path[0] = '\0'; storage_error = length < 0 ? ENOENT : ENAMETOOLONG;
     } else {
         snprintf(backup, sizeof(backup), "%s.1", path);
-        if (create_parent() == 0) {
+        errno = 0;
+        if (create_parent() != 0) storage_error = errno ? errno : EIO;
+        else {
+            errno = 0;
             FILE *file = open_log(path, 0, 0);
-            if (file) { fclose(file); persistent = 1; load_recent(backup); load_recent(path); }
+            if (!file) storage_error = errno ? errno : EIO;
+            else { fclose(file); persistent = 1; load_recent(backup); load_recent(path); }
         }
-        if (!persistent) storage_error = errno ? errno : EIO;
     }
     if (storage_error) {
         char message[LOG_LINE];
@@ -161,8 +181,8 @@ static void persist_line(const char *line) {
 }
 void nero_log_write(nero_log_level level, const char *component, const char *format, ...) {
     int saved_errno = errno;
+    pthread_once(&log_once, initialize);
     pthread_mutex_lock(&log_mutex);
-    initialize();
     char message[512] = {0}, safe_message[512], safe_component[40], timestamp[32];
     va_list args;
     va_start(args, format);
@@ -198,13 +218,14 @@ static void show_path(FILE *out) {
 }
 void nero_log_show_path(FILE *out) {
     int saved_errno = errno;
-    pthread_mutex_lock(&log_mutex); initialize(); show_path(out); pthread_mutex_unlock(&log_mutex);
+    pthread_once(&log_once, initialize);
+    pthread_mutex_lock(&log_mutex); show_path(out); pthread_mutex_unlock(&log_mutex);
     errno = saved_errno;
 }
 void nero_log_dump(FILE *out, int errors_only) {
     int saved_errno = errno;
-    pthread_mutex_lock(&log_mutex);
-    initialize(); show_path(out);
+    pthread_once(&log_once, initialize);
+    pthread_mutex_lock(&log_mutex); show_path(out);
     fprintf(out, "Recent logs (up to %d entries, timestamps UTC)%s:\n", LOG_CAPACITY,
             errors_only ? " — warnings/errors" : "");
     int shown = 0;
@@ -219,8 +240,8 @@ void nero_log_dump(FILE *out, int errors_only) {
 }
 int nero_log_clear(void) {
     int saved_errno = errno, result = 0, error = 0;
+    pthread_once(&log_once, initialize);
     pthread_mutex_lock(&log_mutex);
-    initialize();
     if (persistent) {
         FILE *file = open_log(path, 1, 0);
         if (!file) { result = -1; error = errno; }
