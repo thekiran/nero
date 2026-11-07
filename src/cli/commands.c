@@ -382,6 +382,14 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
         return CLI_CMD_INVALID;
     }
 
+    /* -mode off blocks every network operation at dispatch, consistently with
+     * -Sc. This gates the command handler only; the legacy transmission engine
+     * is never entered and is not modified. */
+    if (!scan_enabled) {
+        puts("\nNetwork diagnostics are disabled.");
+        return CLI_CMD_CONTINUE;
+    }
+
 #if defined(NERO_SAFE_TEST)
 
     /* Safe test mode: no real network traffic. */

@@ -48,6 +48,23 @@ class SafeTests(unittest.TestCase):
         self.assertNotIn(b"-Syn operation failed", output)
         self.assertIn(b"Exiting", output)
 
+    def test_mode_off_gates_syn_at_dispatch(self):
+        # -mode off must block -Syn at the command handler, consistently with
+        # -Sc, before the legacy engine is ever entered. With diagnostics off,
+        # -Syn produces the disabled notice and no safe-test line; turning the
+        # mode back on restores the normal handler. (In this build -Sc reports
+        # "unsupported" independently of the mode; the -Sc gate is exercised by
+        # test_mode_off_blocks_both_sc_and_syn against the nero-mock binary.)
+        output = self.cli(
+            b"-mode off\n192.0.2.1 -Syn\n-mode on\n192.0.2.1 -Syn\nexit\n")
+        self.assertEqual(output.count(b"Network diagnostics are disabled."), 1)
+        self.assertEqual(
+            output.count(b"-Syn: safe test mode; no network traffic generated."), 1)
+        # The disabled notice must precede the restored safe-test line.
+        self.assertLess(
+            output.index(b"Network diagnostics are disabled."),
+            output.index(b"-Syn: safe test mode; no network traffic generated."))
+
     def test_eof_and_incomplete_escape(self):
         for data in (b"", b"unfinished", b"\x1b", b"\x1b["):
             self.cli(data)
