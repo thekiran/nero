@@ -78,12 +78,15 @@ def main():
             command = ("& $env:NERO_INSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
                        "if (-not $?) { exit 1 }; "
                        "$cmd = Get-Command nero -ErrorAction Stop; "
-                       "if ($cmd.Source -ne (Join-Path $env:NERO_INSTALL_DIR 'nero.exe')) { exit 1 }; "
-                       "'version','exit' | nero; exit $LASTEXITCODE")
+                       "$expected = [IO.Path]::GetFullPath((Join-Path $env:NERO_INSTALL_DIR 'nero.exe')); "
+                       "if ([IO.Path]::GetFullPath($cmd.Source) -ne $expected) { throw 'Wrong nero command resolved' }; "
+                       "$output = @('version','exit' | nero); "
+                       "if ($LASTEXITCODE -ne 0 -or -not ($output -match 'version 1.0')) { throw 'Installed CLI failed' }; "
+                       "Write-Output 'NERO_COMMAND_INSTALL_OK'")
             check = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', command],
                                    capture_output=True, timeout=30, env=install_env, cwd=temp)
-            if check.returncode != 0 or b'version 1.0' not in check.stdout:
-                raise RuntimeError(f'installed nero command failed: {check.stderr!r}')
+            if check.returncode != 0 or b'NERO_COMMAND_INSTALL_OK' not in check.stdout:
+                raise RuntimeError(f'installed nero command failed ({check.returncode}): stdout={check.stdout!r}, stderr={check.stderr!r}')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_name(archive.name + '.sha256').write_text(f'{digest}  {archive.name}\n')
     print(archive)
