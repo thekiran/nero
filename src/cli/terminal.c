@@ -5,6 +5,7 @@
 #include "nero/terminal.h"
 #include "cli_internal.h"
 #include "nero/ascii.h"
+#include "nero/log.h"
 #if !defined(NERO_NETWORK_UNAVAILABLE) && !defined(NERO_SAFE_TEST)
 #include "nero/portscanner.h"
 #endif
@@ -78,6 +79,7 @@ static void terminal_cleanup(void)
 {
     if (terminal_changed) {
         if (set_terminal(&saved_terminal) != 0) {
+            nero_log_write(NERO_LOG_ERROR, "terminal", "Terminal restoration failed: %s", strerror(errno));
             perror("tcsetattr restore");
             terminal_error = 1;
         } else {
@@ -98,6 +100,7 @@ void disableBuffering(struct termios *old)
     if (!isatty(STDIN_FILENO))
         return;
     if (tcgetattr(STDIN_FILENO, old) != 0) {
+        nero_log_write(NERO_LOG_ERROR, "terminal", "Terminal state read failed: %s", strerror(errno));
         perror("tcgetattr");
         terminal_error = 1;
         return;
@@ -110,6 +113,7 @@ void disableBuffering(struct termios *old)
     if (set_terminal(&new) == 0) {
         terminal_changed = 1;
     } else {
+        nero_log_write(NERO_LOG_ERROR, "terminal", "Terminal setup failed: %s", strerror(errno));
         perror("tcsetattr");
         terminal_error = 1;
     }
@@ -123,6 +127,7 @@ void restoreBuffering(struct termios *old)
 
 int terminal_code(void)
 {
+    nero_log_write(NERO_LOG_INFO, "session", "NERO terminal session started");
     struct termios old = {0};
     char command[CLI_LINE_CAPACITY] = {0};
 
@@ -135,6 +140,7 @@ int terminal_code(void)
         cleanup_registered = 1;
     }
     if (save_signals() != 0) {
+        nero_log_write(NERO_LOG_ERROR, "terminal", "Signal setup failed: %s", strerror(errno));
         perror("sigaction");
         terminal_error = 1;
         goto input_end;
@@ -151,12 +157,14 @@ int terminal_code(void)
         int result = cli_read_line(command);
         if (result <= 0) {
             if (result < 0) {
+                nero_log_write(NERO_LOG_ERROR, "terminal", "Input read failed: %s", strerror(errno));
                 perror("terminal read");
                 terminal_error = 1;
             }
             goto input_end;
         }
         if (result == 2) {
+            nero_log_write(NERO_LOG_WARN, "cli", "Input rejected: command exceeds 255 bytes");
             fputs("\nCommand too long (maximum 255 bytes).\n", stderr);
             continue;
         }
@@ -177,6 +185,10 @@ input_end:
     if (signals_saved && cli_signal_mode(0) != 0)
         terminal_error = 1;
     signals_saved = 0;
+    nero_log_write(terminal_error ? NERO_LOG_ERROR :
+                   (cli_termination_signal ? NERO_LOG_WARN : NERO_LOG_INFO), "session",
+                   "NERO terminal session ended: signal=%d status=%d",
+                   (int)cli_termination_signal, terminal_error);
     if (cli_termination_signal)
         return 128 + cli_termination_signal;
     return terminal_error || ferror(stdout) ? 1 : 0;

@@ -36,6 +36,7 @@
 #include "nero/terminal.h"
 #include "nero/network_diagnostics.h"
 #include "nero/operation_ui.h"
+#include "nero/log.h"
 #include "nero/socket_handle.h"
 #ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/portscanner.h"
@@ -299,6 +300,7 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
         return CLI_CMD_INVALID;
 
 #ifdef NERO_NETWORK_UNAVAILABLE
+    nero_log_write(NERO_LOG_WARN, "scanner", "TCP scanner unavailable in this build");
     fputs(
         "\n-Sc: unsupported in this build; "
         "no network traffic is generated.\n",
@@ -344,6 +346,9 @@ static cli_cmd_result cmd_scan(char **tokens, size_t count)
     tcp_port_result result =
         tcp_port_check(tokens[0], (uint16_t)selected_port);
 
+    nero_log_write(result == TCP_PORT_ERROR ? NERO_LOG_ERROR :
+                   (result == TCP_PORT_TIMEOUT ? NERO_LOG_WARN : NERO_LOG_INFO),
+                   "tcp", "target=%s port=%d result=%s", tokens[0], selected_port, tcp_result_string(result));
     printf(
         "Port %d : %s\n",
         selected_port,
@@ -397,6 +402,7 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     /* SYN flood'u başlat. Port taraması SYN_Flood içinde port_get()
      * üzerinden portscanner() ile yapılır, burada ayrıca çağırmayın. */
     if (SYN_Flood(tokens[0]) != 0) {
+        nero_log_write(NERO_LOG_ERROR, "cli", "Legacy network operation failed: target=%s", tokens[0]);
         fprintf(stderr, "SYN flood failed for %s\n", tokens[0]);
     }
 
@@ -497,6 +503,24 @@ static cli_cmd_result cmd_version(char **tokens, size_t count)
     return CLI_CMD_CONTINUE;
 }
 
+/* Logs are independent of shell history and survive session restart when
+ * the per-user log file can be written. Never log log-reads themselves. */
+static cli_cmd_result cmd_log(char **tokens, size_t count)
+{
+    if (count > 2 || (count == 2 && strcmp(tokens[1], "-errors") != 0 &&
+        strcmp(tokens[1], "-path") != 0 && strcmp(tokens[1], "-clear") != 0))
+        return CLI_CMD_INVALID;
+    putchar('\n');
+    if (count == 1) nero_log_dump(stdout, 0);
+    else if (count == 2 && strcmp(tokens[1], "-errors") == 0) nero_log_dump(stdout, 1);
+    else if (count == 2 && strcmp(tokens[1], "-path") == 0) nero_log_show_path(stdout);
+    else if (count == 2 && strcmp(tokens[1], "-clear") == 0) {
+        if (nero_log_clear() == 0) puts("Logs cleared.");
+        else fprintf(stderr, "Could not clear persisted logs: %s\n", strerror(errno));
+    } else return CLI_CMD_INVALID;
+    return CLI_CMD_CONTINUE;
+}
+
 /* ============================================================
  * COMMAND REGISTRY
  * ============================================================ */
@@ -516,6 +540,7 @@ static const struct {
 
 static void cli_report_unknown(void)
 {
+    nero_log_write(NERO_LOG_WARN, "cli", "Unknown command rejected (input omitted)");
     if (terminal_color_enabled()) {
         fputs(UNKNOWN_COMMAND_WARNING, stdout);
     } else {
@@ -533,8 +558,10 @@ static void cli_report_unknown(void)
 
 int cli_dispatch_command(const char *command)
 {
-    if (command == NULL)
+    if (command == NULL) {
+        nero_log_write(NERO_LOG_ERROR, "cli", "Null command input");
         return -1;
+    }
 
     char copy[CLI_LINE_CAPACITY];
 
@@ -624,6 +651,7 @@ int cli_dispatch_command(const char *command)
     return (int)result;
 
 invalid:
+    nero_log_write(NERO_LOG_WARN, "cli", "Invalid command parameters (input omitted)");
     fputs(
         "\nInvalid command parameters. Use 'help'.\n",
         stderr

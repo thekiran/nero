@@ -28,6 +28,7 @@
 #include "nero/operation_ui.h"
 #include "nero/socket_handle.h"
 #include "nero/portscanner.h"
+#include "nero/log.h"
 
 /* Genel amaçlı tarayıcı: her IP için tam 1-65535 aralığı taranır. */
 #define SCAN_TOTAL_PORTS 65535
@@ -212,6 +213,10 @@ static void scan_error_text(int error, char *text, size_t size) {
 
 static void report_scan_summary(void) {
     scan_summary s = summarize_scan(); /* caller has joined every writer */
+    nero_log_write(s.unknown ? NERO_LOG_ERROR : (s.filtered || s.unscanned ? NERO_LOG_WARN : NERO_LOG_INFO),
+        "scanner", "target=%s host=%s open=%d closed=%d filtered=%d error/unknown=%d unscanned=%d retried=%d",
+        target_ip_global, atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
+        s.open, s.closed, s.filtered, s.unknown, s.unscanned, s.retried);
     printf("Host: %s | TCP: open=%d closed=%d filtered=%d error/unknown=%d "
            "unscanned=%d total=%d | retried=%d\n",
            atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
@@ -223,6 +228,8 @@ static void report_scan_summary(void) {
     for (int i = 0; i < count; ++i) {
         char text[256];
         scan_error_text(groups[i].error, text, sizeof(text));
+        nero_log_write(NERO_LOG_ERROR, "scanner", "target=%s operation=%s error=%d (%s) ports=%d",
+                       target_ip_global, scan_stage_name(groups[i].stage), groups[i].error, text, groups[i].count);
         printf("  %s: error=%d (%s), ports=%d\n", scan_stage_name(groups[i].stage),
                groups[i].error, text, groups[i].count);
     }
@@ -927,10 +934,12 @@ static const scan_profile *select_scan_profile(nero_operation_ui *ui) {
 int portscanner(const char *target_ip) {
     struct in_addr address;
     if (!target_ip || inet_pton(AF_INET, target_ip, &address) != 1) {
+        nero_log_write(NERO_LOG_ERROR, "scanner", "Invalid IPv4 target (input omitted)");
         fprintf(stderr, "[-] Invalid IPv4 target.\n");
         return PORTSCANNER_FAILED;
     }
     target_ip_global = target_ip;
+    nero_log_write(NERO_LOG_INFO, "scanner", "TCP scan started: target=%s ports=1-65535", target_ip);
     scan_input_fallback = 0;
     scan_owner = pthread_self();
     portscanner_interrupt_requested = 0;
@@ -943,6 +952,7 @@ int portscanner(const char *target_ip) {
     if (!results_list || !work_ports) {
         free(results_list); results_list = NULL;
         free(work_ports);
+        nero_log_write(NERO_LOG_ERROR, "scanner", "Failed to allocate scan ledger");
         fprintf(stderr, "[-] Failed to allocate scan ledger.\n");
         return PORTSCANNER_FAILED;
     }
@@ -962,6 +972,7 @@ int portscanner(const char *target_ip) {
         free(results_list); results_list = NULL;
         free(work_ports);
         nero_operation_end(&ui);
+        nero_log_write(NERO_LOG_WARN, "scanner", "Scan cancelled at profile selection");
         puts("Scan cancelled. Returned to terminal.");
         return PORTSCANNER_CANCELLED;
     }

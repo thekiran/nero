@@ -16,6 +16,7 @@ include(CTest)
 include(cmake/NeroTargets.cmake)
 
 set(NERO_CLI_SUPPORT_SOURCES
+    src/core/log.c
     src/cli/parser/parser.c
     src/cli/input.c
     src/cli/render.c
@@ -145,7 +146,7 @@ endif()
 # creates real sockets, and uses native pthreads to exercise shared work claims.
 if(BUILD_TESTING AND NOT MSVC)
     find_package(Threads REQUIRED)
-    add_executable(portscanner-reliability tests/portscanner_reliability.c src/cli/operation_ui.c)
+    add_executable(portscanner-reliability tests/portscanner_reliability.c src/cli/operation_ui.c src/core/log.c)
     nero_target(portscanner-reliability)
     target_compile_definitions(portscanner-reliability PRIVATE UNICODE_SUPPORT)
     target_link_libraries(portscanner-reliability PRIVATE Threads::Threads)
@@ -157,4 +158,25 @@ if(BUILD_TESTING AND NOT MSVC)
     endif()
     add_test(NAME portscanner-reliability COMMAND portscanner-reliability)
     set_tests_properties(portscanner-reliability PROPERTIES TIMEOUT 60)
+endif()
+
+if(BUILD_TESTING AND NOT MSVC)
+    add_executable(logging-fixture tests/logging_fixture.c src/core/log.c)
+    nero_target(logging-fixture)
+    target_link_libraries(logging-fixture PRIVATE Threads::Threads)
+    if(WIN32)
+        target_link_options(logging-fixture PRIVATE -static)
+        set(logging_cli_target nero)
+    else()
+        target_compile_definitions(logging-fixture PRIVATE _POSIX_C_SOURCE=200809L)
+        set(logging_cli_target nero-safe)
+    endif()
+    add_test(NAME logging COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_logging.py" $<TARGET_FILE:${logging_cli_target}> $<TARGET_FILE:logging-fixture>)
+    set_tests_properties(logging PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING)
+    get_property(nero_test_names DIRECTORY PROPERTY TESTS)
+    set_tests_properties(${nero_test_names} PROPERTIES ENVIRONMENT "NERO_LOG_FILE=:memory:")
 endif()
