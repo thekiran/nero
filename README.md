@@ -169,7 +169,7 @@ WSL installation is needed to run the downloaded executable.
 In PowerShell, replace the example version with your downloaded version:
 
 ```powershell
-$package = "nero-v0.1.1-windows-x86_64"
+$package = "nero-v0.1.2-windows-x86_64"
 $expected = ((Get-Content "$package.zip.sha256").Trim() -split '\s+')[0]
 $actual = (Get-FileHash "$package.zip" -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw "Checksum mismatch" }

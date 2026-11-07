@@ -74,19 +74,28 @@ def main():
             installer = Path(temp) / root / 'install.ps1'
             installed = Path(temp) / 'installed-bin'
             # Environment variables avoid interpolating filesystem paths as code.
-            install_env = dict(env, NERO_INSTALL_SCRIPT=str(installer), NERO_INSTALL_DIR=str(installed))
+            input_path = Path(temp) / 'commands.txt'
+            input_path.write_bytes(b'version\nexit\n')
+            stdout_path, stderr_path = Path(temp) / 'installed.stdout', Path(temp) / 'installed.stderr'
+            install_env = dict(env, NERO_INSTALL_SCRIPT=str(installer), NERO_INSTALL_DIR=str(installed),
+                               NERO_COMMAND_INPUT=str(input_path), NERO_COMMAND_OUTPUT=str(stdout_path),
+                               NERO_COMMAND_ERROR=str(stderr_path))
             command = ("& $env:NERO_INSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
                        "if (-not $?) { exit 1 }; "
                        "$cmd = Get-Command nero -ErrorAction Stop; "
                        "$expected = [IO.Path]::GetFullPath((Join-Path $env:NERO_INSTALL_DIR 'nero.exe')); "
                        "if ([IO.Path]::GetFullPath($cmd.Source) -ne $expected) { throw 'Wrong nero command resolved' }; "
-                       "$output = @('version','exit' | nero); "
-                       "if ($LASTEXITCODE -ne 0 -or -not ($output -match 'version 1.0')) { throw 'Installed CLI failed' }; "
+                       "$p = Start-Process -FilePath nero -NoNewWindow -PassThru -Wait "
+                       "-RedirectStandardInput $env:NERO_COMMAND_INPUT "
+                       "-RedirectStandardOutput $env:NERO_COMMAND_OUTPUT "
+                       "-RedirectStandardError $env:NERO_COMMAND_ERROR; "
+                       "if ($p.ExitCode -ne 0) { throw ('Installed CLI failed: ' + $p.ExitCode) }; "
                        "Write-Output 'NERO_COMMAND_INSTALL_OK'")
             check = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', command],
                                    capture_output=True, timeout=30, env=install_env, cwd=temp)
-            if check.returncode != 0 or b'NERO_COMMAND_INSTALL_OK' not in check.stdout:
-                raise RuntimeError(f'installed nero command failed ({check.returncode}): stdout={check.stdout!r}, stderr={check.stderr!r}')
+            if (check.returncode != 0 or b'NERO_COMMAND_INSTALL_OK' not in check.stdout
+                    or not stdout_path.exists() or b'version 1.0' not in stdout_path.read_bytes()):
+                raise RuntimeError(f'installed nero command failed ({check.returncode}): stdout={check.stdout!r}, stderr={check.stderr!r}, cli_stdout={stdout_path.read_bytes() if stdout_path.exists() else None!r}, cli_stderr={stderr_path.read_bytes() if stderr_path.exists() else None!r}')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_name(archive.name + '.sha256').write_text(f'{digest}  {archive.name}\n')
     print(archive)

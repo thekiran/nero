@@ -41,7 +41,7 @@ with the selected release. Verify before extracting.
 macOS example (Apple Silicon):
 
 ```bash
-VERSION=v0.1.0
+VERSION=v0.1.2
 PACKAGE="nero-$VERSION-macos-arm64"
 shasum -a 256 -c "$PACKAGE.tar.gz.sha256"
 tar -xzf "$PACKAGE.tar.gz"
@@ -54,7 +54,7 @@ sudo nero
 Linux example (x86-64; use `linux-arm64` for ARM64):
 
 ```bash
-VERSION=v0.1.0
+VERSION=v0.1.2
 PACKAGE="nero-$VERSION-linux-x86_64"
 sha256sum -c "$PACKAGE.tar.gz.sha256"
 tar -xzf "$PACKAGE.tar.gz"
