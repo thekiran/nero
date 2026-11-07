@@ -31,5 +31,8 @@ jobs:
         run: make test CC=${{ matrix.cc }}
       - name: No-network memory safety tests
         run: make test-sanitize CC=${{ matrix.cc }}
+      - name: Scanner thread safety (macOS Clang)
+        if: runner.os == 'macOS'
+        run: make test-tsan CC=${{ matrix.cc }}
       - name: Portable CLI and macOS adapter static analysis
         run: make analyze

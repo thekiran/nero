@@ -9,7 +9,7 @@
 
 static SOCKET expected_handle, observed_handle;
 static DWORD initial_mode, observed_mode;
-static int set_mode_fails;
+static int set_mode_fails, poll_fails;
 static SOCKET fake_socket(int domain, int type, int protocol)
 { (void)domain; (void)type; (void)protocol; return expected_handle; }
 static int fake_connect(SOCKET handle, const struct sockaddr *address, int length)
@@ -25,6 +25,7 @@ static int fake_getsockopt(SOCKET handle, int level, int option, char *value, in
 static int fake_poll(WSAPOLLFD *fds, ULONG count, INT timeout)
 {
     (void)timeout;
+    if (poll_fails) { WSASetLastError(WSAENOBUFS); return SOCKET_ERROR; }
     observed_handle = fds[0].fd;
     for (ULONG i = 0; i < count; ++i) fds[i].revents = POLLOUT;
     return 1;
@@ -69,6 +70,9 @@ int main(void)
     CHECK(fds[0].revents == POLLOUT && fds[1].revents == 0);
     fds[0].fd = 0; /* A zero SOCKET must not be treated as CRT stdin. */
     CHECK(nero_socket_poll(fds, 1, 0) == 1 && observed_handle == 0);
+    poll_fails = 1;
+    CHECK(nero_socket_poll(fds, 1, 0) == -1 && errno == WSAENOBUFS);
+    poll_fails = 0;
     expected_handle = INVALID_SOCKET;
     CHECK(socket(AF_INET, SOCK_STREAM, 0) == INVALID_SOCKET);
 

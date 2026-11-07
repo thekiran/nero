@@ -54,7 +54,7 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 INSTALL_DIR ?= $(PREFIX)/bin
 
-.PHONY: all clean install run help test test-sanitize analyze
+.PHONY: all clean install run help test test-sanitize test-tsan analyze
 .DEFAULT_GOAL := all
 
 all: $(TARGET)
@@ -116,9 +116,12 @@ $(TEST_DIR)/nero-faults: $(FAULT_SOURCES) src/cli/input.c src/cli/terminal.c $(C
 $(TEST_DIR)/operation-layout: tests/operation_layout_fixture.c src/cli/operation_ui.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/operation_layout_fixture.c src/cli/operation_ui.c -o $@
 
+$(TEST_DIR)/portscanner-reliability: tests/portscanner_reliability.c src/modules/portscanner.c src/cli/operation_ui.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/portscanner_reliability.c src/cli/operation_ui.c -o $@ -pthread
+
 TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
              $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults \
-             $(TEST_DIR)/operation-layout
+             $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
@@ -127,12 +130,17 @@ TEST_BINS += $(TEST_DIR)/interfaces-mock
 endif
 
 test: $(TEST_BINS)
+	$(TEST_DIR)/portscanner-reliability
 	python3 tests/test_safe.py $(TEST_DIR)
 	python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
 	python3 tests/test_operation_layout.py $(TEST_DIR)/operation-layout
 
 test-sanitize:
 	$(MAKE) test TEST_DIR=$(BUILD_DIR)/sanitize SANITIZERS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+
+test-tsan:
+	$(MAKE) $(BUILD_DIR)/tsan/portscanner-reliability TEST_DIR=$(BUILD_DIR)/tsan SANITIZERS="-fsanitize=thread -fno-omit-frame-pointer"
+	$(BUILD_DIR)/tsan/portscanner-reliability
 
 analyze:
 	@mkdir -p $(BUILD_DIR)/analysis
