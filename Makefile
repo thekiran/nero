@@ -37,7 +37,7 @@ ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Linux)
     INTERFACE_SOURCE := src/platform/linux/select_interface.c
     PLATFORM_SOURCES := $(INTERFACE_SOURCE)
-    CFLAGS += -D_POSIX_C_SOURCE=199309L -I/usr/include/ldns
+    CFLAGS += -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -I/usr/include/ldns
     LDLIBS += -lcurl -lcjson -lldns -lncurses
 else
     $(error Unsupported platform: $(UNAME_S))
