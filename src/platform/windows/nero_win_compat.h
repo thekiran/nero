@@ -92,7 +92,7 @@ typedef nero_ssize_t ssize_t;
 #undef EMFILE
 #define EMFILE WSAEMFILE
 #undef ENFILE
-#define ENFILE WSAENFILE
+#define ENFILE WSAEMFILE /* Winsock has no separate system file-table code. */
 #undef ENOBUFS
 #define ENOBUFS WSAENOBUFS
 

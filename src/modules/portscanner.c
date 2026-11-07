@@ -474,6 +474,7 @@ void *fast_scan_thread(void *args) {
         atomic_fetch_add_explicit(&ports_scanned, count, memory_order_relaxed);
     }
     pthread_exit(NULL);
+    return NULL; /* MinGW pthread_exit declarations may lack noreturn. */
 }
 
 /* --- Deep batch thread (yalnızca candidates üzerinde) --- */
@@ -500,6 +501,7 @@ void *deep_scan_thread(void *args) {
         atomic_fetch_add_explicit(&ports_scanned, count, memory_order_relaxed);
     }
     pthread_exit(NULL);
+    return NULL; /* MinGW pthread_exit declarations may lack noreturn. */
 }
 
 /* --- Banner / sürüm yakalama ---
