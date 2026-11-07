@@ -73,9 +73,15 @@ typedef enum {
     PORT_UNSCANNED = 0, PORT_OPEN, PORT_CLOSED, PORT_FILTERED, PORT_UNKNOWN
 } port_state;
 
+typedef enum {
+    SCAN_SOCKET, SCAN_NONBLOCKING, SCAN_CONNECT, SCAN_POLL, SCAN_SO_ERROR,
+    SCAN_POLL_EVENT, SCAN_DEADLINE
+} scan_error_stage;
+
 typedef struct {
     port_state state;
     int error;
+    scan_error_stage error_stage;
     unsigned attempts;
     unsigned retries_completed;
 } port_result;
@@ -134,7 +140,7 @@ static scan_summary summarize_scan(void) {
     return s;
 }
 
-static void record_result(int port, port_state state, int error) {
+static void record_result(int port, port_state state, int error, scan_error_stage stage) {
     pthread_mutex_lock(&results_mutex);
     if (results_list[port].state == PORT_UNSCANNED)
         atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
@@ -142,9 +148,66 @@ static void record_result(int port, port_state state, int error) {
         results_list[port].retries_completed++;
     results_list[port].state = state;
     results_list[port].error = error;
+    results_list[port].error_stage = stage;
     pthread_mutex_unlock(&results_mutex);
     if (state == PORT_OPEN || state == PORT_CLOSED)
         atomic_store_explicit(&host_responded, 1, memory_order_relaxed);
+}
+
+#define SCAN_ERROR_GROUPS 16
+typedef struct {
+    scan_error_stage stage;
+    int error, count;
+} scan_error_group;
+
+/* Only finalized unknown outcomes are grouped. A retry replaces its earlier
+ * error; timeouts/closed/open/unscanned are not counted as syscall failures. */
+static int summarize_scan_errors(scan_error_group *groups, int *overflow) {
+    int count = 0;
+    *overflow = 0;
+    for (int port = 1; port <= SCAN_TOTAL_PORTS; ++port) {
+        const port_result *r = &results_list[port];
+        if (r->state != PORT_UNKNOWN) continue;
+        int i;
+        for (i = 0; i < count; ++i)
+            if (groups[i].stage == r->error_stage && groups[i].error == r->error) break;
+        if (i == count) {
+            if (count == SCAN_ERROR_GROUPS) { (*overflow)++; continue; }
+            groups[count++] = (scan_error_group){r->error_stage, r->error, 0};
+        }
+        groups[i].count++;
+    }
+    return count;
+}
+
+static const char *scan_stage_name(scan_error_stage stage) {
+    switch (stage) {
+    case SCAN_SOCKET: return "socket";
+    case SCAN_NONBLOCKING: return "nonblocking setup";
+    case SCAN_CONNECT: return "connect";
+    case SCAN_POLL: return "poll";
+    case SCAN_SO_ERROR: return "SO_ERROR";
+    case SCAN_POLL_EVENT: return "poll event";
+    case SCAN_DEADLINE: return "deadline";
+    }
+    return "unknown operation";
+}
+
+static void scan_error_text(int error, char *text, size_t size) {
+    if (!error) {
+        snprintf(text, size, "completion not confirmed by poll readiness");
+        return;
+    }
+#ifdef _WIN32
+    if (error >= WSABASEERR) {
+        DWORD n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                NULL, (DWORD)error, 0, text, (DWORD)size, NULL);
+        if (!n) snprintf(text, size, "Winsock error %d", error);
+        else while (n && (text[n - 1] == '\r' || text[n - 1] == '\n')) text[--n] = '\0';
+        return;
+    }
+#endif
+    snprintf(text, size, "%s", strerror(error));
 }
 
 static void report_scan_summary(void) {
@@ -154,6 +217,16 @@ static void report_scan_summary(void) {
            atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
            s.open, s.closed, s.filtered, s.unknown, s.unscanned,
            s.open + s.closed + s.filtered + s.unknown + s.unscanned, s.retried);
+    scan_error_group groups[SCAN_ERROR_GROUPS];
+    int overflow = 0;
+    int count = summarize_scan_errors(groups, &overflow);
+    for (int i = 0; i < count; ++i) {
+        char text[256];
+        scan_error_text(groups[i].error, text, sizeof(text));
+        printf("  %s: error=%d (%s), ports=%d\n", scan_stage_name(groups[i].stage),
+               groups[i].error, text, groups[i].count);
+    }
+    if (overflow) printf("  Additional ungrouped error outcomes: %d\n", overflow);
 }
 
 /* --- Terminal yardımcıları --- */
@@ -373,7 +446,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd == NERO_INVALID_SOCKET) {
             int error = errno;
-            record_result(port, PORT_UNKNOWN, error);
+            record_result(port, PORT_UNKNOWN, error, SCAN_SOCKET);
             if (error == EMFILE || error == ENFILE || error == ENOBUFS || error == ENOMEM)
                 resource_error = 1;
             continue;
@@ -381,7 +454,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         if (make_nonblocking(fd) != 0) {
             int error = errno;
             close(fd);
-            record_result(port, PORT_UNKNOWN, error);
+            record_result(port, PORT_UNKNOWN, error, SCAN_NONBLOCKING);
             continue;
         }
         addr.sin_port = htons((uint16_t)port);
@@ -390,7 +463,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         int error = ret == 0 ? 0 : errno;
         if (ret == 0 || !connect_pending(error)) {
             close(fd);
-            record_result(port, classify_connect_error(error), error);
+            record_result(port, classify_connect_error(error), error, SCAN_CONNECT);
             continue;
         }
         pfds[nfds].fd = fd;
@@ -429,7 +502,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
                     if (pfds[s].fd == NERO_INVALID_SOCKET) continue;
                     close(pfds[s].fd);
                     pfds[s].fd = NERO_INVALID_SOCKET;
-                    record_result(slot_port[s], PORT_UNKNOWN, error);
+                    record_result(slot_port[s], PORT_UNKNOWN, error, SCAN_POLL);
                 }
                 break;
             }
@@ -439,8 +512,10 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
             int error = 0;
             socklen_t len = sizeof(error);
             port_state state;
+            scan_error_stage stage = SCAN_SO_ERROR;
             if (pfds[s].revents & POLLNVAL) {
                 error = EBADF;
+                stage = SCAN_POLL_EVENT;
                 state = PORT_UNKNOWN;
             } else if (getsockopt(pfds[s].fd, SOL_SOCKET, SO_ERROR, &error, &len) != 0) {
                 error = errno;
@@ -449,11 +524,12 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
                 continue; /* readiness is not itself successful connection evidence */
             } else if (!error && (!(pfds[s].revents & POLLOUT) ||
                                  (pfds[s].revents & (POLLERR | POLLHUP)))) {
+                stage = SCAN_POLL_EVENT;
                 state = PORT_UNKNOWN;
             } else state = classify_connect_error(error);
             close(pfds[s].fd);
             pfds[s].fd = NERO_INVALID_SOCKET;
-            record_result(slot_port[s], state, error);
+            record_result(slot_port[s], state, error, stage);
             remaining--;
         }
         now = scan_now_ms();
@@ -461,7 +537,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
             if (pfds[s].fd == NERO_INVALID_SOCKET || deadline[s] > now) continue;
             close(pfds[s].fd);
             pfds[s].fd = NERO_INVALID_SOCKET;
-            record_result(slot_port[s], PORT_FILTERED, ETIMEDOUT);
+            record_result(slot_port[s], PORT_FILTERED, ETIMEDOUT, SCAN_DEADLINE);
             remaining--;
         }
         if (ready > 0 && remaining == before) {

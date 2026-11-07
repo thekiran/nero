@@ -54,7 +54,12 @@ creation fails, the existing workers and caller consume the same remaining queue
 The scan progress count measures unique completed first-pass ports, not retries.
 
 The final ledger supersedes first-pass filtered results when a retry returns
-closed or open. The summary reports actual final classifications, completed
+closed or open. The summary groups final unknown outcomes by operation and OS error code, with
+readable system messages and a count of affected ports. This distinguishes
+resource/permission failures from routing failures and unconfirmed poll events.
+Earlier errors replaced by a retry are not counted again.
+
+The summary reports actual final classifications, completed
 retries, and unscanned work. No-open scans containing local/network errors return
 PORTSCANNER_FAILED after reporting the inconclusive outcomes. Explicit user
 cancellation returns PORTSCANNER_CANCELLED. Invalid IPv4 is rejected before UI or

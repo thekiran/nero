@@ -291,12 +291,38 @@ static void test_resource_recovery(void) {
     free(ports); teardown();
     puts("PASS every socket resource failure accounted as unknown, then retried to closed");
 }
+static void test_error_diagnostics(void) {
+    setup(RESOURCE);
+    run_scan_phase(NULL,65535,1,256,5);
+    scan_error_group groups[SCAN_ERROR_GROUPS];
+    int overflow = -1;
+    int n = summarize_scan_errors(groups, &overflow);
+    CHECK(n==1 && overflow==0 && groups[0].count==65535);
+    CHECK(groups[0].error==EMFILE && groups[0].stage==SCAN_SOCKET);
+    scenario=ROUTE_FAILURE;
+    const int ports[]={1,65535};
+    scan_ports_batch(target_ip_global,ports,2,5);
+    n=summarize_scan_errors(groups,&overflow);
+    CHECK(n==2 && overflow==0);
+    CHECK(groups[0].error==EHOSTUNREACH && groups[0].stage==SCAN_CONNECT && groups[0].count==2);
+    CHECK(groups[1].error==EMFILE && groups[1].count==65533);
+    scenario=CLOSED;
+    scan_ports_batch(target_ip_global,ports,2,5);
+    n=summarize_scan_errors(groups,&overflow);
+    CHECK(n==1 && groups[0].count==65533);
+    char text[256]; scan_error_text(0,text,sizeof(text));
+    CHECK(strstr(text,"not confirmed")!=NULL);
+    scan_error_text(EMFILE,text,sizeof(text)); CHECK(text[0]!='\0');
+    teardown();
+    puts("PASS error diagnostics: operation/errno counts, retry replacement and unresolved readiness");
+}
 int main(void) {
 #ifdef _WIN32
     _putenv_s("NERO_SCAN_ICMP", "");
 #else
     unsetenv("NERO_SCAN_ICMP");
 #endif
+    test_error_diagnostics();
     test_full_coverage(); test_discovery_and_deep(); test_batch_outcomes();
     test_full_timeouts(); test_cancel(); test_resource_recovery();
     setup(CLOSED); teardown();
