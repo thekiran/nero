@@ -190,3 +190,17 @@ Logs reflect events after this logging-enabled build starts; earlier terminal
 output cannot be recovered retroactively. Old severity-labelled records are
 loaded on restart, bounded to recent data. Control characters are sanitized
 before storage/display to avoid injecting terminal escape sequences.
+
+
+Log recovery and clearing behavior:
+
+- A truncated final line is separated from the next event before appending, so
+  its severity cannot absorb a later error record.
+- Special files are rejected (POSIX opens are nonblocking and descriptors are
+  checked as regular files); unavailable storage falls back to memory.
+- Oversized existing current/backup files retain complete recent records in a
+  private temporary file, then replace the original only after a successful copy.
+- `log -clear` retries configured disk files after a prior write failure. It
+  reports failure and retains recent memory records if the persistent clear is
+  unsuccessful. A successful clear also restores disk logging when possible.
+- Session end records contain the actual exit status and stdout error flag.
