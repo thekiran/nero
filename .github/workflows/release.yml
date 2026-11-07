@@ -141,6 +141,7 @@ jobs:
           path: .build/release/*
           if-no-files-found: error
           retention-days: 14
+          include-hidden-files: true
       - name: Preserve CTest diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -149,6 +150,7 @@ jobs:
           path: .build/cmake/**/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14
+          include-hidden-files: true
 
   draft:
     if: github.event_name != 'pull_request'
