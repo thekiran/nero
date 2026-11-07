@@ -9,6 +9,7 @@
 #include <errno.h>
 #ifndef _WIN32
 #include <poll.h>
+#include <sys/select.h>
 #endif
 #include <stdio.h>
 #include <string.h>
@@ -56,6 +57,46 @@ static int complete_line(cli_line *line)
 /* Timeout is used only for escape continuation, never for a whole command. */
 static int read_byte(char *ch, int timeout_ms)
 {
+#ifndef _WIN32
+    /* Blocking the session signals makes the flag check and pselect's atomic
+     * unblock/wait indivisible. A signal just before read() used to be lost as
+     * a wakeup, leaving the terminal waiting for a key after SIGHUP. */
+    sigset_t blocked, previous;
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGINT);
+    sigaddset(&blocked, SIGTERM);
+    sigaddset(&blocked, SIGHUP);
+    sigaddset(&blocked, SIGPIPE);
+    if (sigprocmask(SIG_BLOCK, &blocked, &previous) != 0)
+        return -1;
+    int result = 0;
+    while (!cli_termination_signal) {
+        fd_set input;
+        FD_ZERO(&input);
+        FD_SET(STDIN_FILENO, &input);
+        struct timespec timeout = {timeout_ms / 1000, (timeout_ms % 1000) * 1000000L};
+        int ready = pselect(STDIN_FILENO + 1, &input, NULL, NULL,
+                            timeout_ms < 0 ? NULL : &timeout, &previous);
+        if (cli_termination_signal)
+            break;
+        if (ready < 0 && errno == EINTR)
+            continue;
+        if (ready <= 0) {
+            result = ready == 0 ? -2 : -1;
+            break;
+        }
+        /* This session is stdin's sole reader. Keep signals blocked through
+         * the ready read; pending termination runs when the mask is restored. */
+        ssize_t count = read(STDIN_FILENO, ch, 1);
+        result = count == 1 ? 1 : (count == 0 ? 0 : -1);
+        break;
+    }
+    int saved_errno = errno;
+    if (sigprocmask(SIG_SETMASK, &previous, NULL) != 0)
+        return -1;
+    errno = saved_errno;
+    return cli_termination_signal ? 0 : result;
+#else
     if (timeout_ms < 0) {
         ssize_t count;
         do {
@@ -88,6 +129,7 @@ static int read_byte(char *ch, int timeout_ms)
         count = read(STDIN_FILENO, ch, 1);
     } while (count < 0 && errno == EINTR && !cli_termination_signal);
     return count == 1 ? 1 : (count == 0 ? 0 : -1);
+#endif
 }
 
 enum input_key { KEY_NONE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_DELETE, KEY_REJECT };

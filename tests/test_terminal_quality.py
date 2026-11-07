@@ -161,7 +161,8 @@ class TerminalQuality(unittest.TestCase):
                 os.write(master, sequence)
                 wait_prompt()
             if sig:
-                os.kill(proc.pid, sig)
+                if not (env and env.get("NERO_TEST_FAULT") == "signal-before-wait"):
+                    os.kill(proc.pid, sig)
             else:
                 os.write(master, ending)
             deadline = time.monotonic() + 5
@@ -191,6 +192,12 @@ class TerminalQuality(unittest.TestCase):
         for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             with self.subTest(sig=sig):
                 self.pty_session(b"", sig=sig)
+
+    def test_signal_between_flag_check_and_wait(self):
+        output = self.pty_session(b"", sig=signal.SIGHUP,
+            env={"NERO_TEST_FAULT": "signal-before-wait"},
+            binary=BINARY.with_name("nero-faults"))
+        self.assertIn(b"SIGNAL_BEFORE_WAIT", output)
 
     def test_tty_ctrl_d_and_clear_cleanup(self):
         self.pty_session(b"\x04")
