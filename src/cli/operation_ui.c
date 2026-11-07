@@ -398,6 +398,8 @@ static void draw_scrollbar(nero_operation_ui *ui, int first_row, int visible,
     int bar_col = SCROLLBAR_COLUMN;
     if (bar_col > ui->columns - 1) bar_col = ui->columns - 1;
     int max_off = count - visible;
+    /* Explicit denominator invariant for Clang's path-sensitive analyzer. */
+    if (max_off <= 0) return;
     if (offset < 0) offset = 0;
     if (offset > max_off) offset = max_off;
 
