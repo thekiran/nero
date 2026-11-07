@@ -79,7 +79,7 @@ static int scenario, failures, active_handles, peak_handles, thread_failure_afte
 static atomic_int thread_creates;
 enum { CLOSED, TIMEOUT, DELAYED, RESOURCE, MIXED, CANCEL, POLL_FAILURE,
        GETSOCKOPT_FAILURE, INVALID_EVENT, PENDING_EVENT, NONBLOCK_FAILURE, ROUTE_FAILURE,
-       INTERRUPTED_POLL, ERROR_EVENT, TRANSIENT_RESOURCE, TRANSIENT_POLL };
+       INTERRUPTED_POLL, ERROR_EVENT, TRANSIENT_RESOURCE, TRANSIENT_POLL, ALWAYS_INTERRUPTED };
 
 static int handle_index(nero_socket_t fd) {
     CHECK(fd >= HANDLE_BASE && fd < HANDLE_BASE + FAKE_HANDLES);
@@ -138,6 +138,12 @@ static int fake_getsockopt(nero_socket_t fd, int level, int option, void *value,
 static int fake_poll(struct pollfd *fds, nfds_t count, int timeout) {
     CHECK(timeout>=0 && timeout<=CANCEL_POLL_MS);
     if (scenario==CANCEL) atomic_store(&scan_cancel_requested,1);
+    if (scenario==ALWAYS_INTERRUPTED) {
+        atomic_fetch_add(&fake_time, 50);
+        /* Deliberately poison revents: the failed poll must not classify open. */
+        for (nfds_t s=0;s<count;++s) fds[s].revents=POLLOUT;
+        errno=EINTR; return -1;
+    }
     if (scenario==POLL_FAILURE || (scenario==TRANSIENT_POLL && failures++==0)) { errno=EIO; return -1; }
     if (scenario==INTERRUPTED_POLL && failures++<3) { errno=EINTR; return -1; }
     int ready=0;
@@ -231,12 +237,12 @@ static void test_discovery_and_deep(void) {
 static void test_batch_outcomes(void) {
     const int ports[]={1,65535};
     const int cases[]={TIMEOUT,DELAYED,RESOURCE,POLL_FAILURE,GETSOCKOPT_FAILURE,INVALID_EVENT,
-                       PENDING_EVENT,NONBLOCK_FAILURE,ROUTE_FAILURE,INTERRUPTED_POLL,ERROR_EVENT};
+                       PENDING_EVENT,NONBLOCK_FAILURE,ROUTE_FAILURE,INTERRUPTED_POLL,ERROR_EVENT,ALWAYS_INTERRUPTED};
     for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
         setup(cases[i]);
         scan_ports_batch(target_ip_global,ports,2,250);
         port_state expected=PORT_UNKNOWN;
-        if (cases[i]==TIMEOUT) expected=PORT_FILTERED;
+        if (cases[i]==TIMEOUT || cases[i]==ALWAYS_INTERRUPTED) expected=PORT_FILTERED;
         if (cases[i]==DELAYED || cases[i]==PENDING_EVENT || cases[i]==INTERRUPTED_POLL) expected=PORT_OPEN;
         CHECK(results_list[1].state==expected && results_list[65535].state==expected);
         CHECK(atomic_load(&ports_scanned)==2);

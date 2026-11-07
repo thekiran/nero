@@ -109,7 +109,7 @@ on Windows. No real socket, remote target or raw packet engine is used.
 Covered scenarios include silent discovery followed by port 54321 opening;
 all ports closed; all ports timing out; delayed success and pending completion;
 resource, nonblocking, routing, poll and SO_ERROR failures; HUP/POLLNVAL;
-interrupted polls; first and last port; duplicate prevention; complete retry
+interrupted polls (including continuous EINTR with stale revents); first and last port; duplicate prevention; complete retry
 windows above old limits; partial/all worker-creation failure; cancellation of
 first/deep phase work; resource recovery; invalid IPv4; and the production entry
 point continuing with unknown discovery. The Windows adapter fixture additionally
@@ -132,6 +132,9 @@ in existing package/CTest workflows. MSVC remains foundation-only; this fixture
 uses the project's MinGW/pthread implementation. Compatibility CI adds a macOS
 Clang ThreadSanitizer step. ASan/UBSan and TSan run separately.
 
-Linux/Windows hosted results will be recorded once their new CI runs finish.
+The first hosted source revision (`550ced5`) passed all five native packages:
+Windows x86-64, Linux x86-64/ARM64 and macOS ARM64/Intel. Its full workflow run
+[42403181300](https://github.com/thekiran/nero/actions/runs/42403181300) passed. A follow-up tightens continuous-EINTR deadlines; consult
+[PR #15](https://github.com/thekiran/nero/pull/15) for the latest commit's checks.
 No physical iPhone/Android or real-network scan was performed. Optional ICMP was
 not exercised against a real target.

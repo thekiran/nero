@@ -409,22 +409,30 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
             if (left <= 0) wait_ms = 0;
             else if (left < wait_ms) wait_ms = (int)left;
         }
+        for (int s = 0; s < nfds; ++s) pfds[s].revents = 0;
+        int before = remaining;
         int ready = nero_socket_poll(pfds, (nfds_t)nfds, wait_ms);
         if (scan_cancelled()) break;
         if (ready < 0) {
             int error = errno;
             if (error == EINTR
 #ifdef _WIN32
-                || error == WSAEINTR || error == WSAEINPROGRESS
+                || error == WSAEINTR
 #endif
-               ) continue; /* recompute absolute deadlines and check cancellation */
-            for (int s = 0; s < nfds; ++s) {
-                if (pfds[s].fd == NERO_INVALID_SOCKET) continue;
-                close(pfds[s].fd);
-                pfds[s].fd = NERO_INVALID_SOCKET;
-                record_result(slot_port[s], PORT_UNKNOWN, error);
+               ) {
+                /* poll may leave revents unspecified on error. Still expire
+                 * absolute deadlines even under a stream of interruptions. */
+                ready = 0;
+                for (int s = 0; s < nfds; ++s) pfds[s].revents = 0;
+            } else {
+                for (int s = 0; s < nfds; ++s) {
+                    if (pfds[s].fd == NERO_INVALID_SOCKET) continue;
+                    close(pfds[s].fd);
+                    pfds[s].fd = NERO_INVALID_SOCKET;
+                    record_result(slot_port[s], PORT_UNKNOWN, error);
+                }
+                break;
             }
-            break;
         }
         for (int s = 0; s < nfds; ++s) {
             if (pfds[s].fd == NERO_INVALID_SOCKET || !pfds[s].revents) continue;
@@ -455,6 +463,10 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
             pfds[s].fd = NERO_INVALID_SOCKET;
             record_result(slot_port[s], PORT_FILTERED, ETIMEDOUT);
             remaining--;
+        }
+        if (ready > 0 && remaining == before) {
+            const struct timespec delay = {0, 1000000L};
+            nanosleep(&delay, NULL); /* spurious/pending readiness must not spin */
         }
     }
     /* Cancellation leaves unfinished slots unscanned, or retains their first
