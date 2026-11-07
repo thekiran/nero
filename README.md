@@ -56,6 +56,7 @@ Start with `help`, `version`, `history` and `exit` inside the CLI.
 | [Code map](docs/code-map.md) | Where to find each responsibility |
 | [Release guide](docs/releases.md) | Package scope, checksums and draft procedure |
 | [Changelog](CHANGELOG.md) | Prepared versions and proposed changes |
+| [Repository rules](docs/repository-rules.md) | Main branch protection and required checks |
 | [Contributing](CONTRIBUTING.md) | Focused PRs, review and validation expectations |
 
 NERO is experimental software for isolated laboratories and explicitly authorized

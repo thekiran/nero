@@ -18,6 +18,9 @@ credentials. Debian packages and Homebrew integration follow a reviewed public
 release and reproducible package tests. Do not publish unsigned packages as
 signed, invent package-manager availability or commit signing credentials.
 
+Branch protection is defined in [repository-rules.md](docs/repository-rules.md);
+its configuration file must be applied by an administrator before it is enforced.
+
 ## Working agreement
 
 Use an issue to describe the problem and observable acceptance criteria. Implement
