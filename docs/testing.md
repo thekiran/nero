@@ -146,3 +146,15 @@ and CTest include this fixture. `make test-sanitize` runs it under ASan/UBSan;
 `make test-tsan` runs the scanner fixture separately under ThreadSanitizer on
 supported POSIX toolchains. Windows native MinGW runs the same fixture via CTest.
 Optional ICMP discovery is disabled in these tests.
+
+
+## Application logging
+
+`tests/test_logging.py` verifies the `log` command, warnings/errors filter,
+previous-session loading, file path, clearing, memory fallback, permissions,
+control-character sanitization and 1 MiB rotation. Its C fixture uses eight
+real pthread writers (4,800 records), checks errno preservation, and verifies
+that the latest 256 entries remain intact. The scanner fixture also verifies
+that grouped socket errors reach the error log. Make/CTest include these checks;
+ASan/UBSan cover them and `make test-tsan` additionally stresses the logger.
+Tests use temporary paths or `NERO_LOG_FILE=:memory:` to avoid user log files.

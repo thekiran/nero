@@ -299,6 +299,14 @@ static void test_error_diagnostics(void) {
     int n = summarize_scan_errors(groups, &overflow);
     CHECK(n==1 && overflow==0 && groups[0].count==65535);
     CHECK(groups[0].error==EMFILE && groups[0].stage==SCAN_SOCKET);
+    CHECK(nero_log_clear()==0);
+    report_scan_summary();
+    FILE *capture=tmpfile(); CHECK(capture);
+    nero_log_dump(capture,1); rewind(capture);
+    char log_output[4096]={0};
+    CHECK(fread(log_output,1,sizeof(log_output)-1,capture)>0); fclose(capture);
+    CHECK(strstr(log_output,"operation=socket")!=NULL);
+    CHECK(strstr(log_output,"ports=65535")!=NULL);
     scenario=ROUTE_FAILURE;
     const int ports[]={1,65535};
     scan_ports_batch(target_ip_global,ports,2,5);

@@ -8,7 +8,8 @@
     X(history, cmd_history) \
     X(exit, cmd_exit) \
     X(clear, cmd_clear) \
-    X(version, cmd_version)
+    X(version, cmd_version) \
+    X(log, cmd_log)
 
 #define CLI_HELP_ENTRIES(X) \
     X("<network IP> -Syn", ": Run SYN/UDP packet flood (authorized targets)") \
@@ -19,6 +20,10 @@
     X("clear", ": Clear the screen") \
     X("history", ": Show command history") \
     X("version", ": Show program version") \
+    X("log", ": Show recent application logs") \
+    X("log -errors", ": Show warnings and errors") \
+    X("log -path", ": Show log file location") \
+    X("log -clear", ": Clear log history") \
     X("history -clear", ": Clear command history") \
     X("exit -All", ": Quit the shell and clear the screen") \
     X("<target> -Sc", ": Check TCP ports (offline builds simulate)") \
