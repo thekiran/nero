@@ -135,11 +135,11 @@ static inline int nero_getsockopt(int fd, int level, int option,
 /* poll(): WSAPoll for sockets, WaitForSingleObject for stdin          */
 /* ------------------------------------------------------------------ */
 
-#define POLLIN 0x001
-#define POLLOUT 0x004
-#define POLLERR 0x008
-#define POLLHUP 0x010
-#define POLLNVAL 0x020
+/* Winsock supplies the WSAPoll event constants. Keep those values: POSIX
+ * numeric values are different and cannot be passed through to WSAPoll.
+ * Its struct pollfd stores SOCKET; the shared CLI uses signed descriptors,
+ * so give our translation structure a distinct name. */
+#define pollfd nero_pollfd
 
 typedef unsigned long nfds_t;
 
