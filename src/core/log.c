@@ -12,6 +12,7 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
+#include <windows.h>
 #define mkdir_private(p) _mkdir(p)
 #define log_close _close
 #else
@@ -49,14 +50,24 @@ static void remember(nero_log_level level, const char *line) {
     entries[at].level = level;
     clean_text(entries[at].text, sizeof(entries[at].text), line);
 }
+/* Validate the opened descriptor before truncation or stdio buffering. A
+ * special file must fall back to memory rather than blocking shell startup. */
 static FILE *open_log(const char *name, int truncate, int reading) {
 #ifdef _WIN32
-    int flags = reading ? _O_RDONLY : (_O_WRONLY | _O_CREAT | (truncate ? _O_TRUNC : _O_APPEND));
+    if (_strnicmp(name, "\\\\.\\pipe\\", 9) == 0) { errno = EINVAL; return NULL; }
+    int flags = reading ? _O_RDONLY : (_O_RDWR | _O_CREAT | _O_APPEND);
     int fd = _open(name, flags | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
     if (fd < 0) return NULL;
-    FILE *file = _fdopen(fd, reading ? "rb" : "ab");
+    struct _stat64 info;
+    if (_fstat64(fd, &info) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
+    if ((info.st_mode & _S_IFMT) != _S_IFREG) { log_close(fd); errno = EINVAL; return NULL; }
+    if (truncate) {
+        int error = (int)_chsize_s(fd, 0);
+        if (error) { log_close(fd); errno = error; return NULL; }
+    }
+    FILE *file = _fdopen(fd, reading ? "rb" : "a+b");
 #else
-    int flags = reading ? O_RDONLY : (O_WRONLY | O_CREAT | (truncate ? O_TRUNC : O_APPEND));
+    int flags = (reading ? O_RDONLY : (O_RDWR | O_CREAT | O_APPEND)) | O_NONBLOCK;
 #ifdef O_NOFOLLOW
     flags |= O_NOFOLLOW;
 #endif
@@ -65,10 +76,70 @@ static FILE *open_log(const char *name, int truncate, int reading) {
 #endif
     int fd = open(name, flags, 0600);
     if (fd < 0) return NULL;
-    FILE *file = fdopen(fd, reading ? "r" : "a");
+    struct stat info;
+    if (fstat(fd, &info) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
+    if (!S_ISREG(info.st_mode)) { log_close(fd); errno = EINVAL; return NULL; }
+    if (truncate && ftruncate(fd, 0) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
+    FILE *file = fdopen(fd, reading ? "r" : "a+");
 #endif
     if (!file) { int error = errno; log_close(fd); errno = error; }
     return file;
+}
+
+/* Compact oversized inherited files before rotating them. Write a private,
+ * exclusive temporary file and replace only after a complete successful copy.
+ * Keep complete recent lines; discard an over-limit single malformed record. */
+static int bound_existing_file(const char *name) {
+    errno = 0;
+    FILE *source = open_log(name, 0, 1);
+    if (!source) return errno == ENOENT ? 0 : -1;
+    if (fseek(source, 0, SEEK_END) != 0) { int error = errno; fclose(source); errno = error; return -1; }
+    long size = ftell(source);
+    if (size < 0) { int error = errno; fclose(source); errno = error; return -1; }
+    if (size <= LOG_LIMIT) { fclose(source); return 0; }
+    char *tail = malloc((size_t)LOG_LIMIT);
+    if (!tail) { fclose(source); errno = ENOMEM; return -1; }
+    int failed = fseek(source, -LOG_LIMIT, SEEK_END) != 0;
+    if (!failed && fread(tail, 1, (size_t)LOG_LIMIT, source) != (size_t)LOG_LIMIT) failed = 1;
+    int error = failed ? (errno ? errno : EIO) : 0;
+    fclose(source);
+    if (failed) { free(tail); errno = error; return -1; }
+    size_t start = 0;
+    while (start < (size_t)LOG_LIMIT && tail[start++] != '\n') {}
+    size_t length = (size_t)LOG_LIMIT - start;
+    char temporary[LOG_PATH + 16];
+    snprintf(temporary, sizeof(temporary), "%s.tmp.XXXXXX", name);
+#ifdef _WIN32
+    if (_mktemp_s(temporary, sizeof(temporary)) != 0) { free(tail); return -1; }
+    int fd = _open(temporary, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
+#else
+    int fd = mkstemp(temporary);
+#endif
+    if (fd < 0) { error = errno; free(tail); errno = error; return -1; }
+#ifdef _WIN32
+    FILE *dest = _fdopen(fd, "wb");
+#else
+    FILE *dest = fdopen(fd, "w");
+#endif
+    if (!dest) { error = errno; log_close(fd); remove(temporary); free(tail); errno = error; return -1; }
+    failed = length && fwrite(tail + start, 1, length, dest) != length;
+    error = failed ? (errno ? errno : EIO) : 0;
+    if (fclose(dest) != 0) { failed = 1; error = errno; }
+    free(tail);
+    if (!failed) {
+#ifdef _WIN32
+        if (!MoveFileExA(temporary, name, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DWORD cause = GetLastError();
+            failed = 1;
+            error = cause == ERROR_DISK_FULL ? ENOSPC :
+                (cause == ERROR_ACCESS_DENIED || cause == ERROR_SHARING_VIOLATION ? EACCES : EIO);
+        }
+#else
+        if (rename(temporary, name) != 0) { failed = 1; error = errno; }
+#endif
+    }
+    if (failed) { remove(temporary); errno = error; return -1; }
+    return 0;
 }
 static void remember_import(char *line, size_t length) {
     while (length && line[length - 1] == '\r') length--;
@@ -155,9 +226,16 @@ static void initialize(void) {
             errno = 0;
             FILE *file = open_log(path, 0, 0);
             if (!file) storage_error = errno ? errno : EIO;
-            else { fclose(file); persistent = 1; load_recent(backup); load_recent(path); }
+            else {
+                fclose(file);
+                if (bound_existing_file(backup) != 0 || bound_existing_file(path) != 0)
+                    storage_error = errno ? errno : EIO;
+                else persistent = 1;
+            }
         }
     }
+    /* Readable historical records remain available even without write access. */
+    if (path[0]) { load_recent(backup); load_recent(path); }
     if (storage_error) {
         char message[LOG_LINE];
         snprintf(message, sizeof(message), "[logger] [WARN] [storage] File logging unavailable: %s; using memory", strerror(storage_error));
@@ -166,16 +244,36 @@ static void initialize(void) {
 }
 static void persist_line(const char *line) {
     if (!persistent) return;
-    struct stat info;
-    if (stat(path, &info) == 0 && info.st_size + (long)strlen(line) + 1 > LOG_LIMIT) {
-        if ((remove(backup) != 0 && errno != ENOENT) || rename(path, backup) != 0) {
-            storage_error = errno; persistent = 0; return;
-        }
-    }
     FILE *file = open_log(path, 0, 0);
     if (!file) { storage_error = errno; persistent = 0; return; }
-    int failed = fprintf(file, "%s\n", line) < 0;
-    int error = errno;
+    int error = 0;
+    if (fseek(file, 0, SEEK_END) != 0) error = errno ? errno : EIO;
+    long size = error ? -1 : ftell(file);
+    if (!error && size < 0) error = errno ? errno : EIO;
+    int separator = 0;
+    if (!error && size > 0) {
+        if (fseek(file, -1, SEEK_END) != 0) error = errno ? errno : EIO;
+        else {
+            int last = fgetc(file);
+            if (last == EOF) error = EIO;
+            else separator = last != '\n';
+        }
+    }
+    if (!error && fseek(file, 0, SEEK_END) != 0) error = errno ? errno : EIO;
+    if (error) { fclose(file); storage_error = error; persistent = 0; return; }
+    if (size + separator + (long)strlen(line) + 1 > LOG_LIMIT) {
+        fclose(file);
+        if (bound_existing_file(backup) != 0 || bound_existing_file(path) != 0 ||
+            (remove(backup) != 0 && errno != ENOENT) || rename(path, backup) != 0) {
+            storage_error = errno ? errno : EIO; persistent = 0; return;
+        }
+        file = open_log(path, 0, 0);
+        if (!file) { storage_error = errno; persistent = 0; return; }
+        separator = 0;
+    }
+    /* A truncated tail must never absorb the next event's timestamp/severity. */
+    int failed = fprintf(file, "%s%s\n", separator ? "\n" : "", line) < 0;
+    error = failed ? (errno ? errno : EIO) : 0;
     if (fclose(file) != 0) { failed = 1; error = errno; }
     if (failed) { storage_error = error ? error : EIO; persistent = 0; }
 }
@@ -242,14 +340,31 @@ int nero_log_clear(void) {
     int saved_errno = errno, result = 0, error = 0;
     pthread_once(&log_once, initialize);
     pthread_mutex_lock(&log_mutex);
-    if (persistent) {
-        FILE *file = open_log(path, 1, 0);
-        if (!file) { result = -1; error = errno; }
-        else if (fclose(file) != 0) { result = -1; error = errno; }
-        if (remove(backup) != 0 && errno != ENOENT) { result = -1; error = errno; }
-    }
+    /* A failed append does not make historical files cease to exist. Retry
+     * explicit clearing even in memory-fallback mode; do not report success
+     * until both configured persistent files have actually been cleared. */
+    if (path[0]) {
+        errno = 0;
+        if (create_parent() != 0) { result = -1; error = errno; }
+        FILE *check = result ? NULL : open_log(path, 0, 0);
+        if (!result && !check) { result = -1; error = errno; }
+        if (check && fclose(check) != 0) { result = -1; error = errno; }
+        if (!result) {
+            FILE *previous = open_log(backup, 0, 1);
+            if (previous) fclose(previous);
+            else if (errno != ENOENT) { result = -1; error = errno; }
+        }
+        if (!result && remove(backup) != 0 && errno != ENOENT) { result = -1; error = errno; }
+        if (!result) {
+            FILE *file = open_log(path, 1, 0);
+            if (!file) { result = -1; error = errno; }
+            else if (fclose(file) != 0) { result = -1; error = errno; }
+        }
+        if (!result) { persistent = 1; storage_error = 0; }
+    } else if (storage_error) { result = -1; error = storage_error; }
     if (!result) { head = used = 0; memset(entries, 0, sizeof(entries)); }
+    else { storage_error = error ? error : EIO; persistent = 0; }
     pthread_mutex_unlock(&log_mutex);
-    errno = result ? error : saved_errno;
+    errno = result ? (error ? error : EIO) : saved_errno;
     return result;
 }

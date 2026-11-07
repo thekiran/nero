@@ -748,7 +748,10 @@ static void grab_banners(const char *ip, const int *ports, int count,
         args[i].store = store;
         args[i].start = (i * count) / threads;
         args[i].end   = ((i + 1) * count) / threads;
-        if (pthread_create(&tids[i], NULL, banner_worker, &args[i]) != 0) {
+        int thread_error = pthread_create(&tids[i], NULL, banner_worker, &args[i]);
+        if (thread_error != 0) {
+            nero_log_write(NERO_LOG_WARN, "scanner", "Banner worker creation failed: error=%d (%s)",
+                           thread_error, strerror(thread_error));
             fprintf(stderr, "[!] Optional banner checks incomplete (thread creation failed).\n");
             break;
         }
@@ -956,7 +959,10 @@ int portscanner(const char *target_ip) {
         fprintf(stderr, "[-] Failed to allocate scan ledger.\n");
         return PORTSCANNER_FAILED;
     }
-    if (pthread_mutex_init(&results_mutex, NULL) != 0) {
+    int mutex_error = pthread_mutex_init(&results_mutex, NULL);
+    if (mutex_error != 0) {
+        nero_log_write(NERO_LOG_ERROR, "scanner", "Scan mutex initialization failed: error=%d (%s)",
+                       mutex_error, strerror(mutex_error));
         free(results_list); results_list = NULL;
         free(work_ports);
         return PORTSCANNER_FAILED;
@@ -1056,6 +1062,7 @@ int portscanner(const char *target_ip) {
             ui.banner_count = banner_n;
             nero_operation_status("32", "Scan complete", result_detail);
         } else {
+            nero_log_write(NERO_LOG_WARN, "scanner", "Optional banner buffers could not be allocated");
             free(banner_port_list); free(banner_store); free(banner_texts);
             banner_port_list = NULL; banner_store = NULL; banner_texts = NULL;
         }
