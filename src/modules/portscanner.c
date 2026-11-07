@@ -1,8 +1,6 @@
-/* Concurrent TCP discovery with iOS-focused adaptive scanning.
- * Fast phase and deep phase use event-driven select() batching:
- * each worker thread manages BATCH_SIZE sockets concurrently,
- * so 8 threads * 400 sockets = 3200 simultaneous probes without
- * spawning thousands of threads or hitting macOS ulimit -n. */
+/* Bounded poll-based TCP connect scanner. Discovery is advisory; every port
+ * has an indexed result. A shared queue assigns each phase's work exactly once,
+ * including when a worker cannot be created. No raw packets are generated. */
 #ifdef _WIN32
 #include "../platform/windows/nero_win_compat.h"
 #endif
@@ -16,6 +14,8 @@
 #include <termios.h>
 #include <poll.h>
 #include <sys/resource.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #endif
 #include <unistd.h>
 #include <errno.h>
@@ -38,6 +38,8 @@
  * sorunu yoktur; sınırlar yalnızca bellek ve hedefe nezaket içindir). */
 #define MAX_THREADS 16
 #define MAX_BATCH   512
+#define MAX_SCAN_SOCKETS 256
+#define CANCEL_POLL_MS 50
 
 /* Bir tarama hız profili. Daha düşük eşzamanlılık = hedefi/WiFi'yi daha az
  * boğar = daha kararlı; daha kısa zaman aşımı = daha hızlı bitiş. */
@@ -45,15 +47,15 @@ typedef struct {
     const char *name;
     int fast_threads, fast_batch, fast_timeout_ms;
     int deep_threads, deep_batch, deep_timeout_ms;
-    int deep_max_candidates; /* bu kadar filtrelenmiş porttan fazlası varsa derin taramayı atla */
+    int deep_max_candidates; /* work window size, never a candidate cutoff */
 } scan_profile;
 
 enum { PROFILE_FAST = 0, PROFILE_MEDIUM, PROFILE_SLOW, PROFILE_MANUAL, PROFILE_COUNT };
 
 /* name alanları hız menüsünde de gösterilir. */
 static const scan_profile SCAN_PROFILES[] = {
-    /* Hızlı: kısa zaman aşımı, yüksek eşzamanlılık. Birkaç saniyede biter;
-     * yoğun WiFi'de çok seyrek portları kaçırabilir. */
+    /* Fast, balanced and slow timeout/batch preferences. The global socket
+     * budget is enforced independently; all profiles retry every uncertainty. */
     { "Hizli",  8, 256, 500,  4, 128, 1000, 8000 },
     /* Orta (önerilen): dengeli. */
     { "Orta",   6, 200, 1000, 4, 100, 2000, 12000 },
@@ -67,37 +69,92 @@ static scan_profile manual_profile = { "Manuel", 6, 200, 1000, 4, 100, 2000, 120
 /* Tarama boyunca okunur (yalnız-okuma; thread'ler güvenle paylaşır). */
 static const scan_profile *active_profile = &SCAN_PROFILES[PROFILE_MEDIUM];
 
+typedef enum {
+    PORT_UNSCANNED = 0, PORT_OPEN, PORT_CLOSED, PORT_FILTERED, PORT_UNKNOWN
+} port_state;
+
 typedef struct {
-    int port;
-    int filtered;
+    port_state state;
+    int error;
+    unsigned attempts;
+    unsigned retries_completed;
 } port_result;
 
 typedef struct {
-    int start_port;
-    int end_port;
-    int timeout_ms;
-    int batch;
-} batch_thread_args;
+    atomic_int next;
+    const int *ports; /* NULL means the complete 1..65535 range. */
+    int count, timeout_ms, batch;
+} scan_work;
 
 typedef struct {
-    int start_idx;
-    int end_idx;
-    int timeout_ms;
-    int batch;
-} deep_batch_args;
+    int open, closed, filtered, unknown, unscanned, retried;
+} scan_summary;
+
+typedef enum { HOST_UNKNOWN, HOST_ONLINE } host_state;
+/* Silence, routing errors and stale addresses cannot establish HOST_OFFLINE. */
 
 static struct termios orig_termios;
-static port_result *results_list = NULL;
-static int result_count = 0;
-static int *candidates = NULL;
-static int candidate_count = 0;
-static int scan_alloc_failed = 0;
+static port_result *results_list = NULL; /* [1..65535], allocated once */
 volatile sig_atomic_t portscanner_interrupt_requested = 0;
 static atomic_int scan_cancel_requested;
 static atomic_int ports_scanned;
 static atomic_int latest_probe_port;
+static atomic_int host_responded;
 static const char *target_ip_global;
 static pthread_mutex_t results_mutex;
+static pthread_t scan_owner;
+static int scan_input_fallback;
+
+static int scan_cancelled(void) {
+    if (scan_input_fallback && pthread_equal(pthread_self(), scan_owner) &&
+        nero_operation_read_key(0) == NERO_UI_KEY_CANCEL)
+        atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
+    return portscanner_interrupt_requested ||
+        atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed);
+}
+
+static int64_t scan_now_ms(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static scan_summary summarize_scan(void) {
+    scan_summary s = {0};
+    for (int port = 1; port <= SCAN_TOTAL_PORTS; ++port) {
+        switch (results_list[port].state) {
+        case PORT_OPEN: s.open++; break;
+        case PORT_CLOSED: s.closed++; break;
+        case PORT_FILTERED: s.filtered++; break;
+        case PORT_UNKNOWN: s.unknown++; break;
+        case PORT_UNSCANNED: s.unscanned++; break;
+        }
+        if (results_list[port].retries_completed) s.retried++;
+    }
+    return s;
+}
+
+static void record_result(int port, port_state state, int error) {
+    pthread_mutex_lock(&results_mutex);
+    if (results_list[port].state == PORT_UNSCANNED)
+        atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
+    else
+        results_list[port].retries_completed++;
+    results_list[port].state = state;
+    results_list[port].error = error;
+    pthread_mutex_unlock(&results_mutex);
+    if (state == PORT_OPEN || state == PORT_CLOSED)
+        atomic_store_explicit(&host_responded, 1, memory_order_relaxed);
+}
+
+static void report_scan_summary(void) {
+    scan_summary s = summarize_scan(); /* caller has joined every writer */
+    printf("Host: %s | TCP: open=%d closed=%d filtered=%d error/unknown=%d "
+           "unscanned=%d total=%d | retried=%d\n",
+           atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
+           s.open, s.closed, s.filtered, s.unknown, s.unscanned,
+           s.open + s.closed + s.filtered + s.unknown + s.unscanned, s.retried);
+}
 
 /* --- Terminal yardımcıları --- */
 static int raw_mode_active = 0;
@@ -139,10 +196,10 @@ static void *scan_animation_worker(void *arg) {
         int shown = 0;
 
         pthread_mutex_lock(&results_mutex);
-        for (int i = 0; i < result_count; ++i) {
-            if (!results_list[i].filtered) {
+        for (int i = 1; i <= SCAN_TOTAL_PORTS; ++i) {
+            if (results_list[i].state == PORT_OPEN) {
                 if (shown < DISCOVERY_VIEW_CAP)
-                    ports[shown++] = results_list[i].port;
+                    ports[shown++] = i;
                 total_open++;
             }
         }
@@ -208,25 +265,19 @@ static int compare_ports_asc(const void *a, const void *b) {
     return (*(const int *)a - *(const int *)b);
 }
 
-/* Bir batch taraması aynı anda binlerce soket açabilir. Varsayılan
- * RLIMIT_NOFILE (macOS'ta sıklıkla 256) buna yetmez ve socket() EMFILE ile
- * başarısız olur. Soft limiti, hard limiti aşmadan ihtiyaç kadar yükselt.
- * Windows'ta RLIMIT_NOFILE yoktur; soket sınırı sistem belleğine bağlıdır. */
+/* Reserve descriptors for the terminal/runtime. Never raise the user's limit.
+ * This budget applies to all scanner workers together, not to each worker. */
+static int scan_socket_budget(void) {
+    int budget = MAX_SCAN_SOCKETS;
 #ifndef _WIN32
-static void raise_fd_limit(void) {
     struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return;
-    rlim_t needed = (rlim_t)MAX_THREADS * MAX_BATCH + 64;
-    if (rl.rlim_cur >= needed) return;
-    rlim_t target = needed;
-    if (rl.rlim_max != RLIM_INFINITY && target > rl.rlim_max)
-        target = rl.rlim_max;
-    rl.rlim_cur = target;
-    setrlimit(RLIMIT_NOFILE, &rl);
-}
-#else
-static void raise_fd_limit(void) { /* no per-process fd limit on Windows */ }
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY) {
+        rlim_t available = rl.rlim_cur > 64 ? rl.rlim_cur - 64 : 1;
+        if (available < (rlim_t)budget) budget = (int)available;
+    }
 #endif
+    return budget;
+}
 
 /* --- Port seçim menüsü --- */
 static int select_port_menu_in_ui(int *open_ports, int count, nero_operation_ui *ui) {
@@ -269,240 +320,218 @@ int select_port_menu(int *open_ports, int count) {
     return result;
 }
 
-/* --- Idempotent sonuç ekleme --- */
-static void add_open_result(int port) {
-    pthread_mutex_lock(&results_mutex);
-    for (int i = 0; i < result_count; ++i) {
-        if (results_list[i].port == port) {
-            results_list[i].filtered = 0;
-            pthread_mutex_unlock(&results_mutex);
-            return;
-        }
-    }
-    port_result *tmp = realloc(results_list, (result_count + 1) * sizeof(port_result));
-    if (!tmp) {
-        scan_alloc_failed = 1;
-        pthread_mutex_unlock(&results_mutex);
-        return;
-    }
-    results_list = tmp;
-    results_list[result_count].port = port;
-    results_list[result_count].filtered = 0;
-    result_count++;
-    pthread_mutex_unlock(&results_mutex);
+/* Only a refusal is classified as closed. A timeout is filtered (possibly
+ * dropped); routing, permission, resource and API failures stay unknown. */
+static port_state classify_connect_error(int error) {
+    if (error == 0) return PORT_OPEN;
+    if (error == ECONNREFUSED) return PORT_CLOSED;
+    if (error == ETIMEDOUT) return PORT_FILTERED;
+    return PORT_UNKNOWN;
 }
 
-/* Yanıt vermeyen (filtrelenmiş olabilecek) bir portu, derin taramada yeniden
- * denenmek üzere aday olarak kaydeder. Aynı port zaten varsa tekrar eklenmez. */
-static void add_filtered_candidate(int port) {
-    pthread_mutex_lock(&results_mutex);
-    for (int i = 0; i < result_count; ++i) {
-        if (results_list[i].port == port) {
-            pthread_mutex_unlock(&results_mutex);
-            return;
-        }
-    }
-    port_result *tmp = realloc(results_list, (result_count + 1) * sizeof(port_result));
-    if (!tmp) {
-        scan_alloc_failed = 1;
-        pthread_mutex_unlock(&results_mutex);
-        return;
-    }
-    results_list = tmp;
-    results_list[result_count].port = port;
-    results_list[result_count].filtered = 1;
-    result_count++;
-    pthread_mutex_unlock(&results_mutex);
+static int connect_pending(int error) {
+    return error == EINPROGRESS || error == EALREADY ||
+           error == EWOULDBLOCK || error == EINTR
+#ifdef _WIN32
+           || error == WSAEINTR || error == WSAEINPROGRESS
+#endif
+           ;
 }
 
-/* --- Batch select ile eşzamanlı port tarama ---
- *
- * Her çağrıda `ports[]` dizisindeki portlar için bir soket açar,
- * hepsine non-blocking connect() gönderir, sonra poll() ile yanıtları
- * bekler. Bu sayede aynı anda yüzlerce port probe edilir; tek tek
- * beklemek yerine toplu bekleriz. */
-static void scan_ports_batch(
-    const char *ip,
-    const int *ports,
-    int count,
-    int timeout_ms
-) {
-    if (count > MAX_BATCH) count = MAX_BATCH;
-    if (count <= 0) return;
+static int make_nonblocking(nero_socket_t fd) {
+#ifdef _WIN32
+    u_long value = 1;
+    if (ioctlsocket(fd, FIONBIO, &value) == 0) return 0;
+    errno = WSAGetLastError();
+    return -1;
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    return flags < 0 ? -1 : fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
 
+static void scan_ports_batch(const char *ip, const int *ports, int count, int timeout_ms) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
 #if defined(__APPLE__)
     addr.sin_len = sizeof(addr);
 #endif
-    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
+    if (count <= 0 || count > MAX_BATCH || timeout_ms <= 0 ||
+        inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
 
     struct pollfd pfds[MAX_BATCH];
     int slot_port[MAX_BATCH];
-    int nfds = 0;
-
-    /* 1. Soketleri aç ve non-blocking connect() başlat. */
-    for (int i = 0; i < count; ++i) {
+    int64_t deadline[MAX_BATCH];
+    int nfds = 0, remaining = 0, resource_error = 0;
+    for (int i = 0; i < count && !scan_cancelled(); ++i) {
+        int port = ports[i];
+        pthread_mutex_lock(&results_mutex);
+        results_list[port].attempts++;
+        pthread_mutex_unlock(&results_mutex);
+        atomic_store_explicit(&latest_probe_port, port, memory_order_relaxed);
         nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd == NERO_INVALID_SOCKET) {
-            /* Tanımlayıcı tükendi: portu sessizce "kapalı" saymak yerine
-             * belirsiz (filtered) olarak işaretle; derin tarama yeniden dener. */
-            if (errno == EMFILE || errno == ENFILE)
-                add_filtered_candidate(ports[i]);
+            int error = errno;
+            record_result(port, PORT_UNKNOWN, error);
+            if (error == EMFILE || error == ENFILE || error == ENOBUFS || error == ENOMEM)
+                resource_error = 1;
             continue;
         }
-
-#ifdef _WIN32
-        u_long nonblocking = 1;
-        if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) {
+        if (make_nonblocking(fd) != 0) {
+            int error = errno;
             close(fd);
+            record_result(port, PORT_UNKNOWN, error);
             continue;
         }
-#else
-        int flags = fcntl(fd, F_GETFL, 0);
-        if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-            close(fd);
-            continue;
-        }
-#endif
-
-        addr.sin_port = htons((uint16_t)ports[i]);
-        atomic_store_explicit(&latest_probe_port, ports[i], memory_order_relaxed);
-
+        addr.sin_port = htons((uint16_t)port);
+        deadline[nfds] = scan_now_ms() + timeout_ms;
         int ret = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-        if (ret == 0) {
-            /* Anında açık */
-            add_open_result(ports[i]);
+        int error = ret == 0 ? 0 : errno;
+        if (ret == 0 || !connect_pending(error)) {
             close(fd);
+            record_result(port, classify_connect_error(error), error);
             continue;
         }
-        if (ret < 0 && errno == ECONNREFUSED) {
-            /* Anında kapalı — listeye ekleme */
-            close(fd);
-            continue;
-        }
-        if (ret < 0 && errno != EINPROGRESS) {
-            close(fd);
-            continue;
-        }
-
         pfds[nfds].fd = fd;
         pfds[nfds].events = POLLOUT;
         pfds[nfds].revents = 0;
-        slot_port[nfds] = ports[i];
-        nfds++;
+        slot_port[nfds++] = port;
+        remaining++;
     }
 
-    if (nfds == 0) return;
-
-    /* 2. Bekleyen connect'leri son-tarihe kadar poll() ile çöz. poll()'un
-     * FD_SETSIZE sınırı yoktur; binlerce eşzamanlı tanımlayıcı güvenlidir —
-     * select()'te değeri FD_SETSIZE'ı aşan bir tanımlayıcı fd_set'i bozar.
-     *
-     * ÖNEMLİ: Tek bir poll() geçişiyle yetinilemez. Kapalı portlar connect
-     * sonrası neredeyse anında POLLERR verir; poll onlar hazır olur olmaz
-     * döner. O an hâlâ bağlanmakta olan açık bir portun revents'i 0 olabilir.
-     * Tek geçiş bunu yanlışlıkla "zaman aşımı" sayıp açık portu kaçırırdı.
-     * Bu yüzden çözülen soketleri (fd = -1 ile) poll'dan çıkarıp kalanları
-     * gerçek zaman aşımına kadar yeniden bekleriz. */
-    struct timespec start;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    int remaining = nfds;
-
-    while (remaining > 0) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        long elapsed_ms = (now.tv_sec - start.tv_sec) * 1000L
-                        + (now.tv_nsec - start.tv_nsec) / 1000000L;
-        int wait_ms = timeout_ms - (int)elapsed_ms;
-        if (wait_ms <= 0) break;
-
-        int ready;
-        do {
-            ready = nero_socket_poll(pfds, (nfds_t)nfds, wait_ms);
-        } while (ready < 0 && errno == EINTR);
-        if (ready <= 0) break; /* hata veya zaman aşımı → kalanlar filtered */
-
-        for (int s = 0; s < nfds && ready > 0; ++s) {
-            if (pfds[s].fd == NERO_INVALID_SOCKET || pfds[s].revents == 0) continue;
-            ready--;
-            int so_error = 0;
-            socklen_t len = sizeof(so_error);
-            if (getsockopt(pfds[s].fd, SOL_SOCKET, SO_ERROR, &so_error, &len) == 0) {
-                if (so_error == 0)
-                    add_open_result(slot_port[s]);
-                else if (so_error != ECONNREFUSED)
-                    /* ETIMEDOUT, EHOSTUNREACH vb. → filtrelenmiş aday */
-                    add_filtered_candidate(slot_port[s]);
-                /* ECONNREFUSED → kapalı → listeye ekleme */
-            } else {
-                add_filtered_candidate(slot_port[s]);
+    while (remaining && !scan_cancelled()) {
+        int wait_ms = CANCEL_POLL_MS;
+        int64_t now = scan_now_ms();
+        for (int s = 0; s < nfds; ++s) {
+            if (pfds[s].fd == NERO_INVALID_SOCKET) continue;
+            int64_t left = deadline[s] - now;
+            if (left <= 0) wait_ms = 0;
+            else if (left < wait_ms) wait_ms = (int)left;
+        }
+        int ready = nero_socket_poll(pfds, (nfds_t)nfds, wait_ms);
+        if (scan_cancelled()) break;
+        if (ready < 0) {
+            int error = errno;
+            if (error == EINTR
+#ifdef _WIN32
+                || error == WSAEINTR || error == WSAEINPROGRESS
+#endif
+               ) continue; /* recompute absolute deadlines and check cancellation */
+            for (int s = 0; s < nfds; ++s) {
+                if (pfds[s].fd == NERO_INVALID_SOCKET) continue;
+                close(pfds[s].fd);
+                pfds[s].fd = NERO_INVALID_SOCKET;
+                record_result(slot_port[s], PORT_UNKNOWN, error);
             }
+            break;
+        }
+        for (int s = 0; s < nfds; ++s) {
+            if (pfds[s].fd == NERO_INVALID_SOCKET || !pfds[s].revents) continue;
+            int error = 0;
+            socklen_t len = sizeof(error);
+            port_state state;
+            if (pfds[s].revents & POLLNVAL) {
+                error = EBADF;
+                state = PORT_UNKNOWN;
+            } else if (getsockopt(pfds[s].fd, SOL_SOCKET, SO_ERROR, &error, &len) != 0) {
+                error = errno;
+                state = PORT_UNKNOWN;
+            } else if (connect_pending(error)) {
+                continue; /* readiness is not itself successful connection evidence */
+            } else if (!error && (!(pfds[s].revents & POLLOUT) ||
+                                 (pfds[s].revents & (POLLERR | POLLHUP)))) {
+                state = PORT_UNKNOWN;
+            } else state = classify_connect_error(error);
             close(pfds[s].fd);
-            pfds[s].fd = NERO_INVALID_SOCKET; /* poll bundan sonra yok sayar (revents=0) */
+            pfds[s].fd = NERO_INVALID_SOCKET;
+            record_result(slot_port[s], state, error);
+            remaining--;
+        }
+        now = scan_now_ms();
+        for (int s = 0; s < nfds; ++s) {
+            if (pfds[s].fd == NERO_INVALID_SOCKET || deadline[s] > now) continue;
+            close(pfds[s].fd);
+            pfds[s].fd = NERO_INVALID_SOCKET;
+            record_result(slot_port[s], PORT_FILTERED, ETIMEDOUT);
             remaining--;
         }
     }
-
-    /* 3. Zaman aşımına kadar yanıt vermeyen soketler → sessiz → filtered. */
-    for (int s = 0; s < nfds; ++s) {
-        if (pfds[s].fd == NERO_INVALID_SOCKET) continue;
-        add_filtered_candidate(slot_port[s]);
-        close(pfds[s].fd);
+    /* Cancellation leaves unfinished slots unscanned, or retains their first
+     * phase outcome. No cancelled probe is reported as a completed attempt. */
+    for (int s = 0; s < nfds; ++s)
+        if (pfds[s].fd != NERO_INVALID_SOCKET) close(pfds[s].fd);
+    if (resource_error && !scan_cancelled()) {
+        const struct timespec delay = {0, 5000000L};
+        nanosleep(&delay, NULL); /* bounded backoff, not a busy socket retry loop */
     }
 }
 
-/* --- Fast batch thread --- */
-void *fast_scan_thread(void *args) {
-    batch_thread_args *t = args;
+static void *scan_worker(void *arg) {
+    scan_work *work = arg;
     int ports[MAX_BATCH];
-    int batch = t->batch > 0 && t->batch <= MAX_BATCH ? t->batch : MAX_BATCH;
+    while (!scan_cancelled()) {
+        int base = atomic_fetch_add_explicit(&work->next, work->batch, memory_order_relaxed);
+        if (base >= work->count) break;
+        int count = work->count - base;
+        if (count > work->batch) count = work->batch;
+        for (int i = 0; i < count; ++i)
+            ports[i] = work->ports ? work->ports[base + i] : base + i + 1;
+        scan_ports_batch(target_ip_global, ports, count, work->timeout_ms);
+    }
+    return NULL;
+}
 
-    for (int base = t->start_port; base <= t->end_port; base += batch) {
-        if (portscanner_interrupt_requested ||
-            atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
-            break;
+static void run_scan_phase(const int *ports, int count, int threads, int batch, int timeout_ms) {
+    int budget = scan_socket_budget();
+    if (threads < 1) threads = 1;
+    if (threads > MAX_THREADS) threads = MAX_THREADS;
+    if (threads > budget) threads = budget;
+    if (batch < 1) batch = 1;
+    if (batch > MAX_BATCH) batch = MAX_BATCH;
+    if (batch > budget / threads) batch = budget / threads;
+    scan_work work = { .ports = ports, .count = count,
+                       .timeout_ms = timeout_ms, .batch = batch };
+    atomic_init(&work.next, 0);
+    pthread_t tids[MAX_THREADS];
+    int created = 0;
+    /* Caller is also a worker, so partial/all pthread_create failure cannot
+     * lose a statically assigned range. Total scanner workers <= threads. */
+    for (int i = 1; i < threads; ++i) {
+        if (pthread_create(&tids[created], NULL, scan_worker, &work) != 0) break;
+        created++;
+    }
+    scan_worker(&work);
+    for (int i = 0; i < created; ++i) pthread_join(tids[i], NULL);
+}
 
-        int count = 0;
-        int end = base + batch - 1;
-        if (end > t->end_port) end = t->end_port;
-
-        for (int port = base; port <= end; ++port)
+static int collect_retry_candidates(int *ports) {
+    int count = 0;
+    for (int port = 1; port <= SCAN_TOTAL_PORTS; ++port)
+        if (results_list[port].state == PORT_FILTERED || results_list[port].state == PORT_UNKNOWN)
             ports[count++] = port;
-
-        scan_ports_batch(target_ip_global, ports, count, t->timeout_ms);
-        atomic_fetch_add_explicit(&ports_scanned, count, memory_order_relaxed);
-    }
-    pthread_exit(NULL);
-    return NULL; /* MinGW pthread_exit declarations may lack noreturn. */
+    return count;
 }
 
-/* --- Deep batch thread (yalnızca candidates üzerinde) --- */
-void *deep_scan_thread(void *args) {
-    deep_batch_args *t = args;
-    int ports[MAX_BATCH];
-    int batch = t->batch > 0 && t->batch <= MAX_BATCH ? t->batch : MAX_BATCH;
-
-    for (int base = t->start_idx; base < t->end_idx; base += batch) {
-        if (portscanner_interrupt_requested ||
-            atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed))
-            break;
-
-        int end = base + batch;
-        if (end > t->end_idx) end = t->end_idx;
-
-        int count = 0;
-        for (int i = base; i < end && i < candidate_count; ++i)
-            ports[count++] = candidates[i];
-
-        if (count == 0) continue;
-
-        scan_ports_batch(target_ip_global, ports, count, t->timeout_ms);
-        atomic_fetch_add_explicit(&ports_scanned, count, memory_order_relaxed);
+static void run_deep_scan(int *ports, int count, const scan_profile *profile) {
+    int window = profile->deep_max_candidates;
+    if (window < 1 || window > SCAN_TOTAL_PORTS) window = SCAN_TOTAL_PORTS;
+    for (int start = 0; start < count && !scan_cancelled(); start += window) {
+        int chunk = count - start;
+        if (chunk > window) chunk = window;
+        /* Exactly one bounded retry, with a smaller global socket budget from
+         * the deep profile and a longer (at most 5000 ms) timeout. */
+        int timeout = profile->deep_timeout_ms;
+        if (timeout < profile->fast_timeout_ms) timeout = profile->fast_timeout_ms;
+        if (timeout > 5000) timeout = 5000;
+        int threads = profile->deep_threads;
+        if (threads < 1) threads = 1;
+        if (threads > MAX_THREADS) threads = MAX_THREADS;
+        int batch = profile->deep_batch;
+        if (batch > (MAX_SCAN_SOCKETS / 2) / threads)
+            batch = (MAX_SCAN_SOCKETS / 2) / threads;
+        run_scan_phase(ports + start, chunk, threads, batch, timeout);
     }
-    pthread_exit(NULL);
-    return NULL; /* MinGW pthread_exit declarations may lack noreturn. */
 }
 
 /* --- Banner / sürüm yakalama ---
@@ -518,13 +547,27 @@ static int is_http_port(int port) {
            port == 9000 || port == 591 || port == 8008;
 }
 
-/* Tek bir açık porttan ilk banner satırını `out`'a (en çok outsz-1 bayt) yazar;
- * yanıt yoksa boş bırakır. Bağlantı non-blocking connect+poll ile, okuma ise
- * SO_RCVTIMEO zaman aşımıyla yapılır. */
-static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
-    if (outsz == 0) return;
-    out[0] = '\0';
+/* Nonblocking banner I/O shares the scanner's bounded cancellation latency. */
+static int banner_wait(nero_socket_t fd, short events, int64_t deadline) {
+    while (!scan_cancelled()) {
+        int64_t left = deadline - scan_now_ms();
+        if (left <= 0) return 0;
+        struct pollfd p = {fd, events, 0};
+        int result = nero_socket_poll(&p, 1, left < CANCEL_POLL_MS ? (int)left : CANCEL_POLL_MS);
+        if (result > 0) return (p.revents & events) && !(p.revents & POLLNVAL);
+        if (result < 0 && errno != EINTR
+#ifdef _WIN32
+            && errno != WSAEINTR
+#endif
+           ) return 0;
+    }
+    return 0;
+}
 
+static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
+    if (!outsz) return;
+    out[0] = '\0';
+    if (scan_cancelled()) return;
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -533,55 +576,41 @@ static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
 #endif
     addr.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
-
     nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == NERO_INVALID_SOCKET) return;
-#ifdef _WIN32
-    u_long nonblocking = 1, blocking = 0;
-    if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) { close(fd); return; }
-#else
-    int fl = fcntl(fd, F_GETFL, 0);
-    if (fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
-#endif
-
+    if (make_nonblocking(fd) != 0) { close(fd); return; }
     int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    if (r < 0 && errno == EINPROGRESS) {
-        struct pollfd p = { fd, POLLOUT, 0 };
-        int pr;
-        do { pr = nero_socket_poll(&p, 1, 1200); } while (pr < 0 && errno == EINTR);
-        if (pr <= 0) { close(fd); return; }
-        int se = 0; socklen_t l = sizeof(se);
-        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &se, &l) != 0 || se != 0) { close(fd); return; }
-    } else if (r < 0) {
-        close(fd);
-        return;
+    if (r < 0) {
+        int error = errno;
+        if (!connect_pending(error) || !banner_wait(fd, POLLOUT, scan_now_ms() + 1200)) {
+            close(fd); return;
+        }
+        socklen_t len = sizeof(error);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) != 0 || error) {
+            close(fd); return;
+        }
     }
-
-    /* Bloklamaya dön ve bir okuma zaman aşımı koy. */
-#ifdef _WIN32
-    if (ioctlsocket((SOCKET)fd, FIONBIO, &blocking) != 0) { close(fd); return; }
-    DWORD tv = 1200; /* milisaniye: 1.2 sn */
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&tv, sizeof(tv));
-#else
-    if (fl >= 0) fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
-    struct timeval tv = { 1, 200000 }; /* 1.2 sn */
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#endif
-
-    if (is_http_port(port)) {
+    if (is_http_port(port) && !scan_cancelled()) {
         const char *req = "HEAD / HTTP/1.0\r\n\r\n";
-        (void)send(fd, req, strlen(req), 0);
+        int flags = 0;
+#ifdef MSG_NOSIGNAL
+        flags = MSG_NOSIGNAL;
+#elif defined(SO_NOSIGPIPE)
+        int no_sigpipe = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
+#endif
+        (void)send(fd, req, strlen(req), flags);
     }
-
     char buf[256];
-    ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+    ssize_t n = -1;
+    if (banner_wait(fd, POLLIN, scan_now_ms() + 1200) && !scan_cancelled())
+        n = recv(fd, buf, sizeof(buf) - 1, 0);
     close(fd);
     if (n <= 0) return;
-
     size_t o = 0;
     for (ssize_t i = 0; i < n && o < outsz - 1; ++i) {
         unsigned char c = (unsigned char)buf[i];
-        if (c == '\r' || c == '\n') break;         /* yalnızca ilk satır */
+        if (c == '\r' || c == '\n') break;
         out[o++] = (c >= 32 && c < 127) ? (char)c : '.';
     }
     out[o] = '\0';
@@ -624,110 +653,77 @@ static void grab_banners(const char *ip, const int *ports, int count,
         args[i].store = store;
         args[i].start = (i * count) / threads;
         args[i].end   = ((i + 1) * count) / threads;
-        if (pthread_create(&tids[i], NULL, banner_worker, &args[i]) != 0) break;
+        if (pthread_create(&tids[i], NULL, banner_worker, &args[i]) != 0) {
+            fprintf(stderr, "[!] Optional banner checks incomplete (thread creation failed).\n");
+            break;
+        }
         created++;
     }
     for (int i = 0; i < created; ++i) pthread_join(tids[i], NULL);
 }
 
-/* --- Hızlı erişilebilirlik ön kontrolü ---
- * Tam 65535 portu taramadan önce, hostun orada olup olmadığını birkaç yüz
- * ms'de anlar: yaygın portlara eşzamanlı SYN gönderir. Herhangi bir porttan
- * SYN-ACK (açık) VEYA RST (kapalı) gelmesi hostun var olduğunu kanıtlar;
- * hepsi sessiz kalırsa host muhtemelen kapalı/erişilemez. 1: canlı, 0: sessiz. */
-static int host_probe_alive(const char *ip) {
-    static const int probe_ports[] = {
-        80, 443, 22, 53, 445, 139, 8080, 3389, 21, 23, 25, 111, 135, 993, 62078, 548
-    };
-    const int n = (int)(sizeof(probe_ports) / sizeof(probe_ports[0]));
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-#if defined(__APPLE__)
-    addr.sin_len = sizeof(addr);
-#endif
-    if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return 0;
-
-    struct pollfd pfds[32];
-    int nfds = 0;
-    for (int i = 0; i < n; ++i) {
-        nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (fd == NERO_INVALID_SOCKET) continue;
+/* Optional ICMP discovery is advisory and opt-in. Only numeric, validated
+ * IPv4 addresses are passed as an argv element (never through a shell). Lack
+ * of ping permissions, binary, response or route always means unknown. */
+static host_state host_probe_alive(const char *ip) {
+    struct in_addr parsed;
+    if (!ip || inet_pton(AF_INET, ip, &parsed) != 1) return HOST_UNKNOWN;
+    const char *icmp = getenv("NERO_SCAN_ICMP");
+    if (!icmp || strcmp(icmp, "1") != 0 || scan_cancelled()) return HOST_UNKNOWN;
 #ifdef _WIN32
-        u_long nonblocking = 1;
-        if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) { close(fd); continue; }
-#else
-        int fl = fcntl(fd, F_GETFL, 0);
-        if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0) { close(fd); continue; }
-#endif
-        addr.sin_port = htons((uint16_t)probe_ports[i]);
-        int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-        if (r == 0) { close(fd); return 1; }                       /* anında açık */
-        if (r < 0 && errno == ECONNREFUSED) { close(fd); return 1; } /* RST → canlı */
-        if (r < 0 && errno != EINPROGRESS) { close(fd); continue; }
-        pfds[nfds].fd = fd;
-        pfds[nfds].events = POLLOUT;
-        pfds[nfds].revents = 0;
-        nfds++;
-    }
-
-    int alive = 0;
-    if (nfds > 0) {
-        struct timespec start;
-        clock_gettime(CLOCK_MONOTONIC, &start);
-        int remaining = nfds;
-        while (remaining > 0 && !alive) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            long el = (now.tv_sec - start.tv_sec) * 1000L
-                    + (now.tv_nsec - start.tv_nsec) / 1000000L;
-            int wait = 700 - (int)el; /* sabit, kısa canlılık penceresi */
-            if (wait <= 0) break;
-            int ready;
-            do { ready = nero_socket_poll(pfds, (nfds_t)nfds, wait); } while (ready < 0 && errno == EINTR);
-            if (ready <= 0) break;
-            for (int s = 0; s < nfds && ready > 0; ++s) {
-                if (pfds[s].fd == NERO_INVALID_SOCKET || pfds[s].revents == 0) continue;
-                ready--;
-                int se = 0;
-                socklen_t l = sizeof(se);
-                if (getsockopt(pfds[s].fd, SOL_SOCKET, SO_ERROR, &se, &l) == 0) {
-                    if (se == 0 || se == ECONNREFUSED) alive = 1; /* açık veya kapalı → host var */
-                }
-                close(pfds[s].fd);
-                pfds[s].fd = NERO_INVALID_SOCKET;
-                remaining--;
-            }
+    char command[128];
+    snprintf(command, sizeof(command), "ping.exe -n 1 -w 1000 %s", ip);
+    STARTUPINFOA startup = {0};
+    PROCESS_INFORMATION process;
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
+                        NULL, NULL, &startup, &process)) return HOST_UNKNOWN;
+    int64_t deadline = scan_now_ms() + 1700;
+    DWORD code = 1;
+    while (WaitForSingleObject(process.hProcess, CANCEL_POLL_MS) == WAIT_TIMEOUT) {
+        if (scan_cancelled() || scan_now_ms() >= deadline) {
+            TerminateProcess(process.hProcess, 1);
+            WaitForSingleObject(process.hProcess, INFINITE);
+            break;
         }
     }
-    for (int s = 0; s < nfds; ++s)
-        if (pfds[s].fd != NERO_INVALID_SOCKET) close(pfds[s].fd);
-    return alive;
-}
-
-/* Host sessizse: interaktifte "yine de taransın mı?" sorar (varsayılan Hayır).
- * 1 döndürürse taramaya devam, 0 döndürürse vazgeç. Non-interaktif ortamda
- * (betik/boru) hiçbir hostu atlamamak için devam eder (1). */
-static int confirm_scan_unreachable(nero_operation_ui *ui) {
-    if (!ui->interactive) return 1;
-    int raw = enable_raw_mode() == 0;
-    if (raw) set_mouse_reporting(1);
-    const char *labels[2] = { "Hayir  (geri don)", "Evet  (yine de tara)" };
-    int sel = 0, res = 0;
-    ui->controls = "Up/Down: Sec   Enter: Onayla   Esc: Iptal";
+    GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return code == 0 ? HOST_ONLINE : HOST_UNKNOWN;
+#else
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0) return HOST_UNKNOWN;
+    int ok = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    ok |= posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    ok |= posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+#if defined(__APPLE__)
+    char *args[] = {"ping", "-n", "-c", "1", "-W", "1000", (char *)ip, NULL};
+#else
+    char *args[] = {"ping", "-n", "-c", "1", "-W", "1", (char *)ip, NULL};
+#endif
+    extern char **environ;
+    pid_t pid = -1;
+    int spawned = ok == 0 ? posix_spawnp(&pid, "ping", &actions, NULL, args, environ) : -1;
+    posix_spawn_file_actions_destroy(&actions);
+    if (spawned != 0) return HOST_UNKNOWN;
+    int64_t deadline = scan_now_ms() + 1700;
+    int status = 0;
     for (;;) {
-        nero_operation_menu(ui, "Host yanit vermiyor — yine de taransin mi?",
-                            labels, NULL, 2, sel);
-        if (portscanner_interrupt_requested) { res = 0; break; }
-        nero_ui_key k = nero_operation_read_key(100);
-        if (k == NERO_UI_KEY_CANCEL || k == NERO_UI_KEY_EOF) { res = 0; break; }
-        if (k == NERO_UI_KEY_UP || k == NERO_UI_KEY_WHEEL_UP) { if (sel > 0) sel--; }
-        else if (k == NERO_UI_KEY_DOWN || k == NERO_UI_KEY_WHEEL_DOWN) { if (sel < 1) sel++; }
-        else if (k == NERO_UI_KEY_ENTER) { res = sel; break; }
+        pid_t result = waitpid(pid, &status, WNOHANG);
+        if (result == pid) return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? HOST_ONLINE : HOST_UNKNOWN;
+        if (result < 0 && errno != EINTR) return HOST_UNKNOWN;
+        if (scan_cancelled() || scan_now_ms() >= deadline) {
+            kill(pid, SIGKILL);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+            return HOST_UNKNOWN;
+        }
+        const struct timespec delay = {0, CANCEL_POLL_MS * 1000000L};
+        nanosleep(&delay, NULL);
     }
-    if (raw) { set_mouse_reporting(0); disable_raw_mode(); }
-    return res;
+#endif
 }
 
 /* --- Manuel hız ayarı ekranı ---
@@ -841,220 +837,101 @@ static const scan_profile *select_scan_profile(nero_operation_ui *ui) {
 
 /* --- Ana kontrolcü --- */
 int portscanner(const char *target_ip) {
+    struct in_addr address;
+    if (!target_ip || inet_pton(AF_INET, target_ip, &address) != 1) {
+        fprintf(stderr, "[-] Invalid IPv4 target.\n");
+        return PORTSCANNER_FAILED;
+    }
     target_ip_global = target_ip;
-    results_list = NULL;
-    result_count = 0;
-    candidates = NULL;
-    candidate_count = 0;
-    scan_alloc_failed = 0;
+    scan_input_fallback = 0;
+    scan_owner = pthread_self();
     portscanner_interrupt_requested = 0;
     atomic_init(&scan_cancel_requested, 0);
     atomic_init(&latest_probe_port, 0);
     atomic_init(&ports_scanned, 0);
-
-    if (pthread_mutex_init(&results_mutex, NULL) != 0) {
-        fprintf(stderr, "[-] Failed to initialize mutex.\n");
-        return -1;
+    atomic_init(&host_responded, 0);
+    results_list = calloc(SCAN_TOTAL_PORTS + 1, sizeof(*results_list));
+    int *work_ports = malloc(SCAN_TOTAL_PORTS * sizeof(*work_ports));
+    if (!results_list || !work_ports) {
+        free(results_list); results_list = NULL;
+        free(work_ports);
+        fprintf(stderr, "[-] Failed to allocate scan ledger.\n");
+        return PORTSCANNER_FAILED;
     }
-
-    raise_fd_limit();
+    if (pthread_mutex_init(&results_mutex, NULL) != 0) {
+        free(results_list); results_list = NULL;
+        free(work_ports);
+        return PORTSCANNER_FAILED;
+    }
 
     nero_operation_ui ui = {0};
     char detail[96];
     snprintf(detail, sizeof(detail), "%s", target_ip);
     nero_operation_begin(&ui, "Port scan", detail, "Esc · Back");
-
-    /* Aşama 0: tarama hızını seç (Hızlı/Orta/Yavaş/Manuel). İnteraktif
-     * değilse önerilen profil kullanılır; kullanıcı iptal ederse çıkılır. */
     active_profile = select_scan_profile(&ui);
     if (active_profile == NULL) {
         pthread_mutex_destroy(&results_mutex);
-        free(results_list);
-        results_list = NULL;
-        result_count = 0;
+        free(results_list); results_list = NULL;
+        free(work_ports);
         nero_operation_end(&ui);
         puts("Scan cancelled. Returned to terminal.");
         return PORTSCANNER_CANCELLED;
     }
 
-    /* Aşama 0.5: hostun orada olup olmadığını hızlıca anla. Ulaşılamayan bir
-     * hedefte 65535 portu tam zaman aşımıyla taramak dakikalarca sürebilir;
-     * önce kısa bir canlılık kontrolü yapıp kullanıcıyı bekletme. */
-    if (!host_probe_alive(target_ip)) {
-        if (confirm_scan_unreachable(&ui) != 1) {
-            pthread_mutex_destroy(&results_mutex);
-            free(results_list);
-            results_list = NULL;
-            result_count = 0;
-            nero_operation_end(&ui);
-            printf("Host %s yanit vermiyor (erisilemiyor). Tarama yapilmadi.\n", target_ip);
-            return 0;
-        }
-    }
-
+    /* Discovery never gates a valid target. The full fast phase supplies TCP
+     * reachability evidence itself, without an extra 16-port pre-scan. */
+    if (host_probe_alive(target_ip) == HOST_ONLINE)
+        atomic_store_explicit(&host_responded, 1, memory_order_relaxed);
+    nero_operation_status("36", "Host discovery",
+        atomic_load_explicit(&host_responded, memory_order_relaxed)
+            ? "online; scanning all TCP ports" : "unknown; scanning all TCP ports");
     const scan_profile *prof = active_profile;
-    int fast_thread_count = prof->fast_threads;
-    if (fast_thread_count < 1) fast_thread_count = 1;
-    if (fast_thread_count > MAX_THREADS) fast_thread_count = MAX_THREADS;
-
-    /* Aşama 1: Event-driven batch hızlı keşif (tam 1-65535 aralığı) */
-    pthread_t fast_threads[MAX_THREADS];
-    batch_thread_args fast_args[MAX_THREADS];
-    int ports_per_fast = SCAN_TOTAL_PORTS / fast_thread_count;
-    if (ports_per_fast == 0) ports_per_fast = SCAN_TOTAL_PORTS;
-
-    int fast_created = 0;
-    for (int i = 0; i < fast_thread_count; ++i) {
-        fast_args[i].start_port = (i * ports_per_fast) + 1;
-        fast_args[i].end_port = (i == fast_thread_count - 1)
-            ? SCAN_TOTAL_PORTS
-            : (i + 1) * ports_per_fast;
-        fast_args[i].timeout_ms = prof->fast_timeout_ms;
-        fast_args[i].batch = prof->fast_batch;
-        if (pthread_create(&fast_threads[i], NULL, fast_scan_thread, &fast_args[i]) != 0) {
-            fprintf(stderr, "[-] Failed to create fast thread %d.\n", i);
-            break;
-        }
-        fast_created++;
-    }
-
     scan_animation_state animation = { .target_ip = target_ip, .animate = scan_motion_enabled() };
     atomic_init(&animation.stop, 0);
     pthread_t animation_thread;
-    int animation_started = 0;
-    int discovery_raw = 0;
-
+    int animation_started = 0, discovery_raw = 0;
     if (isatty(STDIN_FILENO)) {
         discovery_raw = (enable_raw_mode() == 0);
         if (discovery_raw) set_mouse_reporting(1);
         animation_started = pthread_create(&animation_thread, NULL, scan_animation_worker, &animation) == 0;
     }
+    scan_input_fallback = discovery_raw && !animation_started;
     if (!animation_started) nero_operation_loader("Scanning", target_ip, 6);
+    run_scan_phase(NULL, SCAN_TOTAL_PORTS, prof->fast_threads,
+                   prof->fast_batch, prof->fast_timeout_ms);
+    int candidate_count = collect_retry_candidates(work_ports);
+    if (!scan_cancelled()) run_deep_scan(work_ports, candidate_count, prof);
 
-    for (int i = 0; i < fast_created; ++i) pthread_join(fast_threads[i], NULL);
-
-    /* İptal edildiyse önce animasyon/girdi thread'ini durdur ki temizlik
-     * sırasında serbest bırakılan belleğe erişmesin. */
-    if (portscanner_interrupt_requested || atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed)) {
-        if (animation_started) {
-            atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
-            pthread_join(animation_thread, NULL);
-        }
-        if (discovery_raw) { set_mouse_reporting(0); disable_raw_mode(); }
-        pthread_mutex_destroy(&results_mutex);
-        free(results_list);
-        results_list = NULL;
-        result_count = 0;
-        free(candidates);
-        candidates = NULL;
-        candidate_count = 0;
-        nero_operation_end(&ui);
-        puts("Scan cancelled. Returned to terminal.");
-        return PORTSCANNER_CANCELLED;
-    }
-
-    /* Candidates dizisini oluştur: yalnızca filtrelenmiş portlar.
-     * Animasyon thread'i candidate oluşturma sırasında results_list'i okur;
-     * tutarlı bir anlık görüntü için kilit altında topla. */
-    pthread_mutex_lock(&results_mutex);
-    int filtered_total = 0;
-    for (int i = 0; i < result_count; ++i)
-        if (results_list[i].filtered) filtered_total++;
-
-    if (filtered_total > 0 && filtered_total <= prof->deep_max_candidates) {
-        candidates = malloc(filtered_total * sizeof(int));
-        if (candidates) {
-            int idx = 0;
-            for (int i = 0; i < result_count; ++i) {
-                if (results_list[i].filtered)
-                    candidates[idx++] = results_list[i].port;
-            }
-            candidate_count = filtered_total;
-        }
-    }
-    pthread_mutex_unlock(&results_mutex);
-
-    /* Aşama 2: Event-driven batch derin tarama. Animasyon/girdi thread'i
-     * çalışmaya devam eder; böylece ekran donmaz ve kullanıcı bu aşamada da
-     * iptal edebilir. İlerleme çubuğu hızlı aşamada doldu; derin aşamada
-     * latest_probe_port canlı etkinliği gösterir. */
-    if (candidate_count > 0 && candidates) {
-        int deep_thread_count = prof->deep_threads;
-        if (deep_thread_count < 1) deep_thread_count = 1;
-        if (deep_thread_count > MAX_THREADS) deep_thread_count = MAX_THREADS;
-        if (deep_thread_count > candidate_count) deep_thread_count = candidate_count;
-
-        pthread_t deep_threads[MAX_THREADS];
-        deep_batch_args deep_args[MAX_THREADS];
-        int created = 0;
-
-        for (int i = 0; i < deep_thread_count; ++i) {
-            deep_args[i].start_idx = (i * candidate_count) / deep_thread_count;
-            deep_args[i].end_idx   = ((i + 1) * candidate_count) / deep_thread_count;
-            deep_args[i].timeout_ms = prof->deep_timeout_ms;
-            deep_args[i].batch = prof->deep_batch;
-            if (pthread_create(&deep_threads[i], NULL, deep_scan_thread, &deep_args[i]) != 0)
-                break;
-            created++;
-        }
-        for (int i = 0; i < created; ++i) pthread_join(deep_threads[i], NULL);
-
-        pthread_mutex_lock(&results_mutex);
-        free(candidates);
-        candidates = NULL;
-        candidate_count = 0;
-        pthread_mutex_unlock(&results_mutex);
-    }
-
-    /* Her iki tarama aşaması bitti: animasyon/girdi thread'ini şimdi durdur. */
     if (animation_started) {
         atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
         pthread_join(animation_thread, NULL);
     }
     if (discovery_raw) { set_mouse_reporting(0); disable_raw_mode(); }
-
+    scan_input_fallback = 0;
     pthread_mutex_destroy(&results_mutex);
-
-    /* Kullanıcı derin tarama sırasında iptal ettiyse menüyü atla. */
-    if (portscanner_interrupt_requested || atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed)) {
-        free(results_list);
-        results_list = NULL;
-        result_count = 0;
+    scan_summary summary = summarize_scan();
+    int cancelled = scan_cancelled();
+    int accounted = summary.open + summary.closed + summary.filtered + summary.unknown;
+    if (cancelled || accounted != SCAN_TOTAL_PORTS || summary.retried < candidate_count) {
         nero_operation_end(&ui);
-        puts("Scan cancelled. Returned to terminal.");
-        return PORTSCANNER_CANCELLED;
+        report_scan_summary();
+        if (summary.retried < candidate_count)
+            printf("Retry checks incomplete: %d of %d candidates.\n", summary.retried, candidate_count);
+        free(results_list); results_list = NULL;
+        free(work_ports);
+        puts(cancelled ? "Scan cancelled. Returned to terminal." : "[-] Scan coverage incomplete.");
+        return cancelled ? PORTSCANNER_CANCELLED : PORTSCANNER_FAILED;
     }
 
-    if (scan_alloc_failed) {
-        nero_operation_end(&ui);
-        fprintf(stderr, "[-] Memory allocation failed during scan.\n");
-        free(results_list);
-        results_list = NULL;
-        result_count = 0;
-        return -1;
-    }
-
-    /* Menü için yalnızca açık portları topla */
-    int *open_ports = NULL;
+    /* Reuse the work array for the unchanged open-port selection screen. */
+    int *open_ports = work_ports;
     int open_count = 0;
-    if (result_count > 0) {
-        open_ports = malloc(result_count * sizeof(int));
-        if (open_ports) {
-            for (int i = 0; i < result_count; ++i) {
-                if (!results_list[i].filtered)
-                    open_ports[open_count++] = results_list[i].port;
-            }
-        }
-    }
-
-    char result_detail[96];
-    if (filtered_total > 0) {
-        snprintf(result_detail, sizeof(result_detail),
-            "%d open, %d filtered (not shown)", open_count, filtered_total);
-    } else {
-        snprintf(result_detail, sizeof(result_detail),
-            "%d open port%s found", open_count, open_count == 1 ? "" : "s");
-    }
+    for (int port = 1; port <= SCAN_TOTAL_PORTS; ++port)
+        if (results_list[port].state == PORT_OPEN) open_ports[open_count++] = port;
+    char result_detail[160];
+    snprintf(result_detail, sizeof(result_detail),
+        "%d open, %d closed, %d filtered, %d error/unknown",
+        summary.open, summary.closed, summary.filtered, summary.unknown);
     nero_operation_status("32", "Scan complete", result_detail);
 
     /* Açık portlar için servis banner'larını yakala (varsa menüde gösterilir).
@@ -1085,15 +962,19 @@ int portscanner(const char *target_ip) {
         }
     }
 
-    int selected_port = select_port_menu_in_ui(open_ports, open_count, &ui);
+    int selected_port = scan_cancelled() ? PORTSCANNER_CANCELLED :
+        select_port_menu_in_ui(open_ports, open_count, &ui);
     free(banner_port_list);
     free(banner_store);
     free(banner_texts);
     free(open_ports);
+    nero_operation_end(&ui);
+    report_scan_summary();
+    if (summary.filtered || summary.unknown)
+        puts("Some port checks remain inconclusive after one bounded retry.");
     free(results_list);
     results_list = NULL;
-    nero_operation_end(&ui);
     if (selected_port == PORTSCANNER_CANCELLED)
         puts("Port selection cancelled. Returned to terminal.");
-    return selected_port;
+    return selected_port == 0 && summary.unknown > 0 ? PORTSCANNER_FAILED : selected_port;
 }

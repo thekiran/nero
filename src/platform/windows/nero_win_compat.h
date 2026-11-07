@@ -184,8 +184,10 @@ static inline int nero_socket_poll(struct pollfd *fds, nfds_t count, int timeout
         batch[i].revents = 0;
     }
     int ready = NERO_WIN_WSAPOLL(batch, (ULONG)count, timeout_ms);
-    if (ready == SOCKET_ERROR)
+    if (ready == SOCKET_ERROR) {
+        errno = WSAGetLastError();
         return -1;
+    }
     for (unsigned long i = 0; i < count; ++i) {
         if (fds[i].fd == INVALID_SOCKET) {
             fds[i].revents = 0;
