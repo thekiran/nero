@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Sensitive security report
+    url: https://github.com/thekiran/nero/blob/main/SECURITY.md
+    about: Follow the private reporting guidance; do not disclose sensitive details in an issue.
