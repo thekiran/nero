@@ -91,7 +91,8 @@ static int mutex_init_failure;
 static int socket_cap;
 enum { CLOSED, TIMEOUT, DELAYED, RESOURCE, MIXED, CANCEL, POLL_FAILURE,
        GETSOCKOPT_FAILURE, INVALID_EVENT, PENDING_EVENT, NONBLOCK_FAILURE, ROUTE_FAILURE,
-       INTERRUPTED_POLL, ERROR_EVENT, TRANSIENT_RESOURCE, TRANSIENT_POLL, ALWAYS_INTERRUPTED, CAPPED };
+       INTERRUPTED_POLL, ERROR_EVENT, TRANSIENT_RESOURCE, TRANSIENT_POLL, ALWAYS_INTERRUPTED, CAPPED,
+       SELECT_EARLY };
 
 static int handle_index(nero_socket_t fd) {
     CHECK(fd >= HANDLE_BASE && fd < HANDLE_BASE + FAKE_HANDLES);
@@ -157,6 +158,7 @@ static int fake_getsockopt(nero_socket_t fd, int level, int option, void *value,
 static int fake_poll(struct pollfd *fds, nfds_t count, int timeout) {
     CHECK(timeout>=0 && timeout<=CANCEL_POLL_MS);
     if (scenario==CANCEL) atomic_store(&scan_cancel_requested,1);
+    if (scenario==SELECT_EARLY) atomic_store(&scan_select_requested,1);
     if (scenario==ALWAYS_INTERRUPTED) {
         atomic_fetch_add(&fake_time, 50);
         /* Deliberately poison revents: the failed poll must not classify open. */
@@ -217,6 +219,7 @@ static void setup(int kind) {
     atomic_init(&host_responded,0); atomic_init(&latest_probe_port,0);
     atomic_init(&scan_progress_total,SCAN_TOTAL_PORTS);
     atomic_init(&probes_completed,0); atomic_init(&scan_work_done,0);
+    atomic_init(&scan_select_requested,0);
     atomic_init(&resource_failures,0); socket_cap=0;
     scan_input_fallback=0;
     portscanner_interrupt_requested=0;
@@ -304,6 +307,23 @@ static void test_cancel(void) {
     CHECK(portscanner(NULL)==PORTSCANNER_FAILED);
     CHECK(portscanner("192.0.2.999")==PORTSCANNER_FAILED);
     puts("PASS cancellation cleans active sockets and reports unscanned separately; invalid IPv4 rejected");
+}
+static void test_select_early(void) {
+    /* The user presses Enter mid-scan to stop and pick from the ports found so
+     * far. Like cancel it stops pulling new work and leaves the rest unscanned;
+     * unlike cancel it is NOT a cancellation, and it must not persist so a later
+     * scan still covers every port. */
+    setup(SELECT_EARLY);
+    run_scan_phase(NULL,65535,4,16,5000);
+    scan_summary s=summarize_scan();
+    CHECK(scan_interrupted() && !scan_cancelled());
+    CHECK(s.unscanned>0 && s.open+s.closed+s.filtered+s.unknown<65535);
+    teardown();
+    setup(CLOSED); /* setup() clears the early-select request, like a new scan */
+    run_scan_phase(NULL,65535,4,64,50);
+    CHECK(summarize_scan().closed==65535 && summarize_scan().unscanned==0);
+    teardown();
+    puts("PASS user early-select stops the scan as partial, stays distinct from cancel, and does not persist");
 }
 static void test_signal_interrupt(void) {
     setup(CLOSED);
@@ -536,7 +556,7 @@ int main(void) {
     test_initialization_error_logs();
     test_error_diagnostics();
     test_full_coverage(); test_discovery_and_deep(); test_batch_outcomes();
-    test_full_timeouts(); test_cancel(); test_signal_interrupt(); test_resource_recovery();
+    test_full_timeouts(); test_cancel(); test_select_early(); test_signal_interrupt(); test_resource_recovery();
     test_port_bounds(); test_retry_precedence(); test_adaptive_retry(); test_progress_honest();
 #ifndef _WIN32
     test_user_cancel_keys();

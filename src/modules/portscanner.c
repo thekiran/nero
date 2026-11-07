@@ -121,6 +121,10 @@ static atomic_int host_responded;
 static atomic_int scan_progress_total;
 static atomic_int probes_completed;
 static atomic_int scan_work_done;
+/* Set when the user chooses, during a live scan, to stop early and pick from
+ * the open ports already discovered. Distinct from cancellation: coverage is
+ * reported as partial and the open-port selection menu is still shown. */
+static atomic_int scan_select_requested;
 /* Local resource exhaustion (descriptors, buffers, ephemeral ports). Deep
  * rounds halve their concurrency when a window increases this counter. */
 static atomic_int resource_failures;
@@ -140,6 +144,14 @@ static int scan_cancelled(void) {
         atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
     return portscanner_interrupt_requested ||
         atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed);
+}
+
+/* True when the scan should stop pulling new work: a hard cancel, or a user
+ * request to stop early and select from the ports found so far. Loop gates use
+ * this; final classification still uses scan_cancelled() to tell them apart. */
+static int scan_interrupted(void) {
+    return scan_cancelled() ||
+        atomic_load_explicit(&scan_select_requested, memory_order_relaxed);
 }
 
 static int64_t scan_now_ms(void) {
@@ -366,6 +378,12 @@ static void *scan_animation_worker(void *arg) {
         case NERO_UI_KEY_WHEEL_DOWN: scroll_delta =  1; break;
         case NERO_UI_KEY_UP:         scroll_delta = -1; break;
         case NERO_UI_KEY_DOWN:       scroll_delta =  1; break;
+        case NERO_UI_KEY_ENTER:
+            /* Stop the scan early and let the user pick from the ports already
+             * found, but only once at least one open port exists. */
+            if (total_open > 0)
+                atomic_store_explicit(&scan_select_requested, 1, memory_order_relaxed);
+            break;
         default: break;
         }
 
@@ -520,7 +538,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
     int slot_port[MAX_BATCH];
     int64_t deadline[MAX_BATCH];
     int nfds = 0, remaining = 0, resource_error = 0;
-    for (int i = 0; i < count && !scan_cancelled(); ++i) {
+    for (int i = 0; i < count && !scan_interrupted(); ++i) {
         int port = ports[i];
         /* Port 0 and out-of-range indices can never enter the ledger; the
          * production queue only generates the complete 1..65535 range. */
@@ -560,7 +578,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         remaining++;
     }
 
-    while (remaining && !scan_cancelled()) {
+    while (remaining && !scan_interrupted()) {
         int wait_ms = CANCEL_POLL_MS;
         int64_t now = scan_now_ms();
         for (int s = 0; s < nfds; ++s) {
@@ -572,7 +590,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         for (int s = 0; s < nfds; ++s) pfds[s].revents = 0;
         int before = remaining;
         int ready = nero_socket_poll(pfds, (nfds_t)nfds, wait_ms);
-        if (scan_cancelled()) break;
+        if (scan_interrupted()) break;
         if (ready < 0) {
             int error = errno;
             if (error == EINTR
@@ -638,7 +656,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         if (pfds[s].fd != NERO_INVALID_SOCKET) close(pfds[s].fd);
     if (resource_error)
         atomic_fetch_add_explicit(&resource_failures, 1, memory_order_relaxed);
-    if (resource_error && !scan_cancelled()) {
+    if (resource_error && !scan_interrupted()) {
         const struct timespec delay = {0, 5000000L};
         nanosleep(&delay, NULL); /* bounded backoff, not a busy socket retry loop */
     }
@@ -647,7 +665,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
 static void *scan_worker(void *arg) {
     scan_work *work = arg;
     int ports[MAX_BATCH];
-    while (!scan_cancelled()) {
+    while (!scan_interrupted()) {
         int base = atomic_fetch_add_explicit(&work->next, work->batch, memory_order_relaxed);
         if (base >= work->count) break;
         int count = work->count - base;
@@ -715,10 +733,10 @@ static void run_deep_scan(int *ports, int count, const scan_profile *profile) {
     if (batch > (MAX_SCAN_SOCKETS / 2) / threads)
         batch = (MAX_SCAN_SOCKETS / 2) / threads;
 
-    for (int round = 0; round < rounds && count > 0 && !scan_cancelled(); ++round) {
+    for (int round = 0; round < rounds && count > 0 && !scan_interrupted(); ++round) {
         /* Publish this round's work before probing so progress stays honest. */
         atomic_fetch_add_explicit(&scan_progress_total, count, memory_order_relaxed);
-        for (int start = 0; start < count && !scan_cancelled(); start += window) {
+        for (int start = 0; start < count && !scan_interrupted(); start += window) {
             int chunk = count - start;
             if (chunk > window) chunk = window;
             int before = atomic_load_explicit(&resource_failures, memory_order_relaxed);
@@ -1061,6 +1079,7 @@ int portscanner(const char *target_ip) {
     atomic_init(&scan_progress_total, SCAN_TOTAL_PORTS);
     atomic_init(&probes_completed, 0);
     atomic_init(&scan_work_done, 0);
+    atomic_init(&scan_select_requested, 0);
     atomic_init(&resource_failures, 0);
     scan_profile_label = "";
     scan_completion = NULL;
@@ -1086,7 +1105,7 @@ int portscanner(const char *target_ip) {
     nero_operation_ui ui = {0};
     char detail[96];
     snprintf(detail, sizeof(detail), "%s", target_ip);
-    nero_operation_begin(&ui, "Port scan", detail, "Esc · Back");
+    nero_operation_begin(&ui, "Port scan", detail, "Enter: port sec  ·  Esc: Geri");
     active_profile = select_scan_profile(&ui);
     if (active_profile == NULL) {
         pthread_mutex_destroy(&results_mutex);
@@ -1122,8 +1141,8 @@ int portscanner(const char *target_ip) {
     run_scan_phase(NULL, SCAN_TOTAL_PORTS, prof->fast_threads,
                    prof->fast_batch, prof->fast_timeout_ms);
     int candidate_count = collect_retry_candidates(work_ports);
-    if (!scan_cancelled()) run_deep_scan(work_ports, candidate_count, prof);
-    if (!scan_cancelled()) atomic_store_explicit(&scan_work_done, 1, memory_order_relaxed);
+    if (!scan_interrupted()) run_deep_scan(work_ports, candidate_count, prof);
+    if (!scan_interrupted()) atomic_store_explicit(&scan_work_done, 1, memory_order_relaxed);
 
     if (animation_started) {
         atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
@@ -1134,14 +1153,22 @@ int portscanner(const char *target_ip) {
     pthread_mutex_destroy(&results_mutex);
     scan_summary summary = summarize_scan();
     int cancelled = scan_cancelled();
+    /* A deliberate early stop (the user pressed Enter to pick from the ports
+     * found so far). It is not a cancel and not a coverage failure: the menu is
+     * still shown, and the summary reports the partial coverage honestly. */
+    int selected_early = !cancelled &&
+        atomic_load_explicit(&scan_select_requested, memory_order_relaxed);
     int accounted = summary.open + summary.closed + summary.filtered + summary.unknown;
     scan_duration_ms = scan_now_ms() - scan_started_ms;
     scan_completion = cancelled ? "cancelled"
+        : selected_early ? "stopped early by user (partial coverage)"
         : (accounted == SCAN_TOTAL_PORTS ? "complete" : "incomplete");
-    if (cancelled || accounted != SCAN_TOTAL_PORTS || summary.retried < candidate_count) {
+    if (cancelled ||
+        (!selected_early &&
+         (accounted != SCAN_TOTAL_PORTS || summary.retried < candidate_count))) {
         nero_operation_end(&ui);
         report_scan_summary();
-        if (summary.retried < candidate_count)
+        if (!cancelled && summary.retried < candidate_count)
             printf("Retry checks incomplete: %d of %d candidates.\n", summary.retried, candidate_count);
         free(results_list); results_list = NULL;
         free(work_ports);
@@ -1158,7 +1185,8 @@ int portscanner(const char *target_ip) {
     snprintf(result_detail, sizeof(result_detail),
         "%d open, %d closed, %d filtered, %d error/unknown",
         summary.open, summary.closed, summary.filtered, summary.unknown);
-    nero_operation_status("32", "Scan complete", result_detail);
+    nero_operation_status(selected_early ? "33" : "32",
+        selected_early ? "Scan stopped early (partial)" : "Scan complete", result_detail);
 
     /* Açık portlar için servis banner'larını yakala (varsa menüde gösterilir).
      * Port değerine göre arandığından menüdeki sıralamadan bağımsızdır. */
@@ -1181,7 +1209,8 @@ int portscanner(const char *target_ip) {
             ui.banner_ports = banner_port_list;
             ui.banner_texts = (const char *const *)banner_texts;
             ui.banner_count = banner_n;
-            nero_operation_status("32", "Scan complete", result_detail);
+            nero_operation_status(selected_early ? "33" : "32",
+        selected_early ? "Scan stopped early (partial)" : "Scan complete", result_detail);
         } else {
             nero_log_write(NERO_LOG_WARN, "scanner", "Optional banner buffers could not be allocated");
             free(banner_port_list); free(banner_store); free(banner_texts);
@@ -1197,6 +1226,9 @@ int portscanner(const char *target_ip) {
     free(open_ports);
     nero_operation_end(&ui);
     report_scan_summary();
+    if (selected_early && summary.unscanned)
+        printf("Scan stopped early at your request: %d of %d TCP ports were not scanned.\n",
+               summary.unscanned, SCAN_TOTAL_PORTS);
     if (summary.filtered || summary.unknown)
         puts("Some port checks remain inconclusive after bounded retries.");
     free(results_list);
