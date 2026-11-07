@@ -103,6 +103,20 @@ class TerminalQuality(unittest.TestCase):
         self.assertEqual(output.count(b"-Sc: simulation for 192.0.2.1; packets sent: 0"), 1)
         self.assertEqual(output.count(b"Network diagnostics: ON"), 2)
 
+    def test_mode_off_blocks_both_sc_and_syn(self):
+        # -mode off must block -Sc and -Syn consistently at dispatch, before any
+        # operation path (simulation, mock engine, or the real engine) runs.
+        output = self.output(
+            b"-mode off\n192.0.2.1 -Sc\n192.0.2.1 -Syn\n"
+            b"-mode on\n192.0.2.1 -Sc\n192.0.2.1 -Syn\nexit -All\n")
+        self.assertEqual(output.count(b"Network diagnostics are disabled."), 2)
+        self.assertNotIn(b"MOCK_SYN:", output)
+        # While disabled, neither operation path may run; both resume once on.
+        self.assertEqual(
+            output.count(b"-Sc: simulation for 192.0.2.1; packets sent: 0"), 1)
+        self.assertEqual(
+            output.count(b"-Syn: safe test mode; no network traffic generated."), 1)
+
     def test_repeated_clear_and_fallback(self):
         result = run(b"clear\n" * 200 + b"help\nexit\n", TERM="dumb", NERO_ASCII="1", NO_COLOR="1")
         self.assertEqual(result.returncode, 0, result.stderr)
