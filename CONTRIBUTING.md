@@ -9,10 +9,11 @@ development host. Run the appropriate CMake configure/build/test preset when
 CMake is available. Record compiler, OS, architecture, failures and skipped tests.
 Never infer runtime support from compilation alone. Never run network-load tests.
 
-The baseline manifest protects existing C/header/Makefile contents. Do not regenerate
-it simply to make a failure disappear: intentional changes need review, targeted
-regression evidence and an explicit baseline update. Windows CI currently tests
-foundation components only; implementing the real console requires separate tests.
+Historical baseline manifests are audit records, not the default quality gate.
+Do not regenerate them simply to hide drift. Intentional changes need review and
+relevant behavioral regression evidence. Native Windows CLI tests use MSYS2
+UCRT64 / MinGW and include socket-width, console-restoration and loopback checks;
+the Visual Studio preset still validates only the platform foundation.
 
 Check `git diff --check`, review the full diff (including new files), and obtain
 explicit approval before committing, pushing, merging or releasing work.

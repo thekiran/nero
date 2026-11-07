@@ -36,6 +36,7 @@
 #include "nero/terminal.h"
 #include "nero/network_diagnostics.h"
 #include "nero/operation_ui.h"
+#include "nero/socket_handle.h"
 #ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/portscanner.h"
 #endif
@@ -126,9 +127,9 @@ static tcp_port_result tcp_port_check(
     if (inet_pton(AF_INET, ip, &address.sin_addr) != 1)
         return TCP_PORT_ERROR;
 
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
 
-    if (fd < 0)
+    if (fd == NERO_INVALID_SOCKET)
         return TCP_PORT_ERROR;
 
 #ifdef _WIN32
@@ -183,7 +184,11 @@ static tcp_port_result tcp_port_check(
     };
 
     status = select(
+#ifdef _WIN32
+        0, /* Winsock ignores nfds; never narrow a SOCKET into this parameter. */
+#else
         fd + 1,
+#endif
         NULL,
         &writefds,
         NULL,

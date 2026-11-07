@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #include "nero/operation_ui.h"
+#include "nero/socket_handle.h"
 #include "nero/portscanner.h"
 
 /* Genel amaçlı tarayıcı: her IP için tam 1-65535 aralığı taranır. */
@@ -343,8 +344,8 @@ static void scan_ports_batch(
 
     /* 1. Soketleri aç ve non-blocking connect() başlat. */
     for (int i = 0; i < count; ++i) {
-        int fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) {
+        nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd == NERO_INVALID_SOCKET) {
             /* Tanımlayıcı tükendi: portu sessizce "kapalı" saymak yerine
              * belirsiz (filtered) olarak işaretle; derin tarama yeniden dener. */
             if (errno == EMFILE || errno == ENFILE)
@@ -419,12 +420,12 @@ static void scan_ports_batch(
 
         int ready;
         do {
-            ready = poll(pfds, (nfds_t)nfds, wait_ms);
+            ready = nero_socket_poll(pfds, (nfds_t)nfds, wait_ms);
         } while (ready < 0 && errno == EINTR);
         if (ready <= 0) break; /* hata veya zaman aşımı → kalanlar filtered */
 
         for (int s = 0; s < nfds && ready > 0; ++s) {
-            if (pfds[s].fd < 0 || pfds[s].revents == 0) continue;
+            if (pfds[s].fd == NERO_INVALID_SOCKET || pfds[s].revents == 0) continue;
             ready--;
             int so_error = 0;
             socklen_t len = sizeof(so_error);
@@ -439,14 +440,14 @@ static void scan_ports_batch(
                 add_filtered_candidate(slot_port[s]);
             }
             close(pfds[s].fd);
-            pfds[s].fd = -1; /* poll bundan sonra yok sayar (revents=0) */
+            pfds[s].fd = NERO_INVALID_SOCKET; /* poll bundan sonra yok sayar (revents=0) */
             remaining--;
         }
     }
 
     /* 3. Zaman aşımına kadar yanıt vermeyen soketler → sessiz → filtered. */
     for (int s = 0; s < nfds; ++s) {
-        if (pfds[s].fd < 0) continue;
+        if (pfds[s].fd == NERO_INVALID_SOCKET) continue;
         add_filtered_candidate(slot_port[s]);
         close(pfds[s].fd);
     }
@@ -533,8 +534,8 @@ static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
     addr.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return;
 
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return;
+    nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == NERO_INVALID_SOCKET) return;
 #ifdef _WIN32
     u_long nonblocking = 1, blocking = 0;
     if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) { close(fd); return; }
@@ -547,7 +548,7 @@ static void grab_banner(const char *ip, int port, char *out, size_t outsz) {
     if (r < 0 && errno == EINPROGRESS) {
         struct pollfd p = { fd, POLLOUT, 0 };
         int pr;
-        do { pr = poll(&p, 1, 1200); } while (pr < 0 && errno == EINTR);
+        do { pr = nero_socket_poll(&p, 1, 1200); } while (pr < 0 && errno == EINTR);
         if (pr <= 0) { close(fd); return; }
         int se = 0; socklen_t l = sizeof(se);
         if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &se, &l) != 0 || se != 0) { close(fd); return; }
@@ -651,8 +652,8 @@ static int host_probe_alive(const char *ip) {
     struct pollfd pfds[32];
     int nfds = 0;
     for (int i = 0; i < n; ++i) {
-        int fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) continue;
+        nero_socket_t fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd == NERO_INVALID_SOCKET) continue;
 #ifdef _WIN32
         u_long nonblocking = 1;
         if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) { close(fd); continue; }
@@ -684,10 +685,10 @@ static int host_probe_alive(const char *ip) {
             int wait = 700 - (int)el; /* sabit, kısa canlılık penceresi */
             if (wait <= 0) break;
             int ready;
-            do { ready = poll(pfds, (nfds_t)nfds, wait); } while (ready < 0 && errno == EINTR);
+            do { ready = nero_socket_poll(pfds, (nfds_t)nfds, wait); } while (ready < 0 && errno == EINTR);
             if (ready <= 0) break;
             for (int s = 0; s < nfds && ready > 0; ++s) {
-                if (pfds[s].fd < 0 || pfds[s].revents == 0) continue;
+                if (pfds[s].fd == NERO_INVALID_SOCKET || pfds[s].revents == 0) continue;
                 ready--;
                 int se = 0;
                 socklen_t l = sizeof(se);
@@ -695,13 +696,13 @@ static int host_probe_alive(const char *ip) {
                     if (se == 0 || se == ECONNREFUSED) alive = 1; /* açık veya kapalı → host var */
                 }
                 close(pfds[s].fd);
-                pfds[s].fd = -1;
+                pfds[s].fd = NERO_INVALID_SOCKET;
                 remaining--;
             }
         }
     }
     for (int s = 0; s < nfds; ++s)
-        if (pfds[s].fd >= 0) close(pfds[s].fd);
+        if (pfds[s].fd != NERO_INVALID_SOCKET) close(pfds[s].fd);
     return alive;
 }
 

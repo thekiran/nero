@@ -16,8 +16,7 @@
  *    and the POSIX error macros are remapped to their WSAE* values.
  *  - poll(): sockets go through WSAPoll; STDIN goes through
  *    WaitForSingleObject because WSAPoll only accepts socket handles.
- *    The struct keeps a signed fd so the shared "fd = -1" convention
- *    (ignore this slot) keeps working.
+ *    Socket slots retain the full SOCKET width; INVALID_SOCKET marks removals.
  *  - termios: the two shared consumers (terminal session, port scanner)
  *    only toggle ICANON/ECHO, so the shim maps those bits onto console
  *    input modes. Raw mode also enables ENABLE_VIRTUAL_TERMINAL_INPUT so
@@ -45,6 +44,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #ifndef STDIN_FILENO
 #define STDIN_FILENO 0
@@ -99,33 +99,55 @@ typedef nero_ssize_t ssize_t;
 /* Every close() in the socket-facing sources targets a socket. */
 #define close closesocket
 
-static inline int nero_socket(int domain, int type, int protocol)
+/* API seams allow offline boundary tests to supply synthetic 64-bit handles. */
+#ifndef NERO_WIN_SOCKET
+#define NERO_WIN_SOCKET socket
+#endif
+#ifndef NERO_WIN_CONNECT
+#define NERO_WIN_CONNECT connect
+#endif
+#ifndef NERO_WIN_GETSOCKOPT
+#define NERO_WIN_GETSOCKOPT getsockopt
+#endif
+#ifndef NERO_WIN_WSAPOLL
+#define NERO_WIN_WSAPOLL WSAPoll
+#endif
+#ifndef NERO_WIN_GETMODE
+#define NERO_WIN_GETMODE GetConsoleMode
+#endif
+#ifndef NERO_WIN_SETMODE
+#define NERO_WIN_SETMODE SetConsoleMode
+#endif
+#ifndef NERO_WIN_OSFHANDLE
+#define NERO_WIN_OSFHANDLE _get_osfhandle
+#endif
+
+static inline SOCKET nero_socket(int domain, int type, int protocol)
 {
-    SOCKET handle = socket(domain, type, protocol);
+    SOCKET handle = NERO_WIN_SOCKET(domain, type, protocol);
     if (handle == INVALID_SOCKET) {
         errno = WSAGetLastError();
-        return -1;
+        return INVALID_SOCKET;
     }
-    /* Win32 handles have 32-bit significance; the CLI keeps bounded socket
-     * counts, so the narrowing cast is safe for the select()/fd_set paths. */
-    return (int)handle;
+    return handle;
 }
 #define socket nero_socket
 
-static inline int nero_connect(int fd, const struct sockaddr *address, socklen_t length)
+static inline int nero_connect(SOCKET fd, const struct sockaddr *address, socklen_t length)
 {
-    int result = connect((SOCKET)fd, address, (int)length);
+    int result = NERO_WIN_CONNECT(fd, address, (int)length);
     if (result < 0)
         errno = WSAGetLastError();
     return result;
 }
 #define connect nero_connect
 
-static inline int nero_getsockopt(int fd, int level, int option,
+static inline int nero_getsockopt(SOCKET fd, int level, int option,
                                   void *value, socklen_t *length)
 {
     int int_length = (int)*length;
-    int result = getsockopt((SOCKET)fd, level, option, (char *)value, &int_length);
+    int result = NERO_WIN_GETSOCKOPT(fd, level, option, (char *)value, &int_length);
+    if (result == SOCKET_ERROR) errno = WSAGetLastError();
     *length = (socklen_t)int_length;
     return result;
 }
@@ -137,24 +159,50 @@ static inline int nero_getsockopt(int fd, int level, int option,
 
 /* Winsock supplies the WSAPoll event constants. Keep those values: POSIX
  * numeric values are different and cannot be passed through to WSAPoll.
- * Its struct pollfd stores SOCKET; the shared CLI uses signed descriptors,
- * so give our translation structure a distinct name. */
+ * Give our translation structure a distinct name while retaining SOCKET width. */
 #define pollfd nero_pollfd
 
 typedef unsigned long nfds_t;
 
 struct pollfd {
-    int fd;    /* signed: -1 marks a removed slot, as the shared code expects */
+    SOCKET fd; /* INVALID_SOCKET marks an ignored slot. */
     short events;
     short revents;
 };
 
+static inline int nero_socket_poll(struct pollfd *fds, nfds_t count, int timeout_ms)
+{
+    if (count == 0)
+        return 0;
+    if (count > 512)
+        return -1; /* shared callers batch at most MAX_BATCH (512) sockets */
+
+    WSAPOLLFD batch[512];
+    for (unsigned long i = 0; i < count; ++i) {
+        batch[i].fd = fds[i].fd;
+        batch[i].events = fds[i].events;
+        batch[i].revents = 0;
+    }
+    int ready = NERO_WIN_WSAPOLL(batch, (ULONG)count, timeout_ms);
+    if (ready == SOCKET_ERROR)
+        return -1;
+    for (unsigned long i = 0; i < count; ++i) {
+        if (fds[i].fd == INVALID_SOCKET) {
+            fds[i].revents = 0;
+            continue;
+        }
+        fds[i].revents = batch[i].revents;
+    }
+    return ready;
+}
+
+/* CRT stdin and SOCKETs are separate namespaces, even when both equal zero. */
 static inline int poll(struct pollfd *fds, nfds_t count, int timeout_ms)
 {
     if (count == 1 && fds[0].fd == STDIN_FILENO) {
         /* WSAPoll refuses non-socket handles; console input handles and
          * pipes are waitable kernel objects, so wait on the OS handle. */
-        HANDLE input = (HANDLE)_get_osfhandle(fds[0].fd);
+        HANDLE input = (HANDLE)NERO_WIN_OSFHANDLE((int)fds[0].fd);
         if (input == INVALID_HANDLE_VALUE) {
             fds[0].revents = POLLNVAL;
             return 1;
@@ -171,28 +219,7 @@ static inline int poll(struct pollfd *fds, nfds_t count, int timeout_ms)
         return 1;
     }
 
-    if (count == 0)
-        return 0;
-    if (count > 512)
-        return -1; /* shared callers batch at most MAX_BATCH (512) sockets */
-
-    WSAPOLLFD batch[512];
-    for (unsigned long i = 0; i < count; ++i) {
-        batch[i].fd = fds[i].fd < 0 ? INVALID_SOCKET : (SOCKET)fds[i].fd;
-        batch[i].events = fds[i].events;
-        batch[i].revents = 0;
-    }
-    int ready = WSAPoll(batch, (ULONG)count, timeout_ms);
-    if (ready == SOCKET_ERROR)
-        return -1;
-    for (unsigned long i = 0; i < count; ++i) {
-        if (fds[i].fd < 0) {
-            fds[i].revents = 0;
-            continue;
-        }
-        fds[i].revents = batch[i].revents;
-    }
-    return ready;
+    return nero_socket_poll(fds, count, timeout_ms);
 }
 
 /* ------------------------------------------------------------------ */
@@ -214,7 +241,7 @@ static inline int ioctl(int fd, int request, struct winsize *size)
         errno = EINVAL;
         return -1;
     }
-    HANDLE output = (HANDLE)_get_osfhandle(fd);
+    HANDLE output = (HANDLE)NERO_WIN_OSFHANDLE(fd);
     CONSOLE_SCREEN_BUFFER_INFO info;
     if (output == INVALID_HANDLE_VALUE ||
         !GetConsoleScreenBufferInfo(output, &info)) {
@@ -243,15 +270,16 @@ static inline int ioctl(int fd, int request, struct winsize *size)
 struct termios {
     DWORD nero_console_mode; /* snapshot of the full console input mode */
     unsigned long c_lflag;
+    unsigned long nero_original_lflag;
     unsigned char c_cc[NCCS];
 };
 
 static inline int tcgetattr(int fd, struct termios *settings)
 {
-    HANDLE input = (HANDLE)_get_osfhandle(fd);
+    HANDLE input = (HANDLE)NERO_WIN_OSFHANDLE(fd);
     DWORD mode = 0;
     if (settings == NULL || input == INVALID_HANDLE_VALUE ||
-        !GetConsoleMode(input, &mode)) {
+        !NERO_WIN_GETMODE(input, &mode)) {
         errno = ENOTTY;
         return -1;
     }
@@ -261,6 +289,7 @@ static inline int tcgetattr(int fd, struct termios *settings)
         settings->c_lflag |= ECHO;
     if (mode & ENABLE_LINE_INPUT)
         settings->c_lflag |= ICANON;
+    settings->nero_original_lflag = settings->c_lflag;
     memset(settings->c_cc, 0, sizeof(settings->c_cc));
     return 0;
 }
@@ -272,25 +301,22 @@ static inline int tcsetattr(int fd, int when, const struct termios *settings)
         errno = EINVAL;
         return -1;
     }
-    HANDLE input = (HANDLE)_get_osfhandle(fd);
+    HANDLE input = (HANDLE)NERO_WIN_OSFHANDLE(fd);
     if (input == INVALID_HANDLE_VALUE) {
         errno = ENOTTY;
         return -1;
     }
     DWORD mode = settings->nero_console_mode;
-    mode &= ~(DWORD)(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
-                     ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_PROCESSED_INPUT);
-    if (settings->c_lflag & ECHO)
-        mode |= ENABLE_ECHO_INPUT;
-    if (settings->c_lflag & ICANON)
-        mode |= ENABLE_LINE_INPUT;
-    /* Processed input stays on so Ctrl+C reaches the signal handler exactly
-     * like the POSIX builds; raw mode additionally requests VT input so the
-     * line editor receives ANSI arrow-key sequences. */
-    mode |= ENABLE_PROCESSED_INPUT;
-    if ((settings->c_lflag & (ICANON | ECHO)) != (ICANON | ECHO))
-        mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-    if (!SetConsoleMode(input, mode)) {
+    /* An unmodified snapshot means restore the exact original DWORD, including
+     * processed input, VT, quick-edit and every unrelated console flag. */
+    if (settings->c_lflag != settings->nero_original_lflag) {
+        mode &= ~(DWORD)(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+        if (settings->c_lflag & ECHO) mode |= ENABLE_ECHO_INPUT;
+        if (settings->c_lflag & ICANON) mode |= ENABLE_LINE_INPUT;
+        if ((settings->c_lflag & (ICANON | ECHO)) != (ICANON | ECHO))
+            mode |= ENABLE_PROCESSED_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT;
+    }
+    if (!NERO_WIN_SETMODE(input, mode)) {
         errno = EPERM;
         return -1;
     }
@@ -340,18 +366,50 @@ static inline int sigaction(int signal_number, const struct sigaction *action,
 /* Session startup: winsock + UTF-8 + VT output                        */
 /* ------------------------------------------------------------------ */
 
-/* Called once from main() on Windows builds (see src/main.c). */
+typedef struct {
+    HANDLE output;
+    DWORD output_mode;
+    UINT output_codepage;
+    int restore_output;
+    int winsock_started;
+    int registered;
+} nero_windows_session;
+
+static inline nero_windows_session *nero_windows_session_state(void)
+{
+    static nero_windows_session session;
+    return &session;
+}
+
+static inline void nero_windows_restore(void)
+{
+    nero_windows_session *session = nero_windows_session_state();
+    if (session->restore_output) {
+        SetConsoleMode(session->output, session->output_mode);
+        if (session->output_codepage) SetConsoleOutputCP(session->output_codepage);
+        session->restore_output = 0;
+    }
+    if (session->winsock_started) {
+        WSACleanup();
+        session->winsock_started = 0;
+    }
+}
+
+/* Register cleanup before changing process-owned console state. */
 static inline void nero_windows_init(void)
 {
+    nero_windows_session *session = nero_windows_session_state();
+    if (session->registered) return;
+    if (atexit(nero_windows_restore) != 0) return;
+    session->registered = 1;
     WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
-
-    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD mode = 0;
-    if (output != INVALID_HANDLE_VALUE && GetConsoleMode(output, &mode)) {
-        /* ANSI escape sequences (the shared renderer's only dialect) and
-         * UTF-8 output so the shared logo glyphs survive the code page. */
-        SetConsoleMode(output, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    session->winsock_started = WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+    session->output = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (session->output != INVALID_HANDLE_VALUE &&
+        GetConsoleMode(session->output, &session->output_mode)) {
+        session->output_codepage = GetConsoleOutputCP();
+        session->restore_output = 1;
+        SetConsoleMode(session->output, session->output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
         SetConsoleOutputCP(CP_UTF8);
     }
 }
