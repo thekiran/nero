@@ -66,9 +66,8 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish to GitHub Wiki
+    name: Verify Wiki / publish on main
     needs: validate
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -83,6 +82,7 @@ jobs:
           python-version: '3.12'
 
       - name: Check publication secret availability
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         id: auth-check
         env:
           WIKI_TOKEN: ${{ secrets.WIKI_PUSH_TOKEN }}
@@ -93,6 +93,11 @@ jobs:
           else
             echo "has_token=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Verify Wiki without publishing
+        run: |
+          python3 scripts/docs/wiki_sync.py --check
+          python3 scripts/docs/wiki_sync.py --build .build/wiki-preview
 
       - name: Clone and sync Wiki repository
         if: steps.auth-check.outputs.has_token == 'true'

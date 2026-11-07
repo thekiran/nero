@@ -26,7 +26,7 @@ BLOB_BASE_URL = "https://github.com/thekiran/nero/blob/main"
 # Explicit mapping between canonical repository source files and Wiki page names.
 # All Wiki page filenames will be <WikiName>.md.
 PAGE_MAP = {
-    "README.md": "Home",
+    "docs/wiki-home.md": "Home",
     "docs/installation.md": "Installation",
     "docs/command-reference.md": "Command-Reference",
     "docs/architecture.md": "Architecture",
