@@ -85,11 +85,9 @@ def main():
                        "$cmd = Get-Command nero -ErrorAction Stop; "
                        "$expected = [IO.Path]::GetFullPath((Join-Path $env:NERO_INSTALL_DIR 'nero.exe')); "
                        "if ([IO.Path]::GetFullPath($cmd.Source) -ne $expected) { throw 'Wrong nero command resolved' }; "
-                       "$p = Start-Process -FilePath nero -NoNewWindow -PassThru -Wait "
-                       "-RedirectStandardInput $env:NERO_COMMAND_INPUT "
-                       "-RedirectStandardOutput $env:NERO_COMMAND_OUTPUT "
-                       "-RedirectStandardError $env:NERO_COMMAND_ERROR; "
-                       "if ($p.ExitCode -ne 0) { throw ('Installed CLI failed: ' + $p.ExitCode) }; "
+                       "& (Join-Path $env:SystemRoot 'System32\\cmd.exe') /d /c "
+                       "'nero < commands.txt > installed.stdout 2> installed.stderr'; "
+                       "if ($LASTEXITCODE -ne 0) { throw ('Installed CLI failed: ' + $LASTEXITCODE) }; "
                        "Write-Output 'NERO_COMMAND_INSTALL_OK'")
             check = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', command],
                                    capture_output=True, timeout=30, env=install_env, cwd=temp)
