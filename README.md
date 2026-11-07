@@ -1,28 +1,31 @@
-
 <div align="center">
 
 # NERO
 
-### Native Network & Terminal Research
+**Native terminal engineering. Low-level systems. Controlled network research.**
 
-**A C-based project for low-level systems engineering, terminal development, and controlled network research.**
+A C11 project built to explore terminal interfaces, operating-system boundaries,
+and network diagnostics—without hiding the implementation behind a framework.
 
-[![C](https://img.shields.io/badge/C-Native-24292f?style=flat-square&logo=c&logoColor=white)](https://en.cppreference.com/w/c)
-[![macOS](https://img.shields.io/badge/macOS-Development-24292f?style=flat-square&logo=apple&logoColor=white)](docs/platform-compatibility.md)
-[![Linux](https://img.shields.io/badge/Linux-Target-24292f?style=flat-square&logo=linux&logoColor=white)](docs/platform-compatibility.md)
-![Status](https://img.shields.io/badge/Status-Experimental-orange?style=flat-square)
+<p>
+  <a href="https://github.com/thekiran/nero"><img src="https://img.shields.io/badge/Language-C11-2563EB?style=flat-square&logo=c&logoColor=white" alt="C11"></a>
+  <a href="#platform-support"><img src="https://img.shields.io/badge/Platforms-macOS%20%7C%20Linux-1F2937?style=flat-square&logo=apple&logoColor=white" alt="macOS and Linux"></a>
+  <a href="#project-status"><img src="https://img.shields.io/badge/Status-Experimental-F59E0B?style=flat-square" alt="Experimental"></a>
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-MIT-1F2937?style=flat-square" alt="MIT license"></a>
+</p>
+
+[**Overview**](#overview) &nbsp;·&nbsp;
+[**Quick start**](#quick-start) &nbsp;·&nbsp;
+[**Commands**](#command-reference) &nbsp;·&nbsp;
+[**Architecture**](#architecture) &nbsp;·&nbsp;
+[**Development**](#development) &nbsp;·&nbsp;
+[**Demo**](#demo)
 
 <br>
 
-<img src="https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084" alt="Nero terminal demonstration" width="90%">
+<img src="https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084" alt="NERO interactive terminal interface" width="780">
 
-<br>
-
-[Getting Started](#getting-started) ·
-[Features](#features) ·
-[Architecture](#architecture) ·
-[Compatibility](#platform-compatibility) ·
-[Contributing](#contributing)
+<sub>Native terminal UI • ANSI rendering • command history • platform-aware builds</sub>
 
 </div>
 
@@ -30,86 +33,49 @@
 
 ## Overview
 
-**Nero** is an experimental systems programming project written in C, focused on native terminal interfaces, operating system compatibility, and authorized network research.
+**NERO** is an experimental, open-source systems programming project written in C.
+It combines an interactive terminal with platform-specific code and a separate
+offline test environment. The goal is to make the underlying systems behavior
+visible, inspectable, and testable.
 
-The project provides a development environment for exploring low-level system behavior while keeping platform-specific network components separate from offline testing.
+| Area | What it covers |
+| :--- | :--- |
+| **Terminal experience** | Interactive CLI, ASCII visuals, ANSI colors, keyboard input, and command history |
+| **Systems programming** | C11, POSIX interfaces, terminal state, signal handling, and platform adapters |
+| **Network diagnostics** | IPv4 command handling, TCP connectivity checks, and experimental network modules |
+| **Cross-platform development** | macOS and Linux builds, plus a limited Windows CMake foundation |
+| **Validation** | Offline regression tests, sanitizers, and Clang static analysis |
 
-Nero is under active development and is not intended for production deployment.
+> [!IMPORTANT]
+> NERO is a **research and learning project**, not a production-ready security product.
+> Network features must only be used in isolated labs or against systems you are
+> explicitly authorized to test.
 
-## Features
-
-| Component | Description |
-|:--|:--|
-| **Terminal Interface** | Interactive CLI, ANSI rendering, and ASCII graphics |
-| **Command History** | In-memory command history and input handling |
-| **Platform Support** | Native macOS development and Linux-specific functionality |
-| **Network Research** | Controlled network evaluation in authorized environments |
-| **Offline Testing** | Network-independent validation workflows |
-| **Code Analysis** | Sanitizer testing and Clang static analysis |
-
-> [!NOTE]
-> Feature availability depends on the operating system and build configuration. The macOS development target does not include the Linux load engine or port scanner.
-
-## Getting Started
-
-### Requirements
-
-- C compiler (Clang or GCC)
-- GNU Make
-- Python 3 for test workflows
-- Platform-specific development libraries where required
-
-### Clone
-
-```bash
-git clone https://github.com/thekiran/nero.git
-cd nero
-```
+## Quick start
 
 ### macOS
 
-The macOS version runs the interactive development CLI and includes the SYN/UDP
-packet engine and port scanner. Raw IPv4 sockets require administrator
-privileges, so launch with `sudo` before using `-Syn`.
-
-Install Apple's Command Line Tools if they are not already available:
+**Requirements:** Apple Command Line Tools, Make, and Python 3 for testing.
 
 ```bash
+# Install the Apple build tools if needed
 xcode-select --install
+
+# Get the source
+git clone https://github.com/thekiran/nero.git
+cd nero
+
+# Build and open the interactive terminal
+make CC=clang -j4
+./nero
 ```
 
-From the repository root, build and launch Nero:
+### Linux (Debian / Ubuntu)
 
-```bash
-make CC=clang -j4 && sudo ./nero
-```
+<details>
+<summary><strong>Show dependencies and build instructions</strong></summary>
 
-At the `►` prompt, try `help`, `version`, `history`, and `exit`.
-An IPv4 address followed by `-Syn` scans the target for a port, then starts the
-SYN/UDP packet engine. The offline test and `nero-safe` targets remain
-network-free.
-
-Run the offline checks with Python 3 installed:
-
-```bash
-make test
-make test-sanitize
-```
-
-Alternatively, with CMake 3.21 or newer installed:
-
-```bash
-cmake --preset macos
-cmake --build --preset macos -j4
-ctest --preset macos
-.build/cmake/macos/nero-safe
-```
-
-See [build documentation](docs/building.md) for additional details.
-
-### Linux
-
-Install dependencies on Debian/Ubuntu:
+<br>
 
 ```bash
 sudo apt update
@@ -121,139 +87,156 @@ sudo apt install -y \
   libncurses-dev \
   python3 \
   clang
-```
 
-Build:
-
-```bash
+git clone https://github.com/thekiran/nero.git
+cd nero
 make
+./nero
 ```
 
-Platform-specific components depend on the selected build configuration.
+</details>
 
-### Testing
+Once NERO launches, type `help` to explore its available commands.
+You do **not** need administrator privileges to use basic terminal commands.
+Some experimental low-level network operations have additional platform and
+permission requirements.
 
-```bash
-make test           # Run offline tests
-make test-sanitize  # Run sanitizer-enabled tests
-make analyze        # Run static analysis
+See the [full build guide](docs/building.md) for CMake presets, sanitizer builds,
+and development prerequisites.
+
+## Command reference
+
+| Command | Purpose |
+| :--- | :--- |
+| `help` / `help -All` | Show the CLI command reference |
+| `history` / `history -clear` | Display or clear session command history |
+| `clear` | Redraw the terminal interface |
+| `version` | Show version information |
+| `-mode` / `-mode on` / `-mode off` | Inspect or change the diagnostics setting |
+| `<IPv4> -Sc` | Run the TCP port-check workflow when supported by the build |
+| `<IPv4> -Syn` | Legacy experimental network operation; authorized labs only |
+| `exit` | Leave NERO and restore terminal state |
+
+<details>
+<summary><strong>Example: basic terminal session</strong></summary>
+
+<br>
+
+```text
+► help
+► version
+► history
+► -mode
+► exit
 ```
 
-These targets help validate changes without requiring live network testing.
+</details>
+
+Command availability and behavior depend on the selected build configuration.
+**Offline test targets never initiate live network operations.**
 
 ## Architecture
 
-Nero separates terminal functionality, platform-specific implementations, and validation workflows.
+NERO keeps terminal concerns separate from platform and networking code, so
+changes can be reviewed and validated in smaller pieces.
 
 ```text
-                      NERO
-                        |
-          +-------------+-------------+
-          |                           |
-    Terminal Interface          Platform Layer
-          |                           |
-    +-----+------+              +-----+-----+
-    | Input      |              | macOS     |
-    | History    |              | Linux     |
-    | Rendering  |              | Toolchain |
-    +------------+              +-----------+
-          |                           |
-          +-------------+-------------+
-                        |
-                 Validation
-                        |
-                +-------+-------+
-                | Offline Tests |
-                | Sanitizers    |
-                | Static Analysis|
-                +---------------+
+nero/
+├── src/
+│   ├── cli/             # Input, rendering, commands, ASCII and parsing
+│   ├── core/            # Platform information
+│   ├── modules/         # Network and diagnostic modules
+│   └── platform/        # macOS / Linux implementations
+├── include/nero/        # Shared C headers
+├── tests/               # Offline tests, fixtures and mocks
+├── cmake/               # CMake target configuration
+├── docs/                # Architecture and build documentation
+├── Makefile
+└── CMakeLists.txt
 ```
 
-The architecture prioritizes:
+**Start reading the code here:**
 
-- **Platform isolation** — Operating system-specific components are selected at build time.
-- **Offline validation** — Development tests avoid executing network load functionality.
-- **Native implementation** — Core functionality uses C and operating system interfaces.
+`src/main.c` → `src/cli/terminal.c` → `src/cli/input.c` →
+`src/cli/commands.c` → `src/cli/render.c`
 
-## Platform Compatibility
+For a file-by-file guide, see the [code map](docs/code-map.md).
 
-| Capability | macOS | Linux |
-|:--|:---:|:---:|
-| Native C build | Yes | Yes |
-| Interactive terminal | Yes | Yes |
-| ANSI / ASCII rendering | Yes | Yes |
-| Command history | Yes | Yes |
-| Offline testing | Yes | Yes |
-| Sanitizer testing | Available | Available |
-| Static analysis | Available | Available |
-| Network load engine | Excluded | Build-dependent |
-| Port scanner | Excluded | Build-dependent |
+## Development
 
-For implementation details and known limitations, see [Platform Compatibility](docs/platform-compatibility.md).
+### Build, test, analyze
 
-## Demonstration
+```bash
+make                 # Build the native executable
+make test            # Run network-free regression tests
+make test-sanitize   # Run offline tests with ASan / UBSan
+make analyze         # Run Clang static analysis
+make clean           # Remove generated build artifacts
+```
+
+### CMake (offline development target)
+
+```bash
+cmake --preset macos
+cmake --build --preset macos
+ctest --preset macos
+```
+
+On Linux, use the `linux` preset instead. The Windows preset currently builds
+only the platform foundation—not the interactive CLI.
+
+## Platform support
+
+| Capability | macOS | Linux | Windows |
+| :--- | :---: | :---: | :---: |
+| Native interactive CLI | Yes | Yes | No |
+| Terminal rendering and history | Yes | Yes | No |
+| Offline development tests | Yes | Yes | Foundation only |
+| Make-based network modules | Included* | Included* | No |
+| CMake platform foundation | Yes | Yes | Yes |
+
+<sub>* Availability at runtime depends on the build, dependencies, operating-system
+permissions, and the experimental implementation. Inclusion in a build does
+not guarantee successful or safe operation on a given system.</sub>
+
+## Demo
 
 <div align="center">
 
-<img src="https://github.com/user-attachments/assets/60ef735b-c908-48c2-a8c1-99245a935e03" alt="Nero terminal interface" width="85%">
+<a href="https://www.youtube.com/watch?v=2HGtMkmqwpU">
+  <img src="https://img.youtube.com/vi/2HGtMkmqwpU/hqdefault.jpg" width="520" alt="Watch a demonstration of the NERO terminal">
+</a>
 
-<br><br>
+<br>
 
-[![Nero Demonstration](https://img.youtube.com/vi/2HGtMkmqwpU/hqdefault.jpg)](https://www.youtube.com/watch?v=2HGtMkmqwpU)
-
-**[Watch Demonstration](https://www.youtube.com/watch?v=2HGtMkmqwpU)**
+[**Watch the terminal demo on YouTube**](https://www.youtube.com/watch?v=2HGtMkmqwpU)
 
 </div>
 
-## Contributing
+## Project status
 
-Contributions are welcome in the following areas:
+NERO is **experimental and under active development**. The CLI, platform
+adapters, testing workflows, and legacy network modules have different maturity
+levels. Features and interfaces may change; no production reliability or
+security guarantees are made.
 
-- C code quality and memory safety
-- Terminal functionality
-- macOS and Linux compatibility
-- Automated testing and static analysis
-- Build system improvements
-- Technical documentation
+To contribute, open a focused pull request with a description of the change,
+the target OS/compiler, and relevant test results.
 
-To contribute:
-
-1. Fork the repository.
-2. Create a focused feature or fix branch.
-3. Implement and validate your changes.
-4. Open a pull request with a clear description and test results.
-
-Please include the operating system, compiler version, and relevant test results when reporting bugs.
-
-[Open an Issue](https://github.com/thekiran/nero/issues) · [Submit a Pull Request](https://github.com/thekiran/nero/pulls)
-
-## Security & Responsible Use
-
-> [!CAUTION]
-> Nero is intended for **isolated laboratories and explicitly authorized testing environments**.
->
-> Network-related functionality may affect system or service availability. Do not execute it against third-party, public, or production infrastructure without explicit authorization.
-
-The project is experimental. Security, reliability, and production readiness are not guaranteed.
+[**Report an issue**](https://github.com/thekiran/nero/issues) ·
+[**Open a pull request**](https://github.com/thekiran/nero/pulls) ·
+[**Browse documentation**](docs/building.md)
 
 ## License
 
-Nero is open-source software licensed under the [MIT License](LICENSE.txt).
+Distributed under the [MIT License](LICENSE.txt).
 
-Copyright © 2025–2026 Muhammed Emin Kıran.
+Copyright © 2025–2026 **Muhammed Emin Kıran**.
 
 ---
 
 <div align="center">
 
-**NERO**
-
-Native C · Systems Engineering · Network Research
-
-[Source Code](https://github.com/thekiran/nero) ·
-[Documentation](docs/platform-compatibility.md) ·
-[Issues](https://github.com/thekiran/nero/issues)
-
-<sub>Built for controlled research and development.</sub>
+<sub><strong>NERO</strong> — native C, terminal engineering, and responsible network research.</sub>
 
 </div>
