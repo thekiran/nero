@@ -54,9 +54,20 @@ static int complete_line(cli_line *line)
     return 1;
 }
 
+/* Bytes consumed while probing an escape sequence that turn out not to
+ * belong to one are replayed here, so a plain Esc can never swallow the
+ * keystrokes that followed it into the continuation window. */
+static char escape_pushback[16];
+static size_t escape_pushback_length;
+
 /* Timeout is used only for escape continuation, never for a whole command. */
 static int read_byte(char *ch, int timeout_ms)
 {
+    if (escape_pushback_length > 0) {
+        *ch = escape_pushback[0];
+        memmove(escape_pushback, escape_pushback + 1, --escape_pushback_length);
+        return 1;
+    }
 #ifndef _WIN32
     /* Blocking the session signals makes the flag check and pselect's atomic
      * unblock/wait indivisible. A signal just before read() used to be lost as
@@ -140,13 +151,23 @@ static enum input_key escape_key(void)
 {
     char ch;
     int continuation_timeout = isatty(STDIN_FILENO) ? 100 : -1;
-    if (read_byte(&ch, continuation_timeout) != 1 || (ch != '[' && ch != 'O'))
+    if (read_byte(&ch, continuation_timeout) != 1)
         return KEY_NONE;
+    if (ch != '[' && ch != 'O') {
+        /* The byte after Esc is real input that landed inside the
+         * continuation window; replay it instead of dropping it. */
+        escape_pushback[escape_pushback_length++] = ch;
+        return KEY_NONE;
+    }
     char sequence[16];
     size_t length = 0;
     while (length < sizeof(sequence) - 1) {
-        if (read_byte(&ch, continuation_timeout) != 1)
+        if (read_byte(&ch, continuation_timeout) != 1) {
+            /* Incomplete sequence: replay the consumed bytes as literal text. */
+            for (size_t index = 0; index < length; ++index)
+                escape_pushback[escape_pushback_length++] = sequence[index];
             return KEY_NONE;
+        }
         sequence[length++] = ch;
         if ((unsigned char)ch >= 0x40 && (unsigned char)ch <= 0x7e) {
             sequence[length] = '\0';
