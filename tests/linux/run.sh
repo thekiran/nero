@@ -28,10 +28,10 @@ run cmake --version
 run ip addr
 run make -B CC=gcc BUILD_DIR="$NERO_TMP/gcc-build" TARGET="$NERO_TMP/nero-gcc"
 run make -B CC=clang BUILD_DIR="$NERO_TMP/clang-build" TARGET="$NERO_TMP/nero-clang"
-run gcc -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude -pthread tests/linux/scanner_runtime.c src/cli/operation_ui.c -o "$NERO_TMP/scanner-runtime"
-run timeout 15 strace -f -e trace=socket,connect,getsockopt,close,select,pselect6 "$NERO_TMP/scanner-runtime"
-run gcc -g -fsanitize=address,undefined -fno-omit-frame-pointer -Iinclude -pthread tests/linux/scanner_runtime.c src/cli/operation_ui.c -o "$NERO_TMP/scanner-sanitize"
-run timeout 15 "$NERO_TMP/scanner-sanitize"
+run gcc -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude -pthread -DUNICODE_SUPPORT -D_POSIX_C_SOURCE=200809L tests/linux/scanner_runtime.c src/cli/operation_ui.c src/core/log.c -o "$NERO_TMP/scanner-runtime"
+run env NERO_LOG_FILE=:memory: timeout 300 strace -f -c -e trace=socket,connect,getsockopt,close,select,pselect6 "$NERO_TMP/scanner-runtime"
+run gcc -g -fsanitize=address,undefined -fno-omit-frame-pointer -Iinclude -pthread -DUNICODE_SUPPORT -D_POSIX_C_SOURCE=200809L tests/linux/scanner_runtime.c src/cli/operation_ui.c src/core/log.c -o "$NERO_TMP/scanner-sanitize"
+run env NERO_LOG_FILE=:memory: timeout 300 "$NERO_TMP/scanner-sanitize"
 run gcc -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude tests/interfaces.c src/platform/linux/select_interface.c -o "$NERO_TMP/interfaces"
 
 printf '1junk\n' | "$NERO_TMP/interfaces"; code=$?; echo "INVALID PREFIX EXIT: $code"

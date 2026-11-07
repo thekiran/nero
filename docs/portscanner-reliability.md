@@ -18,7 +18,7 @@ The pre-refactor source is the version inherited through PR #14.
 | Scheduler | Static ranges, 200 threads | Static worker ranges; creation failure loses ranges | Atomic shared queue; caller drains work when threads fail |
 | Socket/connect errors | Silently skipped | Several errors omitted; descriptor exhaustion treated as filtered | Every completed attempt has indexed state/error metadata |
 | Polling | Per-port select | Batched poll with shared batch deadline | Per-socket absolute deadline; pending readiness rechecked; bounded cancellation waits |
-| Retry | None | Entire deep phase skipped above candidate threshold | Every unknown/filtered result gets one retry, in bounded work windows |
+| Retry | None | Entire deep phase skipped above candidate threshold | Every unknown/filtered result is retried in bounded windows; profile-defined extra rounds re-probe only error/unknown ports, with concurrency halved after resource exhaustion |
 | Accounting | Open ports only | Open and filtered list; no full ledger | Open + closed + filtered + unknown + unscanned always accounts for 65535 |
 | Resources | 200 threads | Up to 8192 theoretical sockets; raises soft fd limit | At most 16 scan workers and 256 concurrent scan sockets; retry cap 128 |
 
@@ -51,9 +51,16 @@ restart a fresh timeout. Poll slices are at most 50 ms to allow cancellation.
 A once-allocated indexed ledger replaces per-result realloc and linear duplicate
 searches. Each queued index is claimed by exactly one worker per phase. If thread
 creation fails, the existing workers and caller consume the same remaining queue.
-The scan progress count measures unique completed first-pass ports, not retries.
+Progress is completed probes over queued probes (65535 first-pass probes plus
+every retry queued by a deep round). It is held below 100% until every phase
+has finished, never moves backwards when a later round enlarges the total, and
+the animation draws one final frame after the workers are joined.
 
-The final ledger supersedes first-pass filtered results when a retry returns
+A retry may confirm or strengthen an outcome but never weaken it. Evidence
+ranks open > closed > filtered > error/unknown: an open port is never dropped
+by a later or concurrent failing probe, and a local failure during a retry
+(for example EMFILE) cannot erase a first-pass timeout or refusal. The final
+ledger therefore supersedes first-pass filtered results when a retry returns
 closed or open. The summary groups final unknown outcomes by operation and OS error code, with
 readable system messages and a count of affected ports. This distinguishes
 resource/permission failures from routing failures and unconfirmed poll events.
@@ -88,8 +95,16 @@ or remove false negatives caused by packet loss or changing network conditions.
 
 The scanner never raises RLIMIT_NOFILE. It reserves 64 descriptors when sizing
 its budget, and handles exhaustion caused by other process activity as unknown.
-One finite retry uses a smaller socket budget and a longer timeout, capped at
-5000 ms. Resource failures introduce a bounded 5 ms batch backoff. An entirely
+Deep retries use a smaller socket budget and a longer timeout, capped at
+5000 ms. Round 1 re-probes every filtered and error/unknown port. Profiles add
+further rounds (Hizli 1, Orta 2, Yavas 3, Manuel 2; hard cap 4) that re-probe
+only ports still error/unknown, so a silent target still costs exactly one
+retry per port. A port is probed at most 1 + rounds times. A work window that
+hits local resource exhaustion (EMFILE, ENFILE, ENOBUFS, ENOMEM, or
+EADDRNOTAVAIL from connect) halves socket concurrency (threads first, then
+batch) for the remaining windows and rounds. Resource failures also introduce a
+bounded 5 ms batch backoff. A retry that stays inconclusive leaves the port
+inconclusive. An entirely
 silent /65535-port target can still take many minutes; Esc or session signals
 cancel the work. This is a bounded connect scanner, not a packet flood engine.
 
@@ -104,6 +119,21 @@ actual WSA error into errno instead of leaving a stale connect error behind.
 Linux and macOS use native poll/fcntl. Windows uses the existing WSAPoll and
 ioctlsocket adapter. Winsock pending/interruption codes are explicitly handled.
 
+## Completion report
+
+After every scan (complete, cancelled or incomplete) two lines are printed and
+logged:
+
+```
+Host: online | TCP: open=1 closed=65534 filtered=0 error/unknown=0 unscanned=0 total=65535 | retried=0 retry_probes=0
+Scan: target=127.0.0.1 profile=Orta duration=1.712s status=complete
+```
+
+`retried` counts ports with at least one completed retry; `retry_probes`
+counts completed retry probes across all rounds. `status` is `complete`,
+`cancelled` or `incomplete`; cancelled and incomplete scans keep remaining
+ports in `unscanned`.
+
 ## Regression coverage and validation
 
 `tests/portscanner_reliability.c` compiles the production scanner with synthetic
@@ -117,8 +147,21 @@ resource, nonblocking, routing, poll and SO_ERROR failures; HUP/POLLNVAL;
 interrupted polls (including continuous EINTR with stale revents); first and last port; duplicate prevention; complete retry
 windows above old limits; partial/all worker-creation failure; cancellation of
 first/deep phase work; resource recovery; invalid IPv4; and the production entry
-point continuing with unknown discovery. The Windows adapter fixture additionally
-checks WSAPoll error propagation.
+point continuing with unknown discovery; port 0 and out-of-range indices;
+retry evidence precedence (including eight concurrent writers on one port);
+adaptive back-off under a simulated 8-descriptor ceiling that recovers every
+port; bounded rounds (a hard cap of 4 even if a profile asks for more);
+progress staying below 100% until the deep phase ends; and Esc, Ctrl+C and the
+SIGINT flag cancelling the port menu and queued scan work. Every synthetic
+connect is asserted to target only the TEST-NET-1 address 192.0.2.10. The
+Windows adapter fixture additionally checks WSAPoll error propagation.
+
+`tests/linux/scanner_runtime.c` (Linux and macOS) runs the production scanner
+against real 127.0.0.1 sockets: a listening/refused port pair, two complete
+end-to-end `portscanner()` runs (one with partial worker-creation failure),
+the report fields, pty menu selection with termios restore, and an
+open-descriptor baseline. A connect() guard aborts the fixture on any
+destination outside 127.0.0.0/8.
 
 Local macOS ARM64 commands actually run:
 
@@ -143,3 +186,20 @@ Windows x86-64, Linux x86-64/ARM64 and macOS ARM64/Intel. Its full workflow run
 [PR #15](https://github.com/thekiran/nero/pull/15) for the latest commit's checks.
 No physical iPhone/Android or real-network scan was performed. Optional ICMP was
 not exercised against a real target.
+
+### Validation for the adaptive-retry change (branch `fix/scanner-reliability`)
+
+| Platform | Check | Result |
+| --- | --- | --- |
+| macOS ARM64 (local) | `make`, `make test`, `make test-sanitize`, `make test-tsan`, `make analyze` | Passed |
+| macOS ARM64 (local) | Clang Static Analyzer on `src/modules/portscanner.c` | Passed |
+| macOS ARM64 (local) | CMake presets `macos` and `macos-sanitize` + CTest | Passed: 8/8 each |
+| macOS x86-64 (local, Rosetta) | scanner fixture + loopback runtime built with `-arch x86_64` | Passed |
+| Linux ARM64 (Ubuntu 24.04 container) | gcc/clang `make test`, ASan/UBSan, TSan, analyze, CMake `linux`/`linux-sanitize`, `tests/linux/run.sh` | Passed |
+| Linux ARM64 (container) | loopback runtime fixture 40× (gcc + clang) | Passed: 0 failures |
+| Linux x86-64 (amd64 container, emulated) | gcc `make test`, CMake `linux` + CTest | Passed: 8/8 |
+| Linux x86-64 (amd64 container, emulated) | ASan/UBSan | Not verifiable: the ASan runtime aborts at start-up (`sanitizer_allocator_primary32.h` CHECK) in every binary, including the unchanged logging fixture; hosted x86-64 CI runs it natively |
+| Windows MinGW-w64 | new `windows-mingw` CI job | Not run locally (no toolchain); runs in CI |
+
+Mutation checks: disabling retry precedence, adaptive back-off, or the
+99.9% progress cap each makes `portscanner-reliability` fail.
