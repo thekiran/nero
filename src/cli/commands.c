@@ -25,6 +25,9 @@
  * Offline test builds never generate network traffic.
  */
 
+#ifdef _WIN32
+#include "../platform/windows/nero_win_compat.h"
+#endif
 #include "cli_internal.h"
 #include "command_catalog.h"
 #include "nero/cli/parser.h"
@@ -38,18 +41,22 @@
 #endif
 
 #ifndef NERO_NETWORK_UNAVAILABLE
+#ifndef NERO_SYN_UNAVAILABLE
 #include "nero/syn_flood_powered.h"
 #endif
+#endif
 
+#ifndef _WIN32
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
-#include <netinet/in.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/select.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <stddef.h>     /* size_t */
 
@@ -124,10 +131,15 @@ static tcp_port_result tcp_port_check(
     if (fd < 0)
         return TCP_PORT_ERROR;
 
+#ifdef _WIN32
+    u_long nonblocking = 1;
+    if (ioctlsocket((SOCKET)fd, FIONBIO, &nonblocking) != 0) {
+#else
     int flags = fcntl(fd, F_GETFL, 0);
 
     if (flags < 0 ||
         fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+#endif
         close(fd);
         return TCP_PORT_ERROR;
     }
@@ -153,10 +165,13 @@ static tcp_port_result tcp_port_check(
         return TCP_PORT_ERROR;
     }
 
+#ifndef _WIN32
+    /* Windows selects on SOCKET handles whose values ignore FD_SETSIZE. */
     if (fd >= FD_SETSIZE) {
         close(fd);
         return TCP_PORT_ERROR;
     }
+#endif
 
     fd_set writefds;
     FD_ZERO(&writefds);
@@ -362,9 +377,10 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
     /* Safe test mode: no real network traffic. */
     cli_show_syn_status();
 
-#elif defined(NERO_NETWORK_UNAVAILABLE)
+#elif defined(NERO_NETWORK_UNAVAILABLE) || defined(NERO_SYN_UNAVAILABLE)
 
-    /* Network diagnostics are unavailable in this build. */
+    /* Network diagnostics (raw packet engine) are unavailable in this build.
+     * Windows: the OS blocks raw TCP packet injection for desktop apps. */
     fputs(
         "-Syn: unsupported in this build; "
         "no network traffic is generated.\n",

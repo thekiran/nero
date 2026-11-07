@@ -1,10 +1,15 @@
 /* Line editing, escape-sequence decoding and command history. */
+#ifdef _WIN32
+#include "../platform/windows/nero_win_compat.h"
+#endif
 #include "cli_internal.h"
 #include "command_catalog.h"
 #include "nero/terminal.h"
 
 #include <errno.h>
+#ifndef _WIN32
 #include <poll.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>

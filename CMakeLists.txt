@@ -40,7 +40,36 @@ if(BUILD_TESTING)
 endif()
 
 if(WIN32)
-    message(STATUS "Windows foundation only: Nero CLI and interface listing are Unsupported")
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT MSVC)
+        # MinGW-w64 leg: interactive CLI with TCP diagnostics and the port
+        # scanner. The raw packet engine (-Syn) is excluded; Windows blocks
+        # raw TCP packet injection for desktop applications.
+        message(STATUS "Windows MinGW leg: Nero CLI, interface listing, TCP diagnostics, port scanner")
+        find_package(Threads REQUIRED)
+        add_executable(nero
+            src/main.c
+            src/cli/terminal.c
+            ${NERO_CLI_SUPPORT_SOURCES}
+            src/modules/portscanner.c
+            src/platform/windows/select_interface_windows.c)
+        nero_target(nero)
+        target_compile_definitions(nero PRIVATE UNICODE_SUPPORT NERO_SYN_UNAVAILABLE)
+        target_link_libraries(nero PRIVATE Threads::Threads ws2_32 iphlpapi)
+        target_link_options(nero PRIVATE -static) # self-contained exe (winpthread/libgcc)
+        if(BUILD_TESTING)
+            add_executable(win-interfaces tests/interfaces.c
+                src/platform/windows/select_interface_windows.c)
+            nero_target(win-interfaces)
+            target_link_libraries(win-interfaces PRIVATE ws2_32 iphlpapi)
+            target_link_options(win-interfaces PRIVATE -static)
+            add_test(NAME windows-native-cli COMMAND ${Python3_EXECUTABLE}
+                "${PROJECT_SOURCE_DIR}/tests/windows/test_cli.py"
+                $<TARGET_FILE:nero> $<TARGET_FILE:win-interfaces>)
+            set_tests_properties(windows-native-cli PROPERTIES TIMEOUT 120)
+        endif()
+    else()
+        message(STATUS "Windows foundation only: Nero CLI and interface listing are Unsupported")
+    endif()
 elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Threads REQUIRED)
     add_executable(nero-safe src/main.c src/cli/terminal.c ${NERO_CLI_SUPPORT_SOURCES})

@@ -1,4 +1,7 @@
 /* Terminal session lifecycle: raw mode, signals, cleanup and the main loop. */
+#ifdef _WIN32
+#include "../platform/windows/nero_win_compat.h"
+#endif
 #include "nero/terminal.h"
 #include "cli_internal.h"
 #include "nero/ascii.h"
@@ -11,14 +14,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <termios.h>
+#endif
 #include <unistd.h>
 
 static int terminal_changed = 0;
 static int terminal_error = 0;
 static struct termios saved_terminal;
 volatile sig_atomic_t cli_termination_signal = 0;
+#ifdef _WIN32
+static const int shell_signals[] = {SIGINT, SIGTERM, SIGBREAK};
+#else
 static const int shell_signals[] = {SIGINT, SIGTERM, SIGHUP, SIGPIPE};
+#endif
 static struct sigaction previous_signals[4];
 static int signals_saved = 0;
 

@@ -12,8 +12,11 @@ draft is reviewed and published, use the source installation in the README.
 | `macos-x86_64.tar.gz` | Intel, macOS 15 or newer |
 | `linux-x86_64.tar.gz` | x86-64, Ubuntu 24.04 (glibc 2.39) or compatible |
 | `linux-arm64.tar.gz` | ARM64, Ubuntu 24.04 (glibc 2.39) or compatible |
+| `windows-x86_64.zip` | Windows 10/11 x86-64, native MinGW-w64 CLI |
 
-These are dynamically linked native Make builds, not static universal binaries.
+macOS/Linux packages are dynamically linked native Make builds, not static universal binaries.
+Windows uses CMake with MinGW-w64 and statically links the compiler runtime;
+only Windows system DLLs are allowed by the package import check.
 macOS uses system frameworks; no Homebrew runtime is required. macOS packages
 are not Developer ID signed or notarized. Linux runtime dependencies can be
 installed on Ubuntu 24.04 with:
@@ -61,14 +64,19 @@ install -m 755 "$PACKAGE/bin/nero" "$HOME/.local/bin/nero"
 
 Add `$HOME/.local/bin` to your shell's PATH to run `nero` by name. Alternatively,
 install system-wide with `sudo install -m 755 ... /usr/local/bin/nero`. Remove the
-installed file to uninstall. `SHA256SUMS` verifies all four archives together;
+installed file to uninstall. `SHA256SUMS` verifies all five archives together;
 per-archive `.sha256` files are convenient when downloading just one platform.
 Checksums detect damaged downloads; they are not a separate code signature.
 
 ## Windows 11 / WSL2
 
-No native Windows CLI package or `.exe` is released. The CMake Windows foundation
-is not an equivalent application. In an Administrator PowerShell:
+A native Windows x86-64 ZIP is available as described in the README. It contains
+`bin/nero.exe`, build metadata and the same documentation and license files.
+The extracted binary is smoke-tested with a Windows system-only PATH to ensure
+it runs without MSYS2 DLLs. It is unsigned. The Visual Studio CMake preset
+remains foundation-only; native CLI builds use MinGW-w64.
+
+WSL2 remains an alternative, especially when the Linux environment is preferred. In an Administrator PowerShell:
 
 ```powershell
 wsl --install -d Ubuntu-24.04
@@ -115,18 +123,24 @@ reported by its own workflow; it is not a release-package gate.
 
    Alternatively, for the first release open **Actions → Release packages → Run
    workflow**, select `main`, and enter `v0.1.0`. If the tag does not exist, the
-   workflow builds that main commit and creates the tag only after all four
+   workflow builds that main commit and creates the tag only after all five
    platforms pass. No release is published automatically.
 
 3. Watch **Actions → Release packages**. Four native runners execute Make tests,
    Make ASan/UBSan tests, CMake tests and CMake sanitizer tests.
    A failing check prevents package publication. CTest logs are retained as
    artifacts, including on failure; Make test output is in the job logs.
-4. Each runner builds the real CLI, checks its architecture and dependencies,
+4. Each macOS/Linux runner builds the real CLI, checks its architecture and dependencies,
    verifies executable contents in the archive, and generates a SHA-256 sidecar.
-5. The final job requires all four successful builds, checks all hashes, generates
+   Windows additionally runs its native CLI tests (commands, history, EOF,
+   bounded input, unsupported raw engine) and local interface selection tests,
+   checks the PE architecture and DLL imports, and tests the extracted ZIP.
+   POSIX PTY and ASan/UBSan suites run on macOS/Linux; they are not claimed for
+   the native Windows toolchain.
+
+5. The final job requires all five successful builds, checks all hashes, generates
    `SHA256SUMS`, then creates a **draft** release. Nothing is automatically made
-   public. Review the four archives, sidecars, checksum manifest and notes, then
+   public. Review the five archives, sidecars, checksum manifest and notes, then
    publish manually.
 
 Tags support `vMAJOR.MINOR.PATCH` and prerelease suffixes such as `v0.2.0-rc.1`.
@@ -136,7 +150,7 @@ assets only while the release remains a draft; published assets are never
 overwritten. Tag resolution is frozen to one commit for every matrix job.
 Do not move a published tag; make a new version instead.
 
-On pull requests touching build, source, tests or release files, the same four
+On pull requests touching build, source, tests or release files, the same five
 platforms build test packages (`v0.0.0-ci`) without creating a release or granting
 write permission. Release creation alone receives `contents: write`. Third-party
 actions are pinned to commit hashes. No personal access token is required.

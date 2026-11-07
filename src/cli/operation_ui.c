@@ -1,16 +1,23 @@
 /* Reusable terminal operation surface and keyboard decoder.
  * The caller owns operation state and rendering order; this module owns the
  * alternate-screen transition. Operations are sequential, not nested. */
+#ifdef _WIN32
+#include "../platform/windows/nero_win_compat.h"
+#endif
 #include "nero/operation_ui.h"
 #include "nero/ascii.h"
 
 #include <errno.h>
+#ifndef _WIN32
 #include <poll.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef _WIN32
 #include <sys/ioctl.h>
+#endif
 
 #define ESCAPE_CONTINUATION_MS 35
 #define OPERATION_DOT_COUNT 6
@@ -186,8 +193,15 @@ void nero_operation_begin(
     /* Both ends must be terminals before switching screen buffers. Redirected
      * output keeps its linear transcript instead of entering another screen. */
     const char *term = getenv("TERM");
+#ifdef _WIN32
+    /* Windows consoles carry no TERM convention; VT output is enabled by
+     * nero_windows_init() so a live console is ANSI-capable by default. */
+    ui->interactive = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) &&
+                      (!term || strcmp(term, "dumb") != 0);
+#else
     ui->interactive = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) &&
                       term && strcmp(term, "dumb") != 0;
+#endif
     ui->color = ui->interactive && getenv("NO_COLOR") == NULL;
     ui->title = title;
     ui->detail = detail;

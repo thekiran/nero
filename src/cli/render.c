@@ -1,4 +1,7 @@
 /* Terminal capabilities, prompts, line redraws and help presentation. */
+#ifdef _WIN32
+#include "../platform/windows/nero_win_compat.h"
+#endif
 #include "cli_internal.h"
 #include "command_catalog.h"
 #include "nero/printing.h"
@@ -9,7 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/ioctl.h>
+#endif
 #include <unistd.h>
 
 extern pthread_mutex_t ekran_mutex;
@@ -20,7 +25,13 @@ int row_location = 14;
 int terminal_ansi_enabled(void)
 {
     const char *term = getenv("TERM");
+#ifdef _WIN32
+    /* Windows consoles carry no TERM convention; VT output is enabled by
+     * nero_windows_init() so a live console is ANSI-capable by default. */
+    return isatty(STDOUT_FILENO) && (!term || strcmp(term, "dumb") != 0);
+#else
     return isatty(STDOUT_FILENO) && term && strcmp(term, "dumb") != 0;
+#endif
 }
 
 int terminal_color_enabled(void)
