@@ -18,7 +18,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Dependencies are installed only on the disposable Linux CI runner.
       - name: Linux build dependencies
         if: runner.os == 'Linux'
