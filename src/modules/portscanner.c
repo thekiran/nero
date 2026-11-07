@@ -41,6 +41,8 @@
 #define MAX_BATCH   512
 #define MAX_SCAN_SOCKETS 256
 #define CANCEL_POLL_MS 50
+#define MAX_DEEP_ROUNDS 4
+#define MAX_DEEP_TIMEOUT_MS 5000
 
 /* Bir tarama hız profili. Daha düşük eşzamanlılık = hedefi/WiFi'yi daha az
  * boğar = daha kararlı; daha kısa zaman aşımı = daha hızlı bitiş. */
@@ -49,6 +51,10 @@ typedef struct {
     int fast_threads, fast_batch, fast_timeout_ms;
     int deep_threads, deep_batch, deep_timeout_ms;
     int deep_max_candidates; /* work window size, never a candidate cutoff */
+    /* Retry rounds (1..MAX_DEEP_ROUNDS). Round 1 re-probes every filtered and
+     * error/unknown port; later rounds only re-probe ports that are still
+     * error/unknown, so a silent target costs exactly one retry per port. */
+    int deep_rounds;
 } scan_profile;
 
 enum { PROFILE_FAST = 0, PROFILE_MEDIUM, PROFILE_SLOW, PROFILE_MANUAL, PROFILE_COUNT };
@@ -57,15 +63,15 @@ enum { PROFILE_FAST = 0, PROFILE_MEDIUM, PROFILE_SLOW, PROFILE_MANUAL, PROFILE_C
 static const scan_profile SCAN_PROFILES[] = {
     /* Fast, balanced and slow timeout/batch preferences. The global socket
      * budget is enforced independently; all profiles retry every uncertainty. */
-    { "Hizli",  8, 256, 500,  4, 128, 1000, 8000 },
+    { "Hizli",  8, 256, 500,  4, 128, 1000, 8000,  1 },
     /* Orta (önerilen): dengeli. */
-    { "Orta",   6, 200, 1000, 4, 100, 2000, 12000 },
+    { "Orta",   6, 200, 1000, 4, 100, 2000, 12000, 2 },
     /* Yavaş: düşük eşzamanlılık, uzun zaman aşımı. En kararlı/eksiksiz. */
-    { "Yavas",  4, 100, 1500, 2, 64,  3000, 65535 },
+    { "Yavas",  4, 100, 1500, 2, 64,  3000, 65535, 3 },
 };
 
 /* Manuel profil: kullanıcının ayarladığı değerlerle doldurulur. */
-static scan_profile manual_profile = { "Manuel", 6, 200, 1000, 4, 100, 2000, 12000 };
+static scan_profile manual_profile = { "Manuel", 6, 200, 1000, 4, 100, 2000, 12000, 2 };
 
 /* Tarama boyunca okunur (yalnız-okuma; thread'ler güvenle paylaşır). */
 static const scan_profile *active_profile = &SCAN_PROFILES[PROFILE_MEDIUM];
@@ -94,7 +100,9 @@ typedef struct {
 } scan_work;
 
 typedef struct {
-    int open, closed, filtered, unknown, unscanned, retried;
+    int open, closed, filtered, unknown, unscanned;
+    int retried;       /* ports with at least one completed retry */
+    int retry_probes;  /* completed retry probes across all deep rounds */
 } scan_summary;
 
 typedef enum { HOST_UNKNOWN, HOST_ONLINE } host_state;
@@ -107,6 +115,20 @@ static atomic_int scan_cancel_requested;
 static atomic_int ports_scanned;
 static atomic_int latest_probe_port;
 static atomic_int host_responded;
+/* Progress is completed probes over queued probes: 65535 first-pass probes
+ * plus every retry queued by a deep round. The bar stays below 100% until
+ * scan_work_done is set after the last phase. Reset per scan for restarts. */
+static atomic_int scan_progress_total;
+static atomic_int probes_completed;
+static atomic_int scan_work_done;
+/* Local resource exhaustion (descriptors, buffers, ephemeral ports). Deep
+ * rounds halve their concurrency when a window increases this counter. */
+static atomic_int resource_failures;
+/* Report context, set only by a full portscanner() run. NULL completion keeps
+ * direct report_scan_summary() callers (tests) byte-compatible. */
+static const char *scan_profile_label = "";
+static const char *scan_completion;
+static int64_t scan_duration_ms;
 static const char *target_ip_global;
 static pthread_mutex_t results_mutex;
 static pthread_t scan_owner;
@@ -137,22 +159,54 @@ static scan_summary summarize_scan(void) {
         case PORT_UNSCANNED: s.unscanned++; break;
         }
         if (results_list[port].retries_completed) s.retried++;
+        s.retry_probes += (int)results_list[port].retries_completed;
     }
     return s;
 }
 
+/* Strength of the evidence behind an outcome. A retry may confirm or
+ * strengthen an earlier result but never replace it with weaker evidence:
+ * an open port stays open, and a local failure during a retry cannot erase
+ * a first-pass timeout or refusal observed on the network. */
+static int state_evidence(port_state state) {
+    switch (state) {
+    case PORT_OPEN: return 3;
+    case PORT_CLOSED: return 2;
+    case PORT_FILTERED: return 1;
+    case PORT_UNKNOWN:
+    case PORT_UNSCANNED: break;
+    }
+    return 0;
+}
+
 static void record_result(int port, port_state state, int error, scan_error_stage stage) {
     pthread_mutex_lock(&results_mutex);
-    if (results_list[port].state == PORT_UNSCANNED)
+    port_result *r = &results_list[port];
+    if (r->state == PORT_UNSCANNED)
         atomic_fetch_add_explicit(&ports_scanned, 1, memory_order_relaxed);
     else
-        results_list[port].retries_completed++;
-    results_list[port].state = state;
-    results_list[port].error = error;
-    results_list[port].error_stage = stage;
+        r->retries_completed++;
+    if (r->state == PORT_UNSCANNED || state_evidence(state) >= state_evidence(r->state)) {
+        r->state = state;
+        r->error = error;
+        r->error_stage = stage;
+    }
     pthread_mutex_unlock(&results_mutex);
+    atomic_fetch_add_explicit(&probes_completed, 1, memory_order_relaxed);
     if (state == PORT_OPEN || state == PORT_CLOSED)
         atomic_store_explicit(&host_responded, 1, memory_order_relaxed);
+}
+
+/* Completed probes over queued probes, in permille. Never 1000 until every
+ * phase has finished, so a finished fast pass cannot look like a finished
+ * scan while deep retries are queued or still running. */
+static int scan_progress_permille(void) {
+    long done = atomic_load_explicit(&probes_completed, memory_order_relaxed);
+    long total = atomic_load_explicit(&scan_progress_total, memory_order_relaxed);
+    if (total < SCAN_TOTAL_PORTS) total = SCAN_TOTAL_PORTS;
+    int permille = (int)(done * 1000 / total);
+    if (atomic_load_explicit(&scan_work_done, memory_order_relaxed)) return 1000;
+    return permille > 999 ? 999 : permille;
 }
 
 #define SCAN_ERROR_GROUPS 16
@@ -218,10 +272,19 @@ static void report_scan_summary(void) {
         target_ip_global, atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
         s.open, s.closed, s.filtered, s.unknown, s.unscanned, s.retried);
     printf("Host: %s | TCP: open=%d closed=%d filtered=%d error/unknown=%d "
-           "unscanned=%d total=%d | retried=%d\n",
+           "unscanned=%d total=%d | retried=%d retry_probes=%d\n",
            atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
            s.open, s.closed, s.filtered, s.unknown, s.unscanned,
-           s.open + s.closed + s.filtered + s.unknown + s.unscanned, s.retried);
+           s.open + s.closed + s.filtered + s.unknown + s.unscanned, s.retried, s.retry_probes);
+    if (scan_completion != NULL) {
+        printf("Scan: target=%s profile=%s duration=%lld.%03llds status=%s\n",
+               target_ip_global, scan_profile_label,
+               (long long)(scan_duration_ms / 1000), (long long)(scan_duration_ms % 1000),
+               scan_completion);
+        nero_log_write(NERO_LOG_INFO, "scanner",
+            "target=%s profile=%s duration_ms=%lld status=%s",
+            target_ip_global, scan_profile_label, (long long)scan_duration_ms, scan_completion);
+    }
     scan_error_group groups[SCAN_ERROR_GROUPS];
     int overflow = 0;
     int count = summarize_scan_errors(groups, &overflow);
@@ -269,8 +332,11 @@ static void *scan_animation_worker(void *arg) {
     scan_animation_state *state = arg;
     const struct timespec frame_delay = {0, SCAN_FRAME_NANOSECONDS};
     unsigned frame = 0;
+    int shown_permille = 0;
 
-    while (!atomic_load_explicit(&state->stop, memory_order_relaxed)) {
+    for (;;) {
+        /* One last frame after stop shows the final ledger and progress. */
+        int stopping = atomic_load_explicit(&state->stop, memory_order_relaxed);
         int ports[DISCOVERY_VIEW_CAP];
         int total_open = 0;
         int shown = 0;
@@ -285,12 +351,14 @@ static void *scan_animation_worker(void *arg) {
         }
         pthread_mutex_unlock(&results_mutex);
 
-        int scanned = atomic_load_explicit(&ports_scanned, memory_order_relaxed);
-        int permille = (int)((long)scanned * 1000 / SCAN_TOTAL_PORTS);
-        if (permille > 1000) permille = 1000;
+        /* A later deep round enlarges the denominator; hold the bar rather
+         * than letting it move backwards, and never show 100% early. */
+        int permille = scan_progress_permille();
+        if (permille < shown_permille) permille = shown_permille;
+        shown_permille = permille;
 
         int scroll_delta = 0;
-        switch (nero_operation_read_key(0)) {
+        switch (stopping ? NERO_UI_KEY_NONE : nero_operation_read_key(0)) {
         case NERO_UI_KEY_CANCEL:
             atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
             break;
@@ -304,6 +372,7 @@ static void *scan_animation_worker(void *arg) {
         nero_operation_discovery(ports, shown, total_open, state->animate ? frame : 6,
             atomic_load_explicit(&latest_probe_port, memory_order_relaxed),
             permille, scroll_delta);
+        if (stopping) break;
         frame = (frame + 1) % 6;
         nanosleep(&frame_delay, NULL);
     }
@@ -409,6 +478,13 @@ static port_state classify_connect_error(int error) {
     return PORT_UNKNOWN;
 }
 
+/* Local exhaustion, not evidence about the target. EADDRNOTAVAIL from
+ * connect() means the local ephemeral port range is exhausted. */
+static int is_resource_error(int error) {
+    return error == EMFILE || error == ENFILE || error == ENOBUFS ||
+           error == ENOMEM || error == EADDRNOTAVAIL;
+}
+
 static int connect_pending(int error) {
     return error == EINPROGRESS || error == EALREADY ||
            error == EWOULDBLOCK || error == EINTR
@@ -446,6 +522,10 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
     int nfds = 0, remaining = 0, resource_error = 0;
     for (int i = 0; i < count && !scan_cancelled(); ++i) {
         int port = ports[i];
+        /* Port 0 and out-of-range indices can never enter the ledger; the
+         * production queue only generates the complete 1..65535 range. */
+        if (port < 1 || port > SCAN_TOTAL_PORTS)
+            continue;
         pthread_mutex_lock(&results_mutex);
         results_list[port].attempts++;
         pthread_mutex_unlock(&results_mutex);
@@ -454,8 +534,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         if (fd == NERO_INVALID_SOCKET) {
             int error = errno;
             record_result(port, PORT_UNKNOWN, error, SCAN_SOCKET);
-            if (error == EMFILE || error == ENFILE || error == ENOBUFS || error == ENOMEM)
-                resource_error = 1;
+            if (is_resource_error(error)) resource_error = 1;
             continue;
         }
         if (make_nonblocking(fd) != 0) {
@@ -471,6 +550,7 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
         if (ret == 0 || !connect_pending(error)) {
             close(fd);
             record_result(port, classify_connect_error(error), error, SCAN_CONNECT);
+            if (is_resource_error(error)) resource_error = 1;
             continue;
         }
         pfds[nfds].fd = fd;
@@ -556,6 +636,8 @@ static void scan_ports_batch(const char *ip, const int *ports, int count, int ti
      * phase outcome. No cancelled probe is reported as a completed attempt. */
     for (int s = 0; s < nfds; ++s)
         if (pfds[s].fd != NERO_INVALID_SOCKET) close(pfds[s].fd);
+    if (resource_error)
+        atomic_fetch_add_explicit(&resource_failures, 1, memory_order_relaxed);
     if (resource_error && !scan_cancelled()) {
         const struct timespec delay = {0, 5000000L};
         nanosleep(&delay, NULL); /* bounded backoff, not a busy socket retry loop */
@@ -608,24 +690,49 @@ static int collect_retry_candidates(int *ports) {
     return count;
 }
 
+/* Bounded adaptive retry. `ports` holds the first-pass filtered/unknown
+ * candidates and is compacted in place between rounds. Round 1 re-probes all
+ * of them with the longer deep timeout; later rounds re-probe only ports that
+ * are still error/unknown. Each round is split into bounded work windows; a
+ * window that hits local resource exhaustion halves socket concurrency
+ * (threads first, then batch) for the following windows and rounds. A port
+ * receives at most 1 + deep_rounds probes in total, and an inconclusive final
+ * retry leaves it inconclusive. */
 static void run_deep_scan(int *ports, int count, const scan_profile *profile) {
     int window = profile->deep_max_candidates;
     if (window < 1 || window > SCAN_TOTAL_PORTS) window = SCAN_TOTAL_PORTS;
-    for (int start = 0; start < count && !scan_cancelled(); start += window) {
-        int chunk = count - start;
-        if (chunk > window) chunk = window;
-        /* Exactly one bounded retry, with a smaller global socket budget from
-         * the deep profile and a longer (at most 5000 ms) timeout. */
-        int timeout = profile->deep_timeout_ms;
-        if (timeout < profile->fast_timeout_ms) timeout = profile->fast_timeout_ms;
-        if (timeout > 5000) timeout = 5000;
-        int threads = profile->deep_threads;
-        if (threads < 1) threads = 1;
-        if (threads > MAX_THREADS) threads = MAX_THREADS;
-        int batch = profile->deep_batch;
-        if (batch > (MAX_SCAN_SOCKETS / 2) / threads)
-            batch = (MAX_SCAN_SOCKETS / 2) / threads;
-        run_scan_phase(ports + start, chunk, threads, batch, timeout);
+    int rounds = profile->deep_rounds;
+    if (rounds < 1) rounds = 1;
+    if (rounds > MAX_DEEP_ROUNDS) rounds = MAX_DEEP_ROUNDS;
+    int timeout = profile->deep_timeout_ms;
+    if (timeout < profile->fast_timeout_ms) timeout = profile->fast_timeout_ms;
+    if (timeout > MAX_DEEP_TIMEOUT_MS) timeout = MAX_DEEP_TIMEOUT_MS;
+    int threads = profile->deep_threads;
+    if (threads < 1) threads = 1;
+    if (threads > MAX_THREADS) threads = MAX_THREADS;
+    int batch = profile->deep_batch;
+    if (batch < 1) batch = 1;
+    if (batch > (MAX_SCAN_SOCKETS / 2) / threads)
+        batch = (MAX_SCAN_SOCKETS / 2) / threads;
+
+    for (int round = 0; round < rounds && count > 0 && !scan_cancelled(); ++round) {
+        /* Publish this round's work before probing so progress stays honest. */
+        atomic_fetch_add_explicit(&scan_progress_total, count, memory_order_relaxed);
+        for (int start = 0; start < count && !scan_cancelled(); start += window) {
+            int chunk = count - start;
+            if (chunk > window) chunk = window;
+            int before = atomic_load_explicit(&resource_failures, memory_order_relaxed);
+            run_scan_phase(ports + start, chunk, threads, batch, timeout);
+            if (atomic_load_explicit(&resource_failures, memory_order_relaxed) != before) {
+                if (threads > 1) threads /= 2;
+                else if (batch > 1) batch /= 2;
+            }
+        }
+        /* Every writer of this round has been joined by run_scan_phase. */
+        int next = 0;
+        for (int i = 0; i < count; ++i)
+            if (results_list[ports[i]].state == PORT_UNKNOWN) ports[next++] = ports[i];
+        count = next;
     }
 }
 
@@ -876,6 +983,7 @@ static int adjust_manual_profile(nero_operation_ui *ui) {
     manual_profile.deep_batch = batch > 32 ? batch / 2 : 16;
     manual_profile.deep_timeout_ms = timeout * 2 > 5000 ? 5000 : timeout * 2;
     manual_profile.deep_max_candidates = 65535; /* manuelde her zaman derin tara */
+    manual_profile.deep_rounds = 2;
     return 1;
 }
 
@@ -950,6 +1058,13 @@ int portscanner(const char *target_ip) {
     atomic_init(&latest_probe_port, 0);
     atomic_init(&ports_scanned, 0);
     atomic_init(&host_responded, 0);
+    atomic_init(&scan_progress_total, SCAN_TOTAL_PORTS);
+    atomic_init(&probes_completed, 0);
+    atomic_init(&scan_work_done, 0);
+    atomic_init(&resource_failures, 0);
+    scan_profile_label = "";
+    scan_completion = NULL;
+    scan_duration_ms = 0;
     results_list = calloc(SCAN_TOTAL_PORTS + 1, sizeof(*results_list));
     int *work_ports = malloc(SCAN_TOTAL_PORTS * sizeof(*work_ports));
     if (!results_list || !work_ports) {
@@ -985,12 +1100,14 @@ int portscanner(const char *target_ip) {
 
     /* Discovery never gates a valid target. The full fast phase supplies TCP
      * reachability evidence itself, without an extra 16-port pre-scan. */
+    const int64_t scan_started_ms = scan_now_ms();
     if (host_probe_alive(target_ip) == HOST_ONLINE)
         atomic_store_explicit(&host_responded, 1, memory_order_relaxed);
     nero_operation_status("36", "Host discovery",
         atomic_load_explicit(&host_responded, memory_order_relaxed)
             ? "online; scanning all TCP ports" : "unknown; scanning all TCP ports");
     const scan_profile *prof = active_profile;
+    scan_profile_label = prof->name;
     scan_animation_state animation = { .target_ip = target_ip, .animate = scan_motion_enabled() };
     atomic_init(&animation.stop, 0);
     pthread_t animation_thread;
@@ -1006,6 +1123,7 @@ int portscanner(const char *target_ip) {
                    prof->fast_batch, prof->fast_timeout_ms);
     int candidate_count = collect_retry_candidates(work_ports);
     if (!scan_cancelled()) run_deep_scan(work_ports, candidate_count, prof);
+    if (!scan_cancelled()) atomic_store_explicit(&scan_work_done, 1, memory_order_relaxed);
 
     if (animation_started) {
         atomic_store_explicit(&animation.stop, 1, memory_order_relaxed);
@@ -1017,6 +1135,9 @@ int portscanner(const char *target_ip) {
     scan_summary summary = summarize_scan();
     int cancelled = scan_cancelled();
     int accounted = summary.open + summary.closed + summary.filtered + summary.unknown;
+    scan_duration_ms = scan_now_ms() - scan_started_ms;
+    scan_completion = cancelled ? "cancelled"
+        : (accounted == SCAN_TOTAL_PORTS ? "complete" : "incomplete");
     if (cancelled || accounted != SCAN_TOTAL_PORTS || summary.retried < candidate_count) {
         nero_operation_end(&ui);
         report_scan_summary();
@@ -1077,7 +1198,7 @@ int portscanner(const char *target_ip) {
     nero_operation_end(&ui);
     report_scan_summary();
     if (summary.filtered || summary.unknown)
-        puts("Some port checks remain inconclusive after one bounded retry.");
+        puts("Some port checks remain inconclusive after bounded retries.");
     free(results_list);
     results_list = NULL;
     if (selected_port == PORTSCANNER_CANCELLED)

@@ -95,6 +95,8 @@ typedef nero_ssize_t ssize_t;
 #define ENFILE WSAEMFILE /* Winsock has no separate system file-table code. */
 #undef ENOBUFS
 #define ENOBUFS WSAENOBUFS
+#undef EADDRNOTAVAIL
+#define EADDRNOTAVAIL WSAEADDRNOTAVAIL /* local ephemeral port exhaustion */
 
 /* Every close() in the socket-facing sources targets a socket. */
 #define close closesocket
