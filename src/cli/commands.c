@@ -442,10 +442,10 @@ static cli_cmd_result cmd_help(char **tokens, size_t count)
 static cli_cmd_result cmd_history(char **tokens, size_t count)
 {
     if (count == 2 && strcmp(tokens[1], "-clear") == 0) {
-        memset(history, 0, sizeof(history));
-        history_count = 0;
-
-        printf("\nHistory cleared.\n");
+        if (cli_history_clear() == 0)
+            printf("\nHistory cleared.\n");
+        else
+            fputs("\nSession history cleared; persistent history could not be cleared. See log -errors.\n", stderr);
     } else if (count == 1) {
         for (int i = 0; i < history_count; ++i)
             printf("\n%s", history[i]);
@@ -578,7 +578,7 @@ int cli_dispatch_command(const char *command)
     if (length >= sizeof(copy))
         return -1;
 
-    char *tokens[CLI_MAX_TOKENS];
+    char *tokens[CLI_MAX_TOKENS + 1];
     size_t count = 0;
 
     if (nero_parse(
@@ -587,7 +587,7 @@ int cli_dispatch_command(const char *command)
             copy,
             sizeof(copy),
             tokens,
-            CLI_MAX_TOKENS,
+            CLI_MAX_TOKENS + 1,
             &count
         ) != NERO_PARSE_OK) {
         goto invalid;

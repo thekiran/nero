@@ -33,6 +33,8 @@ PAGE_MAP = {
     "docs/platform-support.md": "Platform-Compatibility",
     "docs/building.md": "Development",
     "docs/testing.md": "Testing",
+    "docs/developer-contracts.md": "Developer-Contracts",
+    "docs/distribution.md": "Distribution",
     "docs/troubleshooting.md": "Troubleshooting",
     "ROADMAP.md": "Roadmap",
     "docs/releases.md": "Releases",
@@ -58,6 +60,8 @@ def get_sidebar_content() -> str:
 ### Development & QA
 * [[Development]]
 * [[Testing]]
+* [[Developer Contracts|Developer-Contracts]]
+* [[Distribution]]
 * [[Troubleshooting]]
 
 ### Project Governance

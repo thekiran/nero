@@ -35,6 +35,13 @@ on a branch, include targeted regression evidence, and request review in a PR.
 The required Release checks gate must cover every supported package. Review draft
 assets and notes before publishing. Green CI is evidence, not a security guarantee.
 
-Known follow-up: the POSIX SIGHUP cleanup test has intermittently timed out on
-hosted runners. Track and diagnose it in #10; retries are not a substitute for a
-deterministic regression and a documented root cause.
+The POSIX SIGHUP flag-check/wait race was fixed in PR #14 with atomic
+`pselect` signal-mask handoff. The deterministic before-wait regression remains
+mandatory; a repeated validation run passed 150 real-signal cleanup cases and
+50 injected races. Track any new failures in #10 with logs rather than retries.
+
+Source builds after v0.1.3 add private command-history persistence, exact
+64-token dispatch, parser capacity regressions and installer lifecycle checks.
+[Distribution paths](docs/distribution.md) documents the macOS Homebrew formula
+and test-only Ubuntu `.deb` artifacts. Signing/notarization still requires
+owner-controlled credentials and is not claimed by these checks.

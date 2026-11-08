@@ -48,7 +48,7 @@ def main():
                 'raw_packet_engine': 'Unsupported', 'code_signed': False}
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(binary, f'{root}/bin/nero.exe')
-        for source, destination in [('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.ps1', 'install.ps1')]:
+        for source, destination in [('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.ps1', 'install.ps1'), ('scripts/uninstall.ps1', 'uninstall.ps1')]:
             zip_file.write(source, f'{root}/{destination}')
         zip_file.writestr(f'{root}/BUILD-INFO.json', json.dumps(metadata, indent=2) + '\n')
     with zipfile.ZipFile(archive) as zip_file:
@@ -77,7 +77,9 @@ def main():
             input_path = Path(temp) / 'commands.txt'
             input_path.write_bytes(b'version\nexit\n')
             stdout_path, stderr_path = Path(temp) / 'installed.stdout', Path(temp) / 'installed.stderr'
-            install_env = dict(env, NERO_INSTALL_SCRIPT=str(installer), NERO_INSTALL_DIR=str(installed),
+            install_env = dict(env, NERO_INSTALL_SCRIPT=str(installer),
+                               NERO_UNINSTALL_SCRIPT=str(Path(temp) / root / 'uninstall.ps1'),
+                               NERO_INSTALL_DIR=str(installed),
                                NERO_COMMAND_INPUT=str(input_path), NERO_COMMAND_OUTPUT=str(stdout_path),
                                NERO_COMMAND_ERROR=str(stderr_path))
             command = ("& $env:NERO_INSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
@@ -88,6 +90,18 @@ def main():
                        "& (Join-Path $env:SystemRoot 'System32\\cmd.exe') /d /c "
                        "'nero < commands.txt > installed.stdout 2> installed.stderr'; "
                        "if ($LASTEXITCODE -ne 0) { throw ('Installed CLI failed: ' + $LASTEXITCODE) }; "
+                       "& $env:NERO_INSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
+                       "if (-not $?) { throw 'Reinstall failed' }; "
+                       "$installedDir = [IO.Path]::GetDirectoryName($expected); "
+                       "$matches = @($env:Path -split ';' | Where-Object { $_.TrimEnd('\\') -ieq $installedDir.TrimEnd('\\') }); "
+                       "if ($matches.Count -ne 1) { throw 'Expected one normalized installed PATH entry' }; "
+                       "$sentinel = Join-Path $env:NERO_INSTALL_DIR 'keep-me.txt'; "
+                       "Set-Content -LiteralPath $sentinel -Value 'preserve'; "
+                       "& $env:NERO_UNINSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
+                       "if (-not $?) { throw 'Uninstall failed' }; "
+                       "if (Test-Path -LiteralPath $expected) { throw 'Executable remains after removal' }; "
+                       "if (-not (Test-Path -LiteralPath $sentinel)) { throw 'Unrelated file removed' }; "
+                       "if (@($env:Path -split ';' | Where-Object { $_.TrimEnd('\\') -ieq $installedDir.TrimEnd('\\') }).Count) { throw 'Installed PATH entry remains' }; "
                        "Write-Output 'NERO_COMMAND_INSTALL_OK'")
             check = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', command],
                                    capture_output=True, timeout=30, env=install_env, cwd=temp)

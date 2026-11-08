@@ -1,0 +1,63 @@
+name: Distribution packages
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  homebrew:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify published formula install, reinstall and removal
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          brew tap nero-ci/nero "$GITHUB_WORKSPACE"
+          brew install nero-ci/nero/nero
+          brew test nero-ci/nero/nero
+          brew reinstall nero-ci/nero/nero
+          brew test nero-ci/nero/nero
+          brew uninstall nero-ci/nero/nero
+  debian:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential dpkg-dev file libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev
+      - name: Build, install, upgrade and remove in disposable runner
+        env:
+          NERO_LOG_FILE: ':memory:'
+          NERO_HISTORY_FILE: ':memory:'
+        run: |
+          set -euo pipefail
+          make -j2 NERO_RELEASE_VERSION=v0.0.0-ci
+          python3 scripts/release/package_deb.py --binary ./nero --version v0.0.0-ci
+          sudo dpkg --install .build/debian/nero_0.0.0~ci_*.deb
+          printf 'version\nexit\n' | /usr/bin/nero | grep -F 'version v0.0.0-ci'
+          make -j2 BUILD_DIR=.build/upgrade TARGET=.build/nero-upgrade NERO_RELEASE_VERSION=v0.0.1-ci
+          python3 scripts/release/package_deb.py --binary .build/nero-upgrade --version v0.0.1-ci
+          sudo dpkg --install .build/debian/nero_0.0.1~ci_*.deb
+          printf 'version\nexit\n' | /usr/bin/nero | grep -F 'version v0.0.1-ci'
+          sudo dpkg --remove nero
+          test ! -e /usr/bin/nero
+          cd .build/debian
+          sha256sum --check ./*.sha256
+      - name: Archive test packages (not a public release)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: debian-${{ matrix.runner }}
+          path: .build/debian/*

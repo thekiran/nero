@@ -21,8 +21,8 @@ published assets or move its tag.
 
 ## Independent follow-up
 
-- [ ] Review [stability tracker #9](https://github.com/thekiran/nero/issues/9)
-      against its acceptance evidence before closing it.
+- [x] [Stability tracker #9](https://github.com/thekiran/nero/issues/9) reviewed,
+      its completed acceptance checklist updated, and closed with release-run evidence.
 - [ ] Perform additional installation checks on fresh end-user machines.
       CI packaging and installer checks are recorded above; separate manual
       clean-machine validation is not claimed.

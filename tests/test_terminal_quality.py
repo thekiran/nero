@@ -14,7 +14,7 @@ import time
 import unittest
 
 BINARY = pathlib.Path(sys.argv.pop(1)).resolve()
-ENV = dict(os.environ, TERM="xterm", UBSAN_OPTIONS="halt_on_error=1")
+ENV = dict(os.environ, TERM="xterm", UBSAN_OPTIONS="halt_on_error=1", NERO_HISTORY_FILE=":memory:")
 
 
 def run(data, **extra):
@@ -23,6 +23,13 @@ def run(data, **extra):
 
 
 class TerminalQuality(unittest.TestCase):
+    def test_exact_token_limit(self):
+        accepted = self.output(b" ".join([b"x"] * 64) + b"\nexit\n")
+        self.assertIn(b"Unknown command", accepted)
+        self.assertNotIn(b"Invalid command parameters", accepted)
+        rejected = self.output(b" ".join([b"x"] * 65) + b"\nexit\n")
+        self.assertIn(b"Invalid command parameters", rejected)
+
     def test_catalog_completion_and_help(self):
         output = self.output(b"vers\t\nhistory -c\t\nhelp\nexit\n")
         self.assertIn(b"version development", output)

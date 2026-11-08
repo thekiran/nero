@@ -23,6 +23,7 @@ set(NERO_CLI_SUPPORT_SOURCES
     src/core/log.c
     src/cli/parser/parser.c
     src/cli/input.c
+    src/cli/history.c
     src/cli/render.c
     src/cli/operation_ui.c
     src/cli/commands.c
@@ -34,6 +35,13 @@ nero_target(nero-platform-info)
 
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(parser-boundaries tests/parser_boundaries.c src/cli/parser/parser.c)
+    nero_target(parser-boundaries)
+    add_test(NAME parser-boundaries COMMAND parser-boundaries)
+    if(UNIX)
+        add_test(NAME installation-lifecycle COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/tests/test_installation.py")
+    endif()
     add_test(NAME foundation COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/integration/test_foundation.py" $<TARGET_FILE:nero-platform-info>)
     # Non-gating: only registered when explicitly requested, so the default
@@ -74,6 +82,9 @@ if(WIN32)
                 "${PROJECT_SOURCE_DIR}/tests/windows/test_cli.py"
                 $<TARGET_FILE:nero> $<TARGET_FILE:win-interfaces>)
             set_tests_properties(windows-native-cli PROPERTIES TIMEOUT 120)
+            add_test(NAME history-persistence COMMAND ${Python3_EXECUTABLE}
+                "${PROJECT_SOURCE_DIR}/tests/test_history.py" $<TARGET_FILE:nero>)
+            set_tests_properties(history-persistence PROPERTIES TIMEOUT 120)
             if(NERO_RELEASE_VERSION)
                 set_tests_properties(windows-native-cli PROPERTIES
                     ENVIRONMENT "NERO_EXPECTED_VERSION=${NERO_RELEASE_VERSION}")
@@ -145,6 +156,9 @@ elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
             "${PROJECT_SOURCE_DIR}/tests/test_operation_layout.py" $<TARGET_FILE:operation-layout>)
         set_tests_properties(operation-layout PROPERTIES TIMEOUT 30)
         set_tests_properties(terminal-quality PROPERTIES TIMEOUT 120)
+        add_test(NAME history-persistence COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/tests/test_history.py" $<TARGET_FILE:nero-safe>)
+        set_tests_properties(history-persistence PROPERTIES TIMEOUT 120)
         add_test(NAME legacy-safe-regression COMMAND ${Python3_EXECUTABLE}
             "${PROJECT_SOURCE_DIR}/tests/test_safe.py" $<TARGET_FILE_DIR:nero-safe>)
         set_tests_properties(legacy-safe-regression PROPERTIES TIMEOUT 120)

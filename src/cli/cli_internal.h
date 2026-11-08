@@ -27,6 +27,9 @@ int cli_signal_mode(int enabled);
 /* input.c: 1 = line, 2 = rejected overflow, 0 = EOF, -1 = read error. */
 int cli_read_line(char command[CLI_LINE_CAPACITY]);
 void cli_history_add(const char *command);
+void cli_history_load(void);
+void cli_history_persist(const char *command);
+int cli_history_clear(void);
 
 /* render.c: presentation only. */
 void cli_render_prompt(void);

@@ -11,7 +11,7 @@ import time
 import unittest
 
 ROOT = pathlib.Path(sys.argv.pop(1)).resolve()
-ENV = dict(os.environ, TERM="xterm", UBSAN_OPTIONS="halt_on_error=1")
+ENV = dict(os.environ, TERM="xterm", UBSAN_OPTIONS="halt_on_error=1", NERO_HISTORY_FILE=":memory:")
 ANSI = re.compile(rb"\x1b\[[0-9;]*[A-Za-z]")
 
 
