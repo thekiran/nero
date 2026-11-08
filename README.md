@@ -48,22 +48,22 @@ Windows ARM64 has no native package; use WSL2 on ARM64 hardware.
   * ANSI VT100 styling with automatic fallback to ASCII when `NO_COLOR=1` or `TERM=dumb`.
   * Network interface enumeration across POSIX (`getifaddrs`) and Windows (`GetAdaptersAddresses`).
   * TCP port diagnostics (`<target> -Sc`) with timeout boundaries.
-  * System command installation scripts for `/usr/local/bin` (macOS/Linux) and `%LOCALAPPDATA%\Programs\Nero\bin` (Windows).
+  * Native `.pkg`, `.msi` and `.deb` installers register the global `nero` command; portable archive installers remain available.
 * **Experimental Modules (Authorized Laboratory Use Only):**
   * Raw packet engine (`<target> -Syn`) on Linux and macOS. Requires administrative root elevation (`sudo nero`) for `SOCK_RAW` and BPF access.
 * **Unavailable Features:**
   * Raw packet engine (`-Syn`) on Windows: user-space raw TCP injection is restricted by the Windows desktop network stack. The command reports unsupported without transmitting traffic.
 * **Planned Features:**
   * Authenticode and Apple Developer ID signing certificates (tracked in [ROADMAP.md](ROADMAP.md)).
-  * Distribution via package managers (Homebrew, APT).
+  * Signed APT repository distribution. A third-party Homebrew formula is already [available](docs/distribution.md#macos-homebrew).
 
 ---
 
 ## Quick Installation
 
-Download the package matching your operating system from [GitHub Releases](https://github.com/thekiran/nero/releases) and verify its `.sha256` checksum before installing. If no release has been published yet, follow the [source-build instructions](docs/installation.md).
+Download the package matching your operating system from [GitHub Releases](https://github.com/thekiran/nero/releases) and verify its `.sha256` checksum before installing. The current release is [v0.1.4](https://github.com/thekiran/nero/releases/tag/v0.1.4).
 
-**Recommended: use the native installer when offered by the release.** Open it
+**Recommended: use the native installer.** Open it
 and follow the operating system's installation screens; no build tools or
 terminal installation commands are required.
 

@@ -13,13 +13,13 @@ Use a published release; drafts are visible only to collaborators.</sub>
 
 <br>
 
-Choose your operating system below. Each command block has GitHub's built-in
-**Copy** button so you can paste the steps directly into your terminal.
+Choose the native installer for your operating system below. Terminal commands
+later in this guide are optional instructions for portable archives and developers.
 
 ### Recommended: standard operating-system installers
 
-Starting with releases after v0.1.3, download the native installer for your
-system from [GitHub Releases](https://github.com/thekiran/nero/releases).
+[v0.1.4](https://github.com/thekiran/nero/releases/tag/v0.1.4) includes native
+installers for all five supported OS/architecture targets.
 
 | System | Download | Installation |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ Linux packages need a compatible distribution and package-manager frontend.
 
 Open **[GitHub Releases](https://github.com/thekiran/nero/releases)** and select a
 published version. Download the package matching your OS and CPU, plus its
-`.sha256` file. If no version is published yet, use the source instructions below.
+`.sha256` file. Use the standard installers above for normal installation.
 
 | Your system | Package |
 | :--- | :--- |
@@ -140,6 +140,12 @@ not a guarantee that every feature works in your environment.
 
 ### Windows — native x86-64
 
+**Recommended:** download the `.msi` from [v0.1.4](https://github.com/thekiran/nero/releases/tag/v0.1.4),
+open the setup wizard, and complete installation. Launch NERO from Start or run
+`nero` from any folder in a fresh terminal. Use Installed apps to uninstall.
+
+The following ZIP/script route is optional for advanced users.
+
 Download `nero-vX.Y.Z-windows-x86_64.zip` and its `.sha256` file from a published
 [release](https://github.com/thekiran/nero/releases). The ZIP contains a real
 MinGW-w64 Windows CLI, statically linked to its compiler runtime; no MSYS2 or
@@ -211,5 +217,7 @@ For CMake, static analysis, sanitizers and test presets, consult the
 
 Version tags such as `v0.1.0` trigger native tests, ASan/UBSan checks, builds and
 packaging for all five platforms. Each archive includes build metadata and a
-SHA-256 sidecar; `SHA256SUMS` covers the complete release. Releases remain drafts
-for review. See the [maintainer release procedure](releases.md#maintainer-release-procedure).
+SHA-256 sidecar; `SHA256SUMS` covers installers and archives. Tag builds and manual
+runs default to drafts; an explicit publication request publishes only after all
+native package checks pass. A reviewed change to `.github/release-intent.json`
+on protected main can also request publication. See the [maintainer release procedure](releases.md#maintainer-release-procedure).

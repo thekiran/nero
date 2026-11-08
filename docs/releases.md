@@ -1,6 +1,6 @@
 # Release and installation guide
 
-## Standard graphical installers (after v0.1.3)
+## Standard graphical installers (v0.1.4 and later)
 
 For normal installation, choose the native installer offered by the release:
 
@@ -27,8 +27,8 @@ The remaining sections describe that optional advanced installation path.
 
 ## Packages
 
-[NERO v0.1.3](https://github.com/thekiran/nero/releases/tag/v0.1.3) is publicly
-available with all five native packages and SHA-256 checksums. Older v0.1.0–v0.1.2
+[NERO v0.1.4](https://github.com/thekiran/nero/releases/tag/v0.1.4) is publicly
+available with five native installers, five portable archives and SHA-256 checksums. Older v0.1.0–v0.1.2
 drafts remain visible only to repository collaborators. Source installation is
 also available in the README.
 
@@ -67,7 +67,7 @@ with the selected release. Verify before extracting.
 macOS example (Apple Silicon):
 
 ```bash
-VERSION=v0.1.3
+VERSION=v0.1.4
 PACKAGE="nero-$VERSION-macos-arm64"
 shasum -a 256 -c "$PACKAGE.tar.gz.sha256"
 tar -xzf "$PACKAGE.tar.gz"
@@ -80,7 +80,7 @@ sudo nero
 Linux example (x86-64; use `linux-arm64` for ARM64):
 
 ```bash
-VERSION=v0.1.3
+VERSION=v0.1.4
 PACKAGE="nero-$VERSION-linux-x86_64"
 sha256sum -c "$PACKAGE.tar.gz.sha256"
 tar -xzf "$PACKAGE.tar.gz"
@@ -99,7 +99,7 @@ A source checkout uses `make` followed by `sudo make install`. Packaging tools
 can stage files with `make install DESTDIR=/path/to/staging PREFIX=/usr/local`.
 `INSTALL_DIR` remains available as an explicit override.
 
-`SHA256SUMS` verifies all five archives together;
+`SHA256SUMS` verifies all ten release payloads together;
 per-archive `.sha256` files are convenient when downloading just one platform.
 Checksums detect damaged downloads; they are not a separate code signature.
 
