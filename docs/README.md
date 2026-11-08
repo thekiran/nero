@@ -26,6 +26,7 @@ A synchronized GitHub Wiki is maintained at **[github.com/thekiran/nero/wiki](ht
 
 ## Project Policies and Governance
 
+* **[Wiki Publication](wiki-publication.md):** Set up Wiki credentials and verify actual publication (not only validation).
 * **[Contributing Guidelines](../CONTRIBUTING.md):** Contributor workflow, commit expectations, and validation rules.
 * **[Project Roadmap](../ROADMAP.md):** Target milestones, feature scope, and distribution prerequisites.
 * **[Security Disclosure Policy](../SECURITY.md):** Responsible reporting guidelines for experimental modules.
