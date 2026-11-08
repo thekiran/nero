@@ -6,6 +6,13 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+No additional unreleased changes are recorded.
+
+## 0.1.4 — native installer release
+
+See [release status and downloads](https://github.com/thekiran/nero/releases)
+for publication and platform assets.
+
 - Add native macOS Installer `.pkg` and Windows Installer `.msi` wizards,
   plus Ubuntu-compatible `.deb` packages to the release pipeline. Normal
   installation registers the global command without shell setup commands.

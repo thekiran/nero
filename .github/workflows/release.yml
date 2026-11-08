@@ -292,8 +292,7 @@ jobs:
           done
           test -s "nero-$VERSION-windows-x86_64.msi"
           sha256sum --check "nero-$VERSION-windows-x86_64.msi.sha256"
-          deb_version="${VERSION#v}"
-          deb_version="${deb_version/-/~}"
+          deb_version=$(python3 -c 'import os; print(os.environ["VERSION"][1:].replace("-", "~", 1))')
           for arch in amd64 arm64; do
             test -s "nero_${deb_version}_${arch}.deb"
             sha256sum --check "nero_${deb_version}_${arch}.deb.sha256"
@@ -339,7 +338,7 @@ jobs:
   release-checks:
     name: Release checks
     if: always()
-    needs: [prepare, package, windows]
+    needs: [prepare, package, windows, draft]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every supported platform
@@ -347,7 +346,9 @@ jobs:
           PREPARE: ${{ needs.prepare.result }}
           POSIX: ${{ needs.package.result }}
           WINDOWS: ${{ needs.windows.result }}
+          DRAFT: ${{ needs.draft.result }}
         run: |
           test "$PREPARE" = success
           test "$POSIX" = success
           test "$WINDOWS" = success
+          test "$DRAFT" = success
