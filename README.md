@@ -1,6 +1,6 @@
 <div align="center">
 
-# NERO
+<img src="docs/media/nero-banner.webp" alt="NERO" width="100%">
 
 **Native C Terminal & Network Research**
 
