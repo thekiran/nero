@@ -170,6 +170,21 @@ if(BUILD_TESTING AND NOT MSVC)
         target_link_libraries(scanner-runtime PRIVATE Threads::Threads)
         add_test(NAME scanner-runtime COMMAND scanner-runtime)
         set_tests_properties(scanner-runtime PROPERTIES TIMEOUT 300)
+
+        # Deterministic PTY smoke test for live early port selection. Mock
+        # sockets only (no real network I/O); a frozen mock clock plus the
+        # scanner's test-only NERO_SCAN_TEST_HOOKS signalling make it reliable,
+        # never time-based. macOS/Linux only; Windows native console behaviour
+        # is covered by the tests/windows fixtures above, not here.
+        add_executable(live-select-pty tests/linux/live_select_pty.c src/cli/operation_ui.c src/core/log.c)
+        nero_target(live-select-pty)
+        target_compile_definitions(live-select-pty PRIVATE UNICODE_SUPPORT)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_compile_definitions(live-select-pty PRIVATE _POSIX_C_SOURCE=200809L)
+        endif()
+        target_link_libraries(live-select-pty PRIVATE Threads::Threads)
+        add_test(NAME live-select-pty COMMAND live-select-pty)
+        set_tests_properties(live-select-pty PROPERTIES TIMEOUT 120)
     endif()
 endif()
 
