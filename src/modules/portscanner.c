@@ -124,6 +124,13 @@ static atomic_int scan_work_done;
 /* Local resource exhaustion (descriptors, buffers, ephemeral ports). Deep
  * rounds halve their concurrency when a window increases this counter. */
 static atomic_int resource_failures;
+/* Scan-worker creation failures (scan phases and banner capture). Tolerated
+ * without losing coverage, but surfaced for diagnostics. */
+static atomic_int worker_failures;
+/* Per-scan correlation id (session id + scan sequence), carried in every scan
+ * log record as `op=` so one scan's events can be isolated with `log -scan`. */
+static char scan_operation_id[40];
+static unsigned scan_sequence;
 /* Report context, set only by a full portscanner() run. NULL completion keeps
  * direct report_scan_summary() callers (tests) byte-compatible. */
 static const char *scan_profile_label = "";
@@ -265,12 +272,24 @@ static void scan_error_text(int error, char *text, size_t size) {
     snprintf(text, size, "%s", strerror(error));
 }
 
+/* Map the internal completion string to a structured phase event name. */
+static const char *scan_completion_event(const char *completion) {
+    if (!completion) return "SCAN_COMPLETED";
+    if (strcmp(completion, "cancelled") == 0) return "SCAN_CANCELLED";
+    if (strcmp(completion, "incomplete") == 0) return "SCAN_PARTIAL";
+    return "SCAN_COMPLETED";
+}
 static void report_scan_summary(void) {
     scan_summary s = summarize_scan(); /* caller has joined every writer */
+    int workers_failed = atomic_load_explicit(&worker_failures, memory_order_relaxed);
+    int resources_failed = atomic_load_explicit(&resource_failures, memory_order_relaxed);
     nero_log_write(s.unknown ? NERO_LOG_ERROR : (s.filtered || s.unscanned ? NERO_LOG_WARN : NERO_LOG_INFO),
-        "scanner", "target=%s host=%s open=%d closed=%d filtered=%d error/unknown=%d unscanned=%d retried=%d",
-        target_ip_global, atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
-        s.open, s.closed, s.filtered, s.unknown, s.unscanned, s.retried);
+        "scanner", "op=%s target=%s host=%s open=%d closed=%d filtered=%d error/unknown=%d unscanned=%d "
+        "retried=%d retry_probes=%d worker_failures=%d resource_failures=%d",
+        scan_operation_id, target_ip_global,
+        atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
+        s.open, s.closed, s.filtered, s.unknown, s.unscanned, s.retried, s.retry_probes,
+        workers_failed, resources_failed);
     printf("Host: %s | TCP: open=%d closed=%d filtered=%d error/unknown=%d "
            "unscanned=%d total=%d | retried=%d retry_probes=%d\n",
            atomic_load_explicit(&host_responded, memory_order_relaxed) ? "online" : "unknown",
@@ -281,9 +300,11 @@ static void report_scan_summary(void) {
                target_ip_global, scan_profile_label,
                (long long)(scan_duration_ms / 1000), (long long)(scan_duration_ms % 1000),
                scan_completion);
-        nero_log_write(NERO_LOG_INFO, "scanner",
-            "target=%s profile=%s duration_ms=%lld status=%s",
-            target_ip_global, scan_profile_label, (long long)scan_duration_ms, scan_completion);
+        int incomplete = strcmp(scan_completion, "complete") != 0;
+        nero_log_write(incomplete ? NERO_LOG_WARN : NERO_LOG_INFO, "scanner",
+            "event=%s op=%s target=%s profile=%s duration_ms=%lld status=%s",
+            scan_completion_event(scan_completion), scan_operation_id, target_ip_global,
+            scan_profile_label, (long long)scan_duration_ms, scan_completion);
     }
     scan_error_group groups[SCAN_ERROR_GROUPS];
     int overflow = 0;
@@ -291,8 +312,9 @@ static void report_scan_summary(void) {
     for (int i = 0; i < count; ++i) {
         char text[256];
         scan_error_text(groups[i].error, text, sizeof(text));
-        nero_log_write(NERO_LOG_ERROR, "scanner", "target=%s operation=%s error=%d (%s) ports=%d",
-                       target_ip_global, scan_stage_name(groups[i].stage), groups[i].error, text, groups[i].count);
+        nero_log_write(NERO_LOG_ERROR, "scanner", "op=%s target=%s phase=%s operation=%s error=%d (%s) ports=%d",
+                       scan_operation_id, target_ip_global, "probe", scan_stage_name(groups[i].stage),
+                       groups[i].error, text, groups[i].count);
         printf("  %s: error=%d (%s), ports=%d\n", scan_stage_name(groups[i].stage),
                groups[i].error, text, groups[i].count);
     }
@@ -1050,7 +1072,12 @@ int portscanner(const char *target_ip) {
         return PORTSCANNER_FAILED;
     }
     target_ip_global = target_ip;
-    nero_log_write(NERO_LOG_INFO, "scanner", "TCP scan started: target=%s ports=1-65535", target_ip);
+    /* Build this scan's correlation id (session pid + per-scan sequence) so
+     * every scan log record can be isolated by its op=. */
+    snprintf(scan_operation_id, sizeof scan_operation_id, "%ld-%u",
+             (long)getpid(), ++scan_sequence);
+    nero_log_write(NERO_LOG_INFO, "scanner", "op=%s TCP scan started: target=%s ports=1-65535",
+                   scan_operation_id, target_ip);
     scan_input_fallback = 0;
     scan_owner = pthread_self();
     portscanner_interrupt_requested = 0;
