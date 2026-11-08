@@ -51,7 +51,7 @@ def main():
         'runtime_dependencies': dependencies,
     }
     with tarfile.open(archive, 'w:gz') as tar:
-        for source, destination in [('nero', 'bin/nero'), ('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.sh', 'install.sh')]:
+        for source, destination in [('nero', 'bin/nero'), ('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.sh', 'install.sh'), ('scripts/uninstall.sh', 'uninstall.sh')]:
             tar.add(source, arcname=f'{root}/{destination}', recursive=False)
         data = (json.dumps(metadata, indent=2) + '\n').encode()
         info = tarfile.TarInfo(f'{root}/BUILD-INFO.json')

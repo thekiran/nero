@@ -43,12 +43,12 @@ The core commands control session state, screen rendering, and input history. Th
 
 ### `history`
 * **Syntax:** `history`
-* **Description:** Displays chronological command history for the active session. The latest 256 nonblank entries are kept in memory (`CLI_HISTORY_CAPACITY`); older entries are discarded. History is not saved to disk or restored between sessions, including after a clean exit. Persistent application events are available separately through `log`.
+* **Description:** Displays the latest 256 entries (`CLI_HISTORY_CAPACITY`). New source builds after v0.1.3 restore recognized commands from private disk history in interactive sessions. Published v0.1.3 packages still have session-only history. See persistence details below.
 * **Platforms:** macOS, Linux, Windows.
 
 ### `history -clear`
 * **Syntax:** `history -clear`
-* **Description:** Clears all command history recorded in the active session.
+* **Description:** Clears session history and, when enabled, persistent history. A disk failure is reported explicitly; the CLI does not claim persistent clearing succeeded.
 * **Platforms:** macOS, Linux, Windows.
 
 ### `clear`
@@ -141,6 +141,35 @@ NERO provides a responsive line editor that handles key sequences across platfor
 * **Maximum command line length:** 255 bytes (`CLI_LINE_CAPACITY` is 256 including the terminating NUL). This is a byte limit, not a Unicode character count. Longer input produces a `Command too long` warning and is rejected safely without buffer overflow.
 * **Maximum token count:** 64 tokens (`CLI_MAX_TOKENS`). Commands exceeding 64 tokens are rejected cleanly.
 * **Unrecognized commands:** Commands not matching the catalog report `Unknown command: <token>` and exit code `0` to keep the shell interactive.
+
+### Persistent command history (source builds after v0.1.3)
+
+Interactive sessions load and save at most 256 recognized commands in
+`~/.nero_history` (Windows: `%USERPROFILE%\\.nero_history`). Entries are written
+after each accepted line; a clean exit is not required. Piped sessions and
+privileged POSIX sessions default to memory only. `NERO_HISTORY_FILE` selects
+an explicit file and also enables persistence for piped input;
+`NERO_HISTORY_FILE=:memory:` disables disk history.
+
+Persistence uses a conservative allowlist: `help`, `help -All`, `version`,
+`clear`, `history`, `-mode` with its documented on/off forms, `log`,
+`log -errors`, `log -path`, and exact numeric IPv4 `-Sc` commands. Unknown
+commands, extra arguments, raw-engine commands, credentials and arbitrary
+input are excluded from disk history. Session memory still contains typed
+commands; use `history -clear` to remove them. Target addresses in recognized
+scan commands are retained unless disk history is disabled.
+
+POSIX files must be owned by the current user with no group/other access and
+are created as 0600. Links, special files and busy locks are rejected. Windows
+rejects reparse points and special files, inherits the parent directory ACL,
+and uses an exclusive file handle during each update. Reads are bounded to
+64 KiB, malformed records are discarded, and each write reloads disk state
+under the lock so an older shell cannot restore previously cleared entries.
+Concurrent writes do not merge session-only or excluded entries. Storage
+failure leaves the session usable, displays a warning and records an event in
+`log -errors` without raw input. A lock conflict drops that persistence update
+rather than waiting. Writes are bounded in-place updates, not crash-atomic
+transactions; a crash during rewriting may lose recent history.
 
 ---
 

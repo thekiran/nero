@@ -11,7 +11,8 @@ Public signatures and runtime behavior are preserved.
 ## CLI responsibilities
 
 - `terminal.c`: session setup, signals, cleanup and orchestration.
-- `input.c`: byte input, escape sequences, line editing and history writes.
+- `input.c`: byte input, escape sequences, line editing and session history.
+- `history.c`: recognized-command persistence, private file validation, bounded import and serialized updates.
 - `render.c`: terminal capabilities, prompts, redraws and help presentation.
 - `commands.c`: tokenization, validation and existing command dispatch.
 - `ascii.c`: logo and existing animation frames.

@@ -148,6 +148,7 @@ int terminal_code(void)
     disableBuffering(&old);
     if (terminal_error)
         goto input_end;
+    cli_history_load();
     ascii_function();
     fflush(stdout);
 

@@ -15,6 +15,8 @@ Pages for the **[GitHub Wiki](https://github.com/thekiran/nero/wiki)** are gener
 | **[Platform Support & Compatibility](platform-support.md)** | Operating system compatibility matrix, verified capabilities, test evidence, and platform boundaries |
 | **[Development & Build Guide](building.md)** | Make and CMake build commands, platform presets, sanitizers, toolchain setup, and code formatting |
 | **[Testing & Quality Assurance](testing.md)** | Testing philosophy, offline-safe regressions, PTY tests, Win32 fixtures, sanitizers, and mock architecture |
+| **[Developer Contracts](developer-contracts.md)** | CLI ownership, parser capacities, persistent history and validation boundaries |
+| **[Distribution Paths](distribution.md)** | Homebrew, native Debian packages, installer lifecycle and signing prerequisites |
 | **[Troubleshooting & Diagnostics](troubleshooting.md)** | Verified solutions for Windows shell/PATH issues, Linux missing libraries, macOS quarantine, and raw mode recovery |
 | **[Architecture & Design Contracts](architecture.md)** | Component boundaries, CLI responsibilities, header contracts, and build modularity |
 | **[Code Map](code-map.md)** | Source file ownership and guide to finding specific implementations |

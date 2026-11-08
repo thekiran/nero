@@ -199,6 +199,7 @@ void cli_history_add(const char *command)
     if (length >= CLI_LINE_CAPACITY)
         return;
     memcpy(history[history_count++], command, length + 1);
+    cli_history_persist(command);
 }
 
 /* 1=line, 2=overlong line rejected, 0=EOF, -1=read failure. */

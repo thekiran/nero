@@ -19,6 +19,7 @@ CLI_SUPPORT_SOURCES := \
     src/core/log.c \
     src/cli/parser/parser.c \
     src/cli/input.c \
+    src/cli/history.c \
     src/cli/render.c \
     src/cli/operation_ui.c \
     src/cli/commands.c \
@@ -59,7 +60,7 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 INSTALL_DIR ?= $(PREFIX)/bin
 
-.PHONY: all clean install run help test test-sanitize test-tsan analyze
+.PHONY: all clean install uninstall run help test test-sanitize test-tsan analyze
 .DEFAULT_GOAL := all
 
 all: $(TARGET)
@@ -82,6 +83,9 @@ install: $(TARGET)
 	@echo "[INSTALL] Installing $(TARGET) to $(INSTALL_DIR)"
 	install -d "$(DESTDIR)$(INSTALL_DIR)"
 	install -m 755 "$(TARGET)" "$(DESTDIR)$(INSTALL_DIR)/$(TARGET)"
+
+uninstall:
+	rm -f "$(DESTDIR)$(INSTALL_DIR)/$(TARGET)"
 
 clean:
 	@echo "[CLEAN] Removing build artifacts and $(TARGET)"
@@ -132,6 +136,9 @@ $(TEST_DIR)/scanner-runtime: tests/linux/scanner_runtime.c src/modules/portscann
 $(TEST_DIR)/logging-fixture: tests/logging_fixture.c src/core/log.c include/nero/log.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/logging_fixture.c src/core/log.c -o $@ -pthread
 
+$(TEST_DIR)/parser-boundaries: tests/parser_boundaries.c src/cli/parser/parser.c include/nero/cli/parser.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/parser_boundaries.c src/cli/parser/parser.c -o $@
+
 # Deterministic PTY smoke test for live early port selection (macOS/Linux). Mock
 # sockets only, no real traffic; defines NERO_SCAN_TEST_HOOKS itself for the
 # scanner's test-only, timing-free synchronization signals.
@@ -141,7 +148,7 @@ $(TEST_DIR)/live-select-pty: tests/linux/live_select_pty.c src/modules/portscann
 TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
              $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults \
              $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability $(TEST_DIR)/logging-fixture \
-             $(TEST_DIR)/scanner-runtime $(TEST_DIR)/live-select-pty
+             $(TEST_DIR)/scanner-runtime $(TEST_DIR)/live-select-pty $(TEST_DIR)/parser-boundaries
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
@@ -150,6 +157,9 @@ TEST_BINS += $(TEST_DIR)/interfaces-mock
 endif
 
 test: $(TEST_BINS)
+	python3 tests/test_installation.py
+	$(TEST_DIR)/parser-boundaries
+	python3 tests/test_history.py $(TEST_DIR)/nero-safe
 	python3 tests/test_logging.py $(TEST_DIR)/nero-safe $(TEST_DIR)/logging-fixture
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/portscanner-reliability
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/scanner-runtime

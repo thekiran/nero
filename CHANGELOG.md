@@ -6,7 +6,18 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
-No additional unreleased changes are recorded.
+- Persist recognized command history with bounded private storage, opt-out,
+  explicit failures and cross-session clear behavior. Unknown commands and
+  arbitrary arguments are excluded from disk history.
+- Accept the documented 64 command tokens; add parser capacity/syntax tests.
+- Verify history restarts, malformed files, permissions, links, locking and
+  concurrent clearing on native CLI targets; exercise ASan/UBSan on POSIX.
+- Add staged installer lifecycle tests, POSIX atomic replacement, and POSIX/
+  Windows uninstallers that retain user data.
+- Add a macOS Homebrew formula pinned to published v0.1.3 archives and native
+  Ubuntu amd64/arm64 Debian package creation with inferred ELF dependencies.
+  Distribution CI verifies install/reinstall or upgrade/removal; it does not
+  publish an APT repository or claim code signing.
 
 ## 0.1.3 — published 2026-11-08
 
