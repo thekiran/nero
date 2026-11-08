@@ -413,7 +413,13 @@ static void *scan_animation_worker(void *arg) {
         shown_permille = permille;
 
         int scroll_delta = 0;
-        switch (stopping ? NERO_UI_KEY_NONE : nero_operation_read_key(0)) {
+        /* Once Enter (select) or Esc (cancel) has ended discovery, stop reading
+         * keys: the next keystroke belongs to the port menu, and consuming it
+         * here would swallow a quick second Enter and leave the menu waiting. */
+        int handed_off = stopping ||
+            atomic_load_explicit(&scan_select_requested, memory_order_relaxed) ||
+            atomic_load_explicit(&scan_cancel_requested, memory_order_relaxed);
+        switch (handed_off ? NERO_UI_KEY_NONE : nero_operation_read_key(0)) {
         case NERO_UI_KEY_CANCEL:
             atomic_store_explicit(&scan_cancel_requested, 1, memory_order_relaxed);
             break;
