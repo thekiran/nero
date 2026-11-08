@@ -1,12 +1,20 @@
 # Changelog
 
-All listed versions are drafts until published on the
-[Releases page](https://github.com/thekiran/nero/releases). Dates below identify
-preparation, not stable or security-certified releases.
+Release status is stated per version. The older v0.1.0–v0.1.2 entries remain
+preparation records for drafts; v0.1.3 is publicly published. No release is
+advertised as stable or security-certified.
 
 ## Unreleased
 
-Implemented on `main` through merged [PR #8](https://github.com/thekiran/nero/pull/8); **not yet included in a publicly published release**. The following changes are planned for the v0.1.3 release:
+No additional unreleased changes are recorded.
+
+## 0.1.3 — published 2026-11-08
+
+[Download v0.1.3](https://github.com/thekiran/nero/releases/tag/v0.1.3).
+Built from `f9904830d2caf3d57df16f36e876ebe56d2c0feb`; all five native package jobs
+and aggregate SHA-256 checks passed in [release run #58](https://github.com/thekiran/nero/actions/runs/42478613983).
+
+Includes the stability fixes merged through [PR #8](https://github.com/thekiran/nero/pull/8):
 
 - Preserve pointer-sized Windows SOCKET handles through socket and poll adapters.
 - Restore original input/output console modes and output code page.
@@ -15,6 +23,11 @@ Implemented on `main` through merged [PR #8](https://github.com/thekiran/nero/pu
 - Serialize manual/tag workflows for the same version and expose Release checks.
 - Correct stale Windows support documentation and clarify audit/test boundaries.
 - Make the scrollbar division invariant explicit for static analysis.
+
+- Add full-range TCP accounting, bounded retries and early port selection with partial coverage.
+- Add persistent application logs and scanner error diagnostics; command history remains session-only.
+- Stamp the CLI with its verified release tag.
+- Correct CLI limits, scanner documentation and Wiki publication error reporting.
 
 Repository quality work already merged: contribution forms, action dependency updates, a roadmap,
 community conduct expectations and a shorter README with dedicated installation docs.
