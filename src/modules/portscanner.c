@@ -30,6 +30,26 @@
 #include "nero/portscanner.h"
 #include "nero/log.h"
 
+/* Deterministic, test-only lifecycle signalling. Compiled in only when the PTY
+ * live-select fixture defines NERO_SCAN_TEST_HOOKS; a release build expands
+ * SCAN_TEST_SIGNAL() to nothing and keeps the production control flow, terminal
+ * output and timing byte-identical. The hook writes "<tag>\n" to the descriptor
+ * named by NERO_TEST_SYNC_FD so a controlling process can observe scan progress
+ * (scan start, first open port, Enter accepted/ignored) without timing guesses. */
+#ifdef NERO_SCAN_TEST_HOOKS
+static void scan_test_signal(const char *tag) {
+    const char *fd_env = getenv("NERO_TEST_SYNC_FD");
+    if (!fd_env) return;
+    int fd = atoi(fd_env);
+    char line[32];
+    int n = snprintf(line, sizeof line, "%s\n", tag);
+    if (n > 0) { ssize_t w = write(fd, line, (size_t)n); (void)w; }
+}
+#define SCAN_TEST_SIGNAL(tag) scan_test_signal(tag)
+#else
+#define SCAN_TEST_SIGNAL(tag) ((void)0)
+#endif
+
 /* Genel amaçlı tarayıcı: her IP için tam 1-65535 aralığı taranır. */
 #define SCAN_TOTAL_PORTS 65535
 #define DISCOVERY_VIEW_CAP 512
@@ -207,6 +227,7 @@ static void record_result(int port, port_state state, int error, scan_error_stag
     atomic_fetch_add_explicit(&probes_completed, 1, memory_order_relaxed);
     if (state == PORT_OPEN || state == PORT_CLOSED)
         atomic_store_explicit(&host_responded, 1, memory_order_relaxed);
+    if (state == PORT_OPEN) SCAN_TEST_SIGNAL("OPEN");
 }
 
 /* Completed probes over queued probes, in permille. Never 1000 until every
@@ -381,8 +402,12 @@ static void *scan_animation_worker(void *arg) {
         case NERO_UI_KEY_ENTER:
             /* Stop the scan early and let the user pick from the ports already
              * found, but only once at least one open port exists. */
-            if (total_open > 0)
+            if (total_open > 0) {
                 atomic_store_explicit(&scan_select_requested, 1, memory_order_relaxed);
+                SCAN_TEST_SIGNAL("ENTER-STOP");
+            } else {
+                SCAN_TEST_SIGNAL("ENTER-IGNORED");
+            }
             break;
         default: break;
         }
@@ -1138,6 +1163,7 @@ int portscanner(const char *target_ip) {
     }
     scan_input_fallback = discovery_raw && !animation_started;
     if (!animation_started) nero_operation_loader("Scanning", target_ip, 6);
+    SCAN_TEST_SIGNAL("SCAN-START");
     run_scan_phase(NULL, SCAN_TOTAL_PORTS, prof->fast_threads,
                    prof->fast_batch, prof->fast_timeout_ms);
     int candidate_count = collect_retry_candidates(work_ports);
