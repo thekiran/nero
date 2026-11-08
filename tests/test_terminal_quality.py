@@ -25,7 +25,7 @@ def run(data, **extra):
 class TerminalQuality(unittest.TestCase):
     def test_catalog_completion_and_help(self):
         output = self.output(b"vers\t\nhistory -c\t\nhelp\nexit\n")
-        self.assertIn(b"version 1.0", output)
+        self.assertIn(b"version development", output)
         self.assertIn(b"History cleared.", output)
         self.assertNotIn(b"Unknown command", output)
         for usage in (b"help -All", b"history -clear", b"exit -All",
@@ -42,7 +42,7 @@ class TerminalQuality(unittest.TestCase):
         output = self.output(b"\n \t \nhelper\npreexit\nversionSuffix\nhelp\nhelp -All\nversion\nexit\n")
         self.assertEqual(output.count(b"Unknown command"), 3)
         self.assertEqual(output.count(b"Available Commands:"), 2)
-        self.assertEqual(output.count(b"version 1.0"), 1)
+        self.assertEqual(output.count(b"version development"), 1)
         self.assertEqual(output.count(b"Exiting..."), 1)
 
     def test_invalid_parameters_and_dispatch(self):
@@ -59,7 +59,7 @@ class TerminalQuality(unittest.TestCase):
         output = self.output(b"192.0.2.1 -Syn " + b" " * 4096 + b"\nversion\nexit\n")
         self.assertIn(b"Command too long", output)
         self.assertNotIn(b"-Syn: safe test mode", output)
-        self.assertIn(b"version 1.0", output)
+        self.assertIn(b"version development", output)
 
     def test_cursor_insert_delete_backspace(self):
         for edit in (b"verion\x1b[D\x1b[D\x1b[Ds",
@@ -69,12 +69,12 @@ class TerminalQuality(unittest.TestCase):
                      b"versxion\x1b[D\x1b[D\x1b[D\x1b[D\x04"):
             with self.subTest(edit=edit):
                 output = self.output(edit + b"\nexit\n")
-                self.assertIn(b"version 1.0", output)
+                self.assertIn(b"version development", output)
                 self.assertNotIn(b"Unknown command", output)
 
     def test_history_draft_and_clear(self):
         output = self.output(b"help\nversion\x1b[A\x1b[B\nhistory -clear\nafter-clear\nhistory\nexit\n")
-        self.assertIn(b"version 1.0", output)
+        self.assertIn(b"version development", output)
         self.assertIn(b"History cleared.", output)
         # Only entries typed after the clear are listed.
         self.assertIn(b"\nafter-clear\nhistory", output)
@@ -84,16 +84,16 @@ class TerminalQuality(unittest.TestCase):
         output = self.output(b"first-entry\n" + b"version\n" * 256 + b"history\nexit\n")
         # The first entry appears once as input, never again in history.
         self.assertEqual(output.count(b"first-entry"), 1)
-        self.assertEqual(output.count(b"version 1.0"), 256)
+        self.assertEqual(output.count(b"version development"), 256)
 
     def test_escape_and_controls(self):
         output = self.output(b"\x1b[99~\x1bOP\x00version\nexit\n")
-        self.assertIn(b"version 1.0", output)
+        self.assertIn(b"version development", output)
         self.assertNotIn(b"Unknown command", output)
         for data in (b"", b"\x1b", b"\x1b[", b"\x1b[123", b"\x04", b"unfinished"):
             self.output(data)
         output = self.output(b"\x1b[" + b"1" * 40 + b"version\nexit\n")
-        self.assertNotIn(b"version 1.0", output)
+        self.assertNotIn(b"version development", output)
         self.assertIn(b"Command too long", output)
 
     def test_offline_legacy_commands(self):
@@ -231,7 +231,7 @@ class TerminalQuality(unittest.TestCase):
             first_line = redraw.split(b"\r")[0].split(b"\n")[0]
             plain = re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", first_line)
             # The viewport uses at most 19 cells in the 20-column test PTY.
-            if b"version 1.0" not in plain:
+            if b"version development" not in plain:
                 self.assertLessEqual(len(plain.decode("utf-8", errors="replace")), 19, plain)
 
     def test_terminal_hangup_does_not_spin(self):
@@ -289,7 +289,7 @@ class TerminalQuality(unittest.TestCase):
             os.write(master, b"version\nexit\n")
             remaining, error = proc.communicate(timeout=5)
             self.assertEqual(proc.returncode, 0, error)
-            self.assertIn(b"version 1.0", remaining)
+            self.assertIn(b"version development", remaining)
         finally:
             if proc.poll() is None:
                 proc.kill()
