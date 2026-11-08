@@ -92,15 +92,16 @@ def main():
                        "if ($LASTEXITCODE -ne 0) { throw ('Installed CLI failed: ' + $LASTEXITCODE) }; "
                        "& $env:NERO_INSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
                        "if (-not $?) { throw 'Reinstall failed' }; "
-                       "$matches = @($env:Path -split ';' | Where-Object { $_.TrimEnd('\\') -ieq $env:NERO_INSTALL_DIR.TrimEnd('\\') }); "
-                       "if ($matches.Count -ne 1) { throw 'Duplicate installed PATH entry' }; "
+                       "$installedDir = [IO.Path]::GetDirectoryName($expected); "
+                       "$matches = @($env:Path -split ';' | Where-Object { $_.TrimEnd('\\') -ieq $installedDir.TrimEnd('\\') }); "
+                       "if ($matches.Count -ne 1) { throw 'Expected one normalized installed PATH entry' }; "
                        "$sentinel = Join-Path $env:NERO_INSTALL_DIR 'keep-me.txt'; "
                        "Set-Content -LiteralPath $sentinel -Value 'preserve'; "
                        "& $env:NERO_UNINSTALL_SCRIPT -InstallDir $env:NERO_INSTALL_DIR -PathScope Process; "
                        "if (-not $?) { throw 'Uninstall failed' }; "
                        "if (Test-Path -LiteralPath $expected) { throw 'Executable remains after removal' }; "
                        "if (-not (Test-Path -LiteralPath $sentinel)) { throw 'Unrelated file removed' }; "
-                       "if (@($env:Path -split ';' | Where-Object { $_.TrimEnd('\\') -ieq $env:NERO_INSTALL_DIR.TrimEnd('\\') }).Count) { throw 'Installed PATH entry remains' }; "
+                       "if (@($env:Path -split ';' | Where-Object { $_.TrimEnd('\\') -ieq $installedDir.TrimEnd('\\') }).Count) { throw 'Installed PATH entry remains' }; "
                        "Write-Output 'NERO_COMMAND_INSTALL_OK'")
             check = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', command],
                                    capture_output=True, timeout=30, env=install_env, cwd=temp)
