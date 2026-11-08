@@ -29,8 +29,8 @@ sudo apt install -y libcurl4t64 libcjson1 libldns3 libncurses6
 For other distributions or older systems, use a source build. Every archive
 contains `bin/nero`, `LICENSE.txt`, `README.md`, `INSTALL.md` and `BUILD-INFO.json`.
 The build manifest records the version, source commit, binary hash and actual
-linked libraries. The CLI's built-in version text is unchanged; the release
-version is recorded in the manifest and archive name.
+linked libraries. The CLI reports the same version tag as the release archive and `BUILD-INFO.json`.
+Unversioned source builds report `version development`.
 
 ## Download, verify and install
 

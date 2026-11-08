@@ -64,7 +64,7 @@ def main():
             result = subprocess.run([str(Path(temp) / root / 'bin/nero.exe')],
                                     input=b'version\nexit\n', capture_output=True,
                                     timeout=15, env=env, cwd=temp)
-            if result.returncode != 0 or b'version 1.0' not in result.stdout:
+            if result.returncode != 0 or f'version {args.version}'.encode() not in result.stdout:
                 raise RuntimeError(f'extracted standalone CLI failed: {result.returncode}: {result.stderr!r}')
             # Test command installation from an unrelated working directory.
             import shutil
@@ -92,7 +92,7 @@ def main():
             check = subprocess.run([powershell, '-NoProfile', '-NonInteractive', '-Command', command],
                                    capture_output=True, timeout=30, env=install_env, cwd=temp)
             if (check.returncode != 0 or b'NERO_COMMAND_INSTALL_OK' not in check.stdout
-                    or not stdout_path.exists() or b'version 1.0' not in stdout_path.read_bytes()):
+                    or not stdout_path.exists() or f'version {args.version}'.encode() not in stdout_path.read_bytes()):
                 raise RuntimeError(f'installed nero command failed ({check.returncode}): stdout={check.stdout!r}, stderr={check.stderr!r}, cli_stdout={stdout_path.read_bytes() if stdout_path.exists() else None!r}, cli_stderr={stderr_path.read_bytes() if stderr_path.exists() else None!r}')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_name(archive.name + '.sha256').write_text(f'{digest}  {archive.name}\n')

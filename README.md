@@ -114,7 +114,7 @@ Available Commands:
   -mode [on|off]       : Configure network diagnostics
 
 ► version
-version 1.0
+version development
 
 ► exit
 Exiting...

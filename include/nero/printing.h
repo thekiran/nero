@@ -36,7 +36,10 @@
 //terminal.h +
 #define EXIT_MESSAGE "\n\x1B[35mExiting...\x1B[0m\n"
 #define UNKNOWN_COMMAND_WARNING "\a\n[\x1B[34mWARNING\x1B[0m] Unknown command! Available commands: 'help'"
-#define VERSION_MESSAGE "\nversion 1.0"
+#ifndef NERO_BUILD_VERSION
+#define NERO_BUILD_VERSION "development"
+#endif
+#define VERSION_MESSAGE "\nversion " NERO_BUILD_VERSION
 
 //interface.h +
 #define MEMORY_ALLOCATION_FAILED "[\x1B[34mERROR\x1B[0m] Memory allocation failed!\n"

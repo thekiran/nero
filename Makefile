@@ -6,6 +6,10 @@ COMMON_CFLAGS := -Wall -Wextra -Werror -pedantic -std=c11 \
                  -g -Iinclude -Ithird_party/cjson -DUNICODE_SUPPORT
 
 CFLAGS := $(COMMON_CFLAGS)
+# Stamp the tag only into a release build. Source builds remain "development".
+ifneq ($(strip $(NERO_RELEASE_VERSION)),)
+    CPPFLAGS += -DNERO_BUILD_VERSION='"$(NERO_RELEASE_VERSION)"'
+endif
 LDFLAGS ?=
 LDLIBS  += -pthread
 

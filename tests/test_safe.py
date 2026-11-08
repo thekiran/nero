@@ -30,7 +30,7 @@ class SafeTests(unittest.TestCase):
     def test_commands_and_notice(self):
         output = self.cli(b"help\nhelp -All\nversion\nhistory\nunknown\nexit\n")
         for expected in (b"LABORATORY USE ONLY", b"RESTRICTED TO LABORATORY USE", b"Available Commands",
-                         b"version 1.0", b"Unknown command", b"Exiting"):
+                         b"version development", b"Unknown command", b"Exiting"):
             self.assertIn(expected, output)
         self.assertIn(b"help\nhelp -All\nversion\nhistory", output)
 
@@ -72,13 +72,13 @@ class SafeTests(unittest.TestCase):
     def test_long_input_and_cursor_bounds(self):
         self.cli(b"x" * 4096 + b"\x1b[C" * 512 + b"\nexit\n")
         output = self.cli(b"versiox\x7fn\nexit\n")
-        self.assertIn(b"version 1.0", output)
+        self.assertIn(b"version development", output)
 
     def test_history_navigation(self):
         output = self.cli(b"version\nhelp\n\x1b[A\x1b[A\x1b[B\nexit\n")
         self.assertEqual(output.count(b"Available Commands"), 2)
         output = self.cli(b"version\n\x1b[A\nexit\n")
-        self.assertEqual(output.count(b"version 1.0"), 2)
+        self.assertEqual(output.count(b"version development"), 2)
 
     def test_history_capacity_and_clear(self):
         self.cli(b"version\n" * 270 + b"history\nexit\n")
