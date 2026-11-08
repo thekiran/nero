@@ -6,7 +6,7 @@ preparation, not stable or security-certified releases.
 
 ## Unreleased
 
-Proposed in [PR #8](https://github.com/thekiran/nero/pull/8) for v0.1.3:
+Implemented on `main` through merged [PR #8](https://github.com/thekiran/nero/pull/8); **not yet included in a publicly published release**. The following changes are planned for the v0.1.3 release:
 
 - Preserve pointer-sized Windows SOCKET handles through socket and poll adapters.
 - Restore original input/output console modes and output code page.
@@ -16,7 +16,7 @@ Proposed in [PR #8](https://github.com/thekiran/nero/pull/8) for v0.1.3:
 - Correct stale Windows support documentation and clarify audit/test boundaries.
 - Make the scrollbar division invariant explicit for static analysis.
 
-Repository quality work: contribution forms, action dependency updates, a roadmap,
+Repository quality work already merged: contribution forms, action dependency updates, a roadmap,
 community conduct expectations and a shorter README with dedicated installation docs.
 
 ## 0.1.2 — draft prepared 2026-11-07

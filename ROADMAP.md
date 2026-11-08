@@ -4,12 +4,16 @@ Reliability, reviewed releases and reproducible developer workflows take priorit
 over new features. A milestone name is a target, not a promise of stable support.
 Track work in the linked issues and keep each change in a focused pull request.
 
+The v0.1.3 stability code from [PR #8](https://github.com/thekiran/nero/pull/8) is merged; the release itself remains unpublished and [Issue #9](https://github.com/thekiran/nero/issues/9) tracks remaining acceptance work.
+
 | Target | Work | Acceptance | Tracking |
 | --- | --- | --- | --- |
 | v0.1.3 — Stability | Windows handle width and exact console cleanup; release serialization; support docs | New boundary/console/loopback regressions and all five package checks pass; review, merge, then inspect a draft | [#9](https://github.com/thekiran/nero/issues/9), [PR #8](https://github.com/thekiran/nero/pull/8) |
 | v0.2.0 — Quality | Parser boundaries, deterministic terminal tests, static analysis, isolated TCP and install/uninstall coverage | Failures block merging; test scope and limitations are explicit; dependency updates and contribution templates maintained | [#10](https://github.com/thekiran/nero/issues/10) |
 | v0.3.0 — Developer experience | Command/platform API boundaries; install/upgrade/uninstall contract; developer docs | Small documented interfaces and reproducible clean-environment setup | [#11](https://github.com/thekiran/nero/issues/11) |
 | v1.0.0 — Stable release | Support policy and release acceptance | Core CLI, packaging, installation and critical failures verified on every claimed platform; no unresolved critical defects | [#11](https://github.com/thekiran/nero/issues/11) |
+
+A reviewed [v0.1.3 release readiness checklist](docs/release-candidate-v0.1.3.md) tracks the pre-publication verification gates. It is not evidence of a published release.
 
 ## Distribution prerequisites
 
