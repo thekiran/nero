@@ -113,7 +113,7 @@ jobs:
           ctest --preset ${{ matrix.preset }}-sanitize --no-tests=error
       - name: Build native release executable using authoritative Makefile
         run: |
-          make CC=${{ matrix.cc }} -j4
+          make CC=${{ matrix.cc }} -j4 NERO_RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
           file nero
       - name: Verify system command installation without modifying the runner
         run: |
@@ -173,9 +173,11 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-python
       - name: Build real Windows CLI and offline test targets
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           gcc --version
-          cmake -S . -B .build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DBUILD_TESTING=ON
+          cmake -S . -B .build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DBUILD_TESTING=ON -DNERO_RELEASE_VERSION="$RELEASE_VERSION"
           cmake --build .build/windows-release --parallel 4
       - name: Test native CLI and interface adapter
         run: ctest --test-dir .build/windows-release --output-on-failure --no-tests=error
