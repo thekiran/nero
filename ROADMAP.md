@@ -11,6 +11,8 @@ Track work in the linked issues and keep each change in a focused pull request.
 | v0.3.0 — Developer experience | Command/platform API boundaries; install/upgrade/uninstall contract; developer docs | Small documented interfaces and reproducible clean-environment setup | [#11](https://github.com/thekiran/nero/issues/11) |
 | v1.0.0 — Stable release | Support policy and release acceptance | Core CLI, packaging, installation and critical failures verified on every claimed platform; no unresolved critical defects | [#11](https://github.com/thekiran/nero/issues/11) |
 
+A reviewed [v0.1.3 release readiness checklist](docs/release-candidate-v0.1.3.md) tracks the pre-publication verification gates. It is not evidence of a published release.
+
 ## Distribution prerequisites
 
 Developer ID/notarization and Authenticode require owner-controlled signing
