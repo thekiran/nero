@@ -89,7 +89,8 @@ jobs:
         run: |
           if [ -z "$WIKI_TOKEN" ]; then
             echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Missing Secret::WIKI_PUSH_TOKEN secret is not configured in this repository. Wiki publication was skipped. Configure WIKI_PUSH_TOKEN with repository write scope to enable automated publishing."
+            echo "::warning title=Missing Secret::WIKI_PUSH_TOKEN not configured; Wiki validation succeeded but publication is skipped."
+            echo "### Wiki publication: SKIPPED — configure WIKI_PUSH_TOKEN in Actions secrets." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "has_token=true" >> "$GITHUB_OUTPUT"
           fi
@@ -112,8 +113,10 @@ jobs:
           if ! git clone "$WIKI_URL" wiki_repo 2>clone_err.log; then
             echo "::warning title=Wiki Not Initialized::Failed to clone the Wiki Git repository. If the Wiki has never been opened in GitHub, navigate to https://github.com/${REPO}/wiki and click 'Create the first page' once to initialize it."
             cat clone_err.log || true
+            echo "### Wiki publication: SKIPPED — Wiki clone failed; initialize the Wiki or check token permissions." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           echo "Synchronizing documentation to Wiki Git repository..."
           python3 scripts/docs/wiki_sync.py --sync wiki_repo --push
+          echo "### Wiki publication: pushed synchronized documentation to the Wiki." >> "$GITHUB_STEP_SUMMARY"
