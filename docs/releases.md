@@ -193,7 +193,7 @@ reported by its own workflow; it is not a release-package gate.
    Alternatively, for the first release open **Actions → Release packages → Run
    workflow**, select `main`, and enter `v0.1.0`. If the tag does not exist, the
    workflow builds that main commit and creates the tag only after all five
-   platforms pass. No release is published automatically.
+   platforms pass. Manual runs default to a draft; enable the explicit `publish` input only when public publication is intended.
 
 3. Watch **Actions → Release packages**. Four native runners execute Make tests,
    Make ASan/UBSan tests, CMake tests and CMake sanitizer tests.
@@ -208,9 +208,7 @@ reported by its own workflow; it is not a release-package gate.
    the native Windows toolchain.
 
 5. The final job requires all five successful builds, checks all hashes, generates
-   `SHA256SUMS`, then creates a **draft** release. Nothing is automatically made
-   public. Review the five archives, sidecars, checksum manifest and notes, then
-   publish manually.
+   `SHA256SUMS`, then creates a **draft** release. Draft-only runs remain private. Explicit publication requests publish only after native installers, portable archives and aggregate checksums have passed. Review the source and publication intent through a PR before requesting this mode.
 
 Tags support `vMAJOR.MINOR.PATCH` and prerelease suffixes such as `v0.2.0-rc.1`.
 Prerelease tags are also marked as prereleases on GitHub. For a failed run, rerun
@@ -226,3 +224,18 @@ actions are pinned to commit hashes. No personal access token is required.
 
 CI exercises offline fixtures and mocks. It compiles the live network modules
 but does not validate their runtime behavior or generate live network traffic.
+
+## Explicit release intent
+
+A protected-main PR can request a release by changing `.github/release-intent.json`.
+Its `version` must be a valid new tag, `publish` controls draft/public status,
+and an optional `pull_request` identifies the same-repository merged release
+branch for cleanup. The current intent requests public v0.1.4 after all five
+native installer and archive checks plus aggregate SHA-256 verification pass.
+Pull request events always build test-only v0.0.0-ci artifacts and cannot
+publish. Tag builds and manual runs default to drafts unless publication is
+explicitly requested. Non-PR release runs are serialized, published assets
+are never overwritten, and an existing tag cannot be moved by a main intent.
+Cleanup only deletes an already-merged feature branch still at its reviewed
+PR head; new work and main are retained. Native-installer download links and
+signing status are added to release notes before publication.
