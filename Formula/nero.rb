@@ -14,7 +14,9 @@ class Nero < Formula
   end
 
   depends_on :macos
-  depends_on macos: :sequoia
+  on_macos do
+    depends_on macos: :sequoia
+  end
 
   def install
     bin.install "bin/nero"

@@ -43,6 +43,15 @@ class InstallationTests(unittest.TestCase):
             subprocess.run(["sh", str(package / "install.sh")], env=env, check=True, capture_output=True)
             self.assertFalse(command.is_symlink())
             self.assertEqual(sentinel.read_text(), "unrelated")
+            command.unlink()
+            directory = base / "unrelated-directory"
+            directory.mkdir()
+            command.symlink_to(directory, target_is_directory=True)
+            refused = subprocess.run(["sh", str(package / "install.sh")], env=env, capture_output=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertEqual(list(directory.iterdir()), [])
+            command.unlink()
+            subprocess.run(["sh", str(package / "install.sh")], env=env, check=True, capture_output=True)
             for _ in range(2):
                 subprocess.run(["sh", str(package / "uninstall.sh")], env=env, check=True, capture_output=True)
             self.assertFalse(command.exists())

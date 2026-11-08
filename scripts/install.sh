@@ -9,6 +9,10 @@ if [ ! -f "$script_dir/bin/nero" ]; then
     exit 1
 fi
 install -d "$destination"
+if [ -d "$destination/nero" ]; then
+    echo "Refusing to replace a directory at $destination/nero" >&2
+    exit 1
+fi
 temporary=$(mktemp "$destination/.nero-install.XXXXXX")
 trap 'rm -f "$temporary"' EXIT HUP INT TERM
 install -m 755 "$script_dir/bin/nero" "$temporary"
