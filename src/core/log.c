@@ -301,11 +301,19 @@ static int create_parent(void) {
  * one process's records together, so a mix of pid, wall clock and a monotonic
  * reading is sufficient and needs no PRNG seeding. */
 static void generate_session_id(void) {
+#ifdef _WIN32
+    uint64_t mix = (uint64_t)GetCurrentProcessId() * 0x9E3779B97F4A7C15ull;
+    mix ^= (uint64_t)time(NULL) << 20;
+    LARGE_INTEGER counter;
+    if (QueryPerformanceCounter(&counter))
+        mix ^= (uint64_t)counter.QuadPart * 0x100000001B3ull;
+#else
     uint64_t mix = (uint64_t)getpid() * 0x9E3779B97F4A7C15ull;
     mix ^= (uint64_t)time(NULL) << 20;
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
         mix ^= (uint64_t)ts.tv_nsec * 0x100000001B3ull + (uint64_t)ts.tv_sec;
+#endif
     mix ^= mix >> 33;
     snprintf(session_id, sizeof(session_id), "%016llx", (unsigned long long)mix);
 }
