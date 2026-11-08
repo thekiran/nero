@@ -34,11 +34,11 @@ The core commands control session state, screen rendering, and input history. Th
 
 ### `version`
 * **Syntax:** `version`
-* **Description:** Prints the current version string (`version 1.0`).
+* **Description:** Prints `version development` in source builds, or the package tag (such as `version v0.1.3`) in release builds.
 * **Platforms:** macOS, Linux, Windows.
 * **Output:**
   ```text
-  version 1.0
+  version development
   ```
 
 ### `history`
