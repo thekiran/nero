@@ -5,8 +5,8 @@ been built, tested, signed, or published. No release is created by this document
 
 ## Prerequisites
 
-- [ ] Merge [CLI version stamping](https://github.com/thekiran/nero/pull/28)
-      only after the required status checks succeed.
+- [x] [CLI version stamping](https://github.com/thekiran/nero/pull/28) merged
+      in commit `e135949`; verify package version output again for this candidate.
 - [ ] Review the open [stability tracker](https://github.com/thekiran/nero/issues/9)
       against its regression evidence, keeping unfinished work open.
 - [ ] Confirm the intended `main` commit and update `CHANGELOG.md` with

@@ -66,7 +66,8 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Verify Wiki / publish on main
+    name: Publish Wiki on main
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -89,8 +90,9 @@ jobs:
         run: |
           if [ -z "$WIKI_TOKEN" ]; then
             echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Missing Secret::WIKI_PUSH_TOKEN not configured; Wiki validation succeeded but publication is skipped."
-            echo "### Wiki publication: SKIPPED — configure WIKI_PUSH_TOKEN in Actions secrets." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Wiki publication blocked::Configure WIKI_PUSH_TOKEN with write access to the Wiki repository. Documentation generation succeeded, but the Wiki was not published."
+            echo "Wiki publication blocked: WIKI_PUSH_TOKEN is missing. Generated pages are available in the wiki-pages artifact." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           else
             echo "has_token=true" >> "$GITHUB_OUTPUT"
           fi
@@ -111,12 +113,11 @@ jobs:
 
           echo "Cloning Wiki repository..."
           if ! git clone "$WIKI_URL" wiki_repo 2>clone_err.log; then
-            echo "::warning title=Wiki Not Initialized::Failed to clone the Wiki Git repository. If the Wiki has never been opened in GitHub, navigate to https://github.com/${REPO}/wiki and click 'Create the first page' once to initialize it."
+            echo "::error title=Wiki clone failed::Check WIKI_PUSH_TOKEN access and initialize the Wiki at https://github.com/${REPO}/wiki if it has no pages. The Wiki was not published."
             cat clone_err.log || true
-            echo "### Wiki publication: SKIPPED — Wiki clone failed; initialize the Wiki or check token permissions." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            exit 1
           fi
 
           echo "Synchronizing documentation to Wiki Git repository..."
           python3 scripts/docs/wiki_sync.py --sync wiki_repo --push
-          echo "### Wiki publication: pushed synchronized documentation to the Wiki." >> "$GITHUB_STEP_SUMMARY"
+          echo "Wiki synchronization succeeded for source commit ${GITHUB_SHA}." >> "$GITHUB_STEP_SUMMARY"

@@ -8,7 +8,7 @@ The v0.1.3 stability code from [PR #8](https://github.com/thekiran/nero/pull/8) 
 
 | Target | Work | Acceptance | Tracking |
 | --- | --- | --- | --- |
-| v0.1.3 — Stability | Windows handle width and exact console cleanup; release serialization; support docs | New boundary/console/loopback regressions and all five package checks pass; review, merge, then inspect a draft | [#9](https://github.com/thekiran/nero/issues/9), [PR #8](https://github.com/thekiran/nero/pull/8) |
+| v0.1.3 — Stability | Windows handle width, console cleanup, release serialization and support docs merged in PR #8 | Remaining: run all five package checks on the intended release commit, inspect draft assets and notes, then publish | [#9](https://github.com/thekiran/nero/issues/9), [PR #8 (merged)](https://github.com/thekiran/nero/pull/8) |
 | v0.2.0 — Quality | Parser boundaries, deterministic terminal tests, static analysis, isolated TCP and install/uninstall coverage | Failures block merging; test scope and limitations are explicit; dependency updates and contribution templates maintained | [#10](https://github.com/thekiran/nero/issues/10) |
 | v0.3.0 — Developer experience | Command/platform API boundaries; install/upgrade/uninstall contract; developer docs | Small documented interfaces and reproducible clean-environment setup | [#11](https://github.com/thekiran/nero/issues/11) |
 | v1.0.0 — Stable release | Support policy and release acceptance | Core CLI, packaging, installation and critical failures verified on every claimed platform; no unresolved critical defects | [#11](https://github.com/thekiran/nero/issues/11) |

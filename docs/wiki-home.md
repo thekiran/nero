@@ -115,4 +115,16 @@ lasting documentation changes through a repository pull request. This home page
 links directly to canonical guides so they remain accessible while the Wiki is
 being populated.
 
+Automatic publication runs only for `main` pushes or manual runs on `main`,
+after documentation validation. An owner must initialize the Wiki by creating
+its first page, then configure the repository Actions secret `WIKI_PUSH_TOKEN`
+with a credential authorized to push to `thekiran/nero.wiki.git` (for a classic
+personal access token, use the `repo` scope). Do not commit the credential.
+Pull requests validate and archive generated pages without publishing.
+
+On `main`, a missing credential, clone failure or push failure fails the
+publication job. The `wiki-pages` artifact remains available from validation
+when publication is blocked. Check the publication job and its synchronization
+summary before claiming that the Wiki is current.
+
 NERO is distributed under the [MIT License](https://github.com/thekiran/nero/blob/main/LICENSE.txt).
