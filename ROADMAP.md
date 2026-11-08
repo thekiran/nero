@@ -4,6 +4,8 @@ Reliability, reviewed releases and reproducible developer workflows take priorit
 over new features. A milestone name is a target, not a promise of stable support.
 Track work in the linked issues and keep each change in a focused pull request.
 
+The v0.1.3 stability code from [PR #8](https://github.com/thekiran/nero/pull/8) is merged; the release itself remains unpublished and [Issue #9](https://github.com/thekiran/nero/issues/9) tracks remaining acceptance work.
+
 | Target | Work | Acceptance | Tracking |
 | --- | --- | --- | --- |
 | v0.1.3 — Stability | Windows handle width and exact console cleanup; release serialization; support docs | New boundary/console/loopback regressions and all five package checks pass; review, merge, then inspect a draft | [#9](https://github.com/thekiran/nero/issues/9), [PR #8](https://github.com/thekiran/nero/pull/8) |
