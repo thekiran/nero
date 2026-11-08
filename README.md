@@ -63,6 +63,23 @@ Windows ARM64 has no native package; use WSL2 on ARM64 hardware.
 
 Download the package matching your operating system from [GitHub Releases](https://github.com/thekiran/nero/releases) and verify its `.sha256` checksum before installing. If no release has been published yet, follow the [source-build instructions](docs/installation.md).
 
+**Recommended: use the native installer when offered by the release.** Open it
+and follow the operating system's installation screens; no build tools or
+terminal installation commands are required.
+
+| System | Installer | After installation |
+| --- | --- | --- |
+| macOS (Apple Silicon / Intel) | `.pkg` | `nero` and `sudo nero` work from any directory |
+| Windows 10/11 x86-64 | `.msi` | Launch NERO from Start, or run `nero` in a new terminal |
+| Ubuntu/Debian compatible (amd64 / ARM64) | `.deb` | Open with your software installer; `nero` is installed in `/usr/bin` |
+
+Existing Windows Terminal processes may need to be fully restarted to receive
+the updated PATH. Native installers are new after v0.1.3; portable archives
+remain available for advanced users. Signing status is stated in release notes.
+
+<details>
+<summary>Advanced: portable archives and manual installation</summary>
+
 ### macOS & Linux
 
 ```bash
@@ -86,6 +103,8 @@ nero
 ```
 
 For complete step-by-step instructions, checksum validation, dependencies, and building from source, see the **[Installation Guide](docs/installation.md)**.
+
+</details>
 
 ---
 

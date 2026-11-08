@@ -7,7 +7,7 @@
 [**GitHub Releases**](https://github.com/thekiran/nero/releases)
 
 <sub>Versioned native packages for macOS, Linux and Windows are prepared by GitHub Actions.
-The first release stays a draft until reviewed; drafts are not public downloads.</sub>
+Use a published release; drafts are visible only to collaborators.</sub>
 
 </div>
 
@@ -15,6 +15,37 @@ The first release stays a draft until reviewed; drafts are not public downloads.
 
 Choose your operating system below. Each command block has GitHub's built-in
 **Copy** button so you can paste the steps directly into your terminal.
+
+### Recommended: standard operating-system installers
+
+Starting with releases after v0.1.3, download the native installer for your
+system from [GitHub Releases](https://github.com/thekiran/nero/releases).
+
+| System | Download | Installation |
+| --- | --- | --- |
+| macOS 15+, Apple Silicon | `nero-vX.Y.Z-macos-arm64.pkg` | Open in Finder and complete Installer |
+| macOS 15+, Intel | `nero-vX.Y.Z-macos-x86_64.pkg` | Open in Finder and complete Installer |
+| Windows 10/11, x86-64 | `nero-vX.Y.Z-windows-x86_64.msi` | Open the setup wizard and complete installation |
+| Ubuntu-compatible, Intel/AMD | `nero_X.Y.Z_amd64.deb` | Open with the desktop's package/software installer |
+| Ubuntu-compatible, ARM64 | `nero_X.Y.Z_arm64.deb` | Open with the desktop's package/software installer |
+
+No compiler, shell profile edit or terminal installation command is needed.
+Accept the normal administrator prompt when required. macOS installs the CLI
+in `/usr/local/bin`; Linux packages install it in `/usr/bin`. Windows installs
+into Program Files, registers system PATH, adds a Start menu shortcut and
+appears in Installed apps for repair/removal. Restart existing Windows Terminal
+processes once so they inherit the saved PATH.
+
+After setup, open a terminal in **any folder** and run `nero`. macOS/Linux also
+support `sudo nero` for operations needing administrator privileges. Windows
+uses an Administrator terminal for elevation. Downloading or extracting a
+portable archive alone does not register a global command; the following
+manual instructions are for that optional distribution path.
+
+The installers currently have no Developer ID/notarization or Authenticode
+signature. Operating-system publisher/security prompts can appear; no
+security setting or execution policy is changed by these packages. Native
+Linux packages need a compatible distribution and package-manager frontend.
 
 ### Prebuilt release packages
 
@@ -117,7 +148,7 @@ WSL installation is needed to run the downloaded executable.
 In PowerShell, replace the example version with your downloaded version:
 
 ```powershell
-$package = "nero-v0.1.2-windows-x86_64"
+$package = "nero-vX.Y.Z-windows-x86_64"
 $expected = ((Get-Content "$package.zip.sha256").Trim() -split '\s+')[0]
 $actual = (Get-FileHash "$package.zip" -Algorithm SHA256).Hash
 if ($actual -ne $expected) { throw "Checksum mismatch" }

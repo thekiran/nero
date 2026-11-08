@@ -81,11 +81,10 @@ run: $(TARGET)
 
 install: $(TARGET)
 	@echo "[INSTALL] Installing $(TARGET) to $(INSTALL_DIR)"
-	install -d "$(DESTDIR)$(INSTALL_DIR)"
-	install -m 755 "$(TARGET)" "$(DESTDIR)$(INSTALL_DIR)/$(TARGET)"
+	NERO_INSTALL_BINARY="$(abspath $(TARGET))" INSTALL_DIR="$(INSTALL_DIR)" DESTDIR="$(DESTDIR)" sh scripts/install.sh
 
 uninstall:
-	rm -f "$(DESTDIR)$(INSTALL_DIR)/$(TARGET)"
+	rm -f "$(DESTDIR)$(INSTALL_DIR)/nero"
 
 clean:
 	@echo "[CLEAN] Removing build artifacts and $(TARGET)"

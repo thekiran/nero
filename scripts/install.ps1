@@ -30,6 +30,8 @@ function Add-PathEntry([string]$current, [string]$entry) {
 if ($PathScope -ne 'Process') {
     $current = [Environment]::GetEnvironmentVariable('Path', $PathScope)
     [Environment]::SetEnvironmentVariable('Path', (Add-PathEntry $current $destination), $PathScope)
+    . (Join-Path $PSScriptRoot 'windows-env.ps1')
+    Send-NeroEnvironmentChange
 }
 $env:Path = Add-PathEntry $env:Path $destination
 Write-Host "Installed $target"

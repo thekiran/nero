@@ -82,11 +82,15 @@ if(WIN32)
                 "${PROJECT_SOURCE_DIR}/tests/windows/test_cli.py"
                 $<TARGET_FILE:nero> $<TARGET_FILE:win-interfaces>)
             set_tests_properties(windows-native-cli PROPERTIES TIMEOUT 120)
+            add_test(NAME windows-global-install COMMAND powershell.exe -NoProfile -NonInteractive
+                -File "${PROJECT_SOURCE_DIR}/tests/windows/global_install.ps1"
+                -BinaryPath $<TARGET_FILE:nero>)
+            set_tests_properties(windows-global-install PROPERTIES TIMEOUT 90)
             add_test(NAME history-persistence COMMAND ${Python3_EXECUTABLE}
                 "${PROJECT_SOURCE_DIR}/tests/test_history.py" $<TARGET_FILE:nero>)
             set_tests_properties(history-persistence PROPERTIES TIMEOUT 120)
             if(NERO_RELEASE_VERSION)
-                set_tests_properties(windows-native-cli PROPERTIES
+                set_tests_properties(windows-native-cli windows-global-install PROPERTIES
                     ENVIRONMENT "NERO_EXPECTED_VERSION=${NERO_RELEASE_VERSION}")
             endif()
             foreach(fixture compat_boundaries console_restore socket_loopback)

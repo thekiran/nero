@@ -2,7 +2,9 @@ name: Release packages
 
 on:
   push:
+    branches: ['main']
     tags: ['v*']
+    paths: ['.github/release-intent.json']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -10,12 +12,16 @@ on:
         description: 'Version tag to build; a new tag is created after checks pass (v0.1.0)'
         required: true
         type: string
+      publish:
+        description: 'Publish after native installer and checksum verification'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event_name == 'pull_request' && github.ref || github.event.inputs.version || github.ref_name }}
+  group: release-${{ github.event_name == 'pull_request' && github.ref || 'publication' }}
   cancel-in-progress: false
 
 defaults:
@@ -28,6 +34,7 @@ jobs:
     outputs:
       version: ${{ steps.ref.outputs.version }}
       commit: ${{ steps.ref.outputs.commit }}
+      publish: ${{ steps.ref.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,14 +45,26 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
+          publish=false
           if [[ "$EVENT" == pull_request ]]; then
             version=v0.0.0-ci
             commit=$(git rev-parse HEAD)
+          elif [[ "$EVENT" == push && "$GITHUB_REF" == refs/heads/main ]]; then
+            version=$(python3 -c 'import json; print(json.load(open(".github/release-intent.json"))["version"])')
+            publish=$(python3 -c 'import json; print("true" if json.load(open(".github/release-intent.json")).get("publish") is True else "false")')
+            [[ "$version" =~ ^v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo 'Invalid release intent'; exit 1; }
+            commit=$(git rev-parse HEAD)
+            if git show-ref --verify --quiet "refs/tags/$version"; then
+              tagged=$(git rev-parse --verify "refs/tags/$version^{commit}")
+              test "$tagged" = "$commit" || { echo 'Release intent cannot move an existing tag'; exit 1; }
+            fi
           else
             version=${REQUESTED_VERSION:-$GITHUB_REF_NAME}
-            [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo 'Invalid version tag'; exit 1; }
+            publish=${REQUESTED_PUBLISH:-false}
+            [[ "$version" =~ ^v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo 'Invalid version tag'; exit 1; }
             if git show-ref --verify --quiet "refs/tags/$version"; then
               commit=$(git rev-parse --verify "refs/tags/$version^{commit}")
             elif [[ "$EVENT" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]; then
@@ -55,8 +74,11 @@ jobs:
               exit 1
             fi
           fi
+          [[ "$publish" == true || "$publish" == false ]] || { echo 'Invalid publication mode'; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          python3 scripts/release/release_notes.py --version "$version" --commit "$commit" --output .build/release-notes-preview.md
 
   package:
     needs: prepare
@@ -128,6 +150,44 @@ jobs:
           COMMIT: ${{ needs.prepare.outputs.commit }}
           PLATFORM: ${{ matrix.platform }}
         run: python3 scripts/release/package.py --version "$VERSION" --platform "$PLATFORM" --commit "$COMMIT"
+      - name: Build graphical macOS installer
+        if: runner.os == 'macOS'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: python3 scripts/release/package_macos.py --binary ./nero --version "$VERSION" --commit "$COMMIT"
+      - name: Build native Linux package
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          sudo apt-get install -y dpkg-dev
+          python3 scripts/release/package_deb.py --binary ./nero --version "$VERSION" --commit "$COMMIT" --output .build/release
+      - name: Verify global command in normal and sudo shells
+        env:
+          NERO_LOG_FILE: ':memory:'
+          NERO_HISTORY_FILE: ':memory:'
+          EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" = Darwin ]; then
+            sudo installer -pkg ".build/release/nero-$EXPECTED_VERSION-${{ matrix.platform }}.pkg" -target /
+            expected_command=/usr/local/bin/nero
+          else
+            sudo dpkg --install .build/release/*.deb
+            expected_command=/usr/bin/nero
+          fi
+          cd "$RUNNER_TEMP"
+          test "$(command -v nero)" = "$expected_command"
+          printf 'version\nexit\n' | nero | grep -F "version $EXPECTED_VERSION"
+          sudo -n env EXPECTED_COMMAND="$expected_command" EXPECTED_VERSION="$EXPECTED_VERSION" NERO_LOG_FILE=:memory: NERO_HISTORY_FILE=:memory: sh -ec 'cd /; test "$(command -v nero)" = "$EXPECTED_COMMAND"; printf "version\nexit\n" | nero | grep -F "version $EXPECTED_VERSION"'
+          if [ "$(uname -s)" = Darwin ]; then
+            sudo rm /usr/local/bin/nero
+            sudo pkgutil --forget com.thekiran.nero
+          else
+            sudo dpkg --remove nero
+          fi
       - name: Upload verified package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -186,6 +246,20 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           COMMIT: ${{ needs.prepare.outputs.commit }}
         run: python scripts/release/package_windows.py --version "$VERSION" --commit "$COMMIT" --binary .build/windows-release/nero.exe
+      - name: Build native Windows Installer wizard and upgrade fixture
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          python scripts/release/package_msi.py --version "$VERSION" --commit "$COMMIT" --binary .build/windows-release/nero.exe
+          python scripts/release/package_msi.py --version "$VERSION" --commit "$COMMIT" --binary .build/windows-release/nero.exe --product-version 255.255.65535 --output .build/msi-upgrade
+      - name: Verify MSI install, upgrade, PATH and removal
+        shell: powershell
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $version = $env:VERSION
+          & ./tests/windows/msi_lifecycle.ps1 -MsiPath ".build/release/nero-${version}-windows-x86_64.msi" -UpgradeMsiPath ".build/msi-upgrade/nero-${version}-windows-x86_64.msi" -ExpectedVersion $version
       - name: Upload verified Windows package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -199,7 +273,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-logs-windows-x86_64
-          path: .build/windows-release/Testing/Temporary/LastTest.log
+          path: |
+            .build/windows-release/Testing/Temporary/LastTest.log
+            .build/msi-test-logs/*
           if-no-files-found: ignore
           retention-days: 14
           include-hidden-files: true
@@ -210,13 +286,18 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: package-*
           path: dist
           merge-multiple: true
-      - name: Verify five packages and create aggregate checksum
+      - name: Verify portable archives and native installers with aggregate checksum
         working-directory: dist
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -232,18 +313,33 @@ jobs:
           sha256sum --check "$archive.sha256"
           test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
           test "$(find . -maxdepth 1 -name '*.zip' | wc -l)" -eq 1
+          for platform in macos-arm64 macos-x86_64; do
+            test -s "nero-$VERSION-$platform.pkg"
+            sha256sum --check "nero-$VERSION-$platform.pkg.sha256"
+          done
+          test -s "nero-$VERSION-windows-x86_64.msi"
+          sha256sum --check "nero-$VERSION-windows-x86_64.msi.sha256"
+          deb_version=$(python3 -c 'import os; print(os.environ["VERSION"][1:].replace("-", "~", 1))')
+          for arch in amd64 arm64; do
+            test -s "nero_${deb_version}_${arch}.deb"
+            sha256sum --check "nero_${deb_version}_${arch}.deb.sha256"
+          done
+          test "$(find . -maxdepth 1 -name '*.pkg' | wc -l)" -eq 2
+          test "$(find . -maxdepth 1 -name '*.deb' | wc -l)" -eq 2
+          test "$(find . -maxdepth 1 -name '*.msi' | wc -l)" -eq 1
           cat ./*.sha256 | LC_ALL=C sort -k2 > SHA256SUMS
           sha256sum --check SHA256SUMS
-      - name: Create or update draft only
+      - name: Create draft and honor explicit publication request
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.prepare.outputs.version }}
           COMMIT: ${{ needs.prepare.outputs.commit }}
+          PUBLISH: ${{ needs.prepare.outputs.publish }}
         run: |
           set -euo pipefail
-          # A manual first release creates its tag only after all checks pass.
+          # New main intents/manual versions receive a tag only after all checks pass.
           gh api --paginate "repos/$GH_REPO/git/matching-refs/tags/$VERSION" > refs.json
           tag_exists=$(jq -r --arg ref "refs/tags/$VERSION" '.[] | select(.ref == $ref) | .ref' refs.json)
           if [[ -z "$tag_exists" ]]; then
@@ -262,15 +358,51 @@ jobs:
             [[ "$VERSION" != *-* ]] || args+=(--prerelease)
             gh release create "$VERSION" dist/* --verify-tag --draft --title "NERO $VERSION" --generate-notes "${args[@]}"
           fi
-          echo "Draft prepared for $VERSION at $COMMIT. Review all five packages before publication." >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$VERSION" --json body --jq .body > current-release-notes.md
+          python3 scripts/release/release_notes.py --version "$VERSION" --commit "$COMMIT" --body current-release-notes.md --output release-notes.md
+          gh release edit "$VERSION" --notes-file release-notes.md
+          if [[ "$PUBLISH" == true ]]; then
+            args=()
+            [[ "$VERSION" == *-* ]] || args+=(--latest)
+            gh release edit "$VERSION" --draft=false "${args[@]}"
+            test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = false
+            echo "Published $VERSION at $COMMIT: https://github.com/$GH_REPO/releases/tag/$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Draft prepared for $VERSION at $COMMIT. Review five native installers and five portable archives before publication." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Clean up the merged release branch
+        if: github.event_name != 'pull_request' && needs.prepare.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          pr=$(python3 -c 'import json; print(json.load(open(".github/release-intent.json")).get("pull_request", ""))')
+          if [[ "$pr" =~ ^[0-9]+$ ]]; then
+            gh api "repos/$GH_REPO/pulls/$pr" > publication-pr.json
+            if jq -e --arg repo "$GH_REPO" --arg commit "$COMMIT" '.merged == true and .merge_commit_sha == $commit and .head.repo.full_name == $repo' publication-pr.json >/dev/null; then
+              head=$(jq -r .head.ref publication-pr.json)
+              expected=$(jq -r .head.sha publication-pr.json)
+              if [[ -n "$head" && "$head" != main ]]; then
+                gh api "repos/$GH_REPO/git/matching-refs/heads/$head" > publication-refs.json
+                current=$(jq -r --arg ref "refs/heads/$head" '.[] | select(.ref == $ref) | .object.sha' publication-refs.json)
+                if [[ "$current" == "$expected" ]]; then
+                  gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$head"
+                  echo "Removed merged release branch $head." >> "$GITHUB_STEP_SUMMARY"
+                fi
+              fi
+            fi
+          fi
+
       - name: Report pull request package verification
         if: github.event_name == 'pull_request'
-        run: echo 'All five packages and aggregate checksums verified. Draft creation runs only for version tags or manual releases.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'All five native installers, five portable archives and aggregate checksums verified. Publication requires an explicit main release intent or manual publish request; other builds remain drafts.' >> "$GITHUB_STEP_SUMMARY"
 
   release-checks:
     name: Release checks
     if: always()
-    needs: [prepare, package, windows]
+    needs: [prepare, package, windows, draft]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every supported platform
@@ -278,7 +410,9 @@ jobs:
           PREPARE: ${{ needs.prepare.result }}
           POSIX: ${{ needs.package.result }}
           WINDOWS: ${{ needs.windows.result }}
+          DRAFT: ${{ needs.draft.result }}
         run: |
           test "$PREPARE" = success
           test "$POSIX" = success
           test "$WINDOWS" = success
+          test "$DRAFT" = success

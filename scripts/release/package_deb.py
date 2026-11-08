@@ -16,10 +16,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--commit", help="full source commit for published packages")
     parser.add_argument("--output", default=".build/debian", type=Path)
     args = parser.parse_args()
     if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?", args.version):
         parser.error("invalid release version")
+    if args.commit and not re.fullmatch(r"[0-9a-f]{40}", args.commit):
+        parser.error("commit must be a full SHA-1")
     arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine())
     if platform.system() != "Linux" or not arch:
         parser.error("requires a native Linux amd64/arm64 build host")
@@ -48,12 +51,18 @@ def main():
         (package / "usr/bin").mkdir(parents=True)
         shutil.copy2(binary, package / "usr/bin/nero")
         (package / "usr/bin/nero").chmod(0o755)
+        applications = package / "usr/share/applications"
+        applications.mkdir(parents=True)
+        (applications / "nero.desktop").write_text("[Desktop Entry]\nType=Application\nName=NERO\n"
+            "Comment=Native terminal and network diagnostics\nExec=nero\nTerminal=true\n"
+            "Icon=utilities-terminal\nCategories=System;Network;\n")
         docs = package / "usr/share/doc/nero"
         docs.mkdir(parents=True)
         shutil.copy2(ROOT / "LICENSE.txt", docs / "copyright")
         shutil.copy2(ROOT / "docs/installation.md", docs / "README.md")
         (docs / "BUILD-INFO.json").write_text(json.dumps({
             "version": args.version, "architecture": arch,
+            "commit": args.commit,
             "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
             "dependencies": depends,
         }, indent=2) + "\n")

@@ -1,5 +1,22 @@
 # Distribution paths
 
+## Normal application installation
+
+Releases after v0.1.3 add native `.pkg` (macOS), `.msi` (Windows) and `.deb`
+(Ubuntu-compatible Linux) installers alongside the existing portable archives.
+Users open the installer file and complete the normal OS installation flow;
+they do not need compiler or terminal setup commands. See
+[installation](installation.md#recommended-standard-operating-system-installers).
+macOS installs the global command in `/usr/local/bin`; Linux uses `/usr/bin`.
+Windows Installer owns its Program Files payload, Start menu shortcut and
+system PATH entry, including upgrade and removal. Restart existing Windows
+Terminal processes once to inherit the environment update.
+
+The release matrix installs actual `.pkg`/`.deb` payloads on disposable native
+runners and resolves `nero` from unrelated directories in normal and sudo
+shells. Windows runs the real MSI install/upgrade/remove sequence and checks
+fresh PowerShell/CMD resolution and unrelated system PATH preservation.
+
 ## macOS Homebrew
 
 The repository now contains `Formula/nero.rb`, pinned to the published v0.1.3
@@ -35,7 +52,9 @@ The Distribution packages workflow creates test-only `.deb` artifacts on
 Ubuntu 24.04 amd64/arm64. On disposable runners it installs a first package,
 builds and upgrades to a second version, checks the CLI version after each
 installation, removes the package, and checks all sidecar hashes. These
-artifacts are not a stable release or an APT repository. Never install CI
+artifacts are not a stable release or an APT repository. The Release packages
+workflow separately builds reviewed-version `.deb` assets for releases after
+v0.1.3 and verifies their real installation before draft creation. Never install CI
 versions as a substitute for a reviewed public release.
 
 Use `sudo apt install ./nero_VERSION_ARCH.deb` for a reviewed local package and
@@ -66,4 +85,5 @@ an owner-controlled code-signing certificate or signing service. These
 credentials have not been supplied; neither signing process is claimed as
 complete. Never generate a self-signed substitute and present it as trusted.
 APT repository hosting/signing and Homebrew Core submission are separate
-publication steps; this change supplies and tests local distribution paths.
+publication steps. Native installer and archive distribution does not require
+either service.

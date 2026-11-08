@@ -6,6 +6,21 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+No additional unreleased changes are recorded.
+
+## 0.1.4 — native installer release
+
+See [release status and downloads](https://github.com/thekiran/nero/releases)
+for publication and platform assets.
+
+- Add native macOS Installer `.pkg` and Windows Installer `.msi` wizards,
+  plus Ubuntu-compatible `.deb` packages to the release pipeline. Normal
+  installation registers the global command without shell setup commands.
+- Add machine PATH and Start menu integration with managed MSI upgrades and
+  removal; notify Windows about manual user PATH changes.
+- Verify native package installation from unrelated folders, including normal
+  and sudo POSIX shells and fresh Windows PowerShell/CMD processes.
+
 - Persist recognized command history with bounded private storage, opt-out,
   explicit failures and cross-session clear behavior. Unknown commands and
   arbitrary arguments are excluded from disk history.
