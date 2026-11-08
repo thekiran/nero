@@ -4,16 +4,19 @@ Reliability, reviewed releases and reproducible developer workflows take priorit
 over new features. A milestone name is a target, not a promise of stable support.
 Track work in the linked issues and keep each change in a focused pull request.
 
-The v0.1.3 stability code from [PR #8](https://github.com/thekiran/nero/pull/8) is merged; the release itself remains unpublished and [Issue #9](https://github.com/thekiran/nero/issues/9) tracks remaining acceptance work.
+[v0.1.3 was published on 2026-11-08](https://github.com/thekiran/nero/releases/tag/v0.1.3)
+from `f990483`. All five package jobs and aggregate checksums passed in
+[release run #58](https://github.com/thekiran/nero/actions/runs/42478613983).
+[Issue #9](https://github.com/thekiran/nero/issues/9) remains available for acceptance follow-up.
 
 | Target | Work | Acceptance | Tracking |
 | --- | --- | --- | --- |
-| v0.1.3 — Stability | Windows handle width, console cleanup, release serialization and support docs merged in PR #8 | Remaining: run all five package checks on the intended release commit, inspect draft assets and notes, then publish | [#9](https://github.com/thekiran/nero/issues/9), [PR #8 (merged)](https://github.com/thekiran/nero/pull/8) |
+| v0.1.3 — Published | Windows handle width, console cleanup, release serialization and support docs merged in PR #8 | Five native packages and SHA-256 checks passed; notes reviewed and release published | [#9](https://github.com/thekiran/nero/issues/9), [PR #8 (merged)](https://github.com/thekiran/nero/pull/8) |
 | v0.2.0 — Quality | Parser boundaries, deterministic terminal tests, static analysis, isolated TCP and install/uninstall coverage | Failures block merging; test scope and limitations are explicit; dependency updates and contribution templates maintained | [#10](https://github.com/thekiran/nero/issues/10) |
 | v0.3.0 — Developer experience | Command/platform API boundaries; install/upgrade/uninstall contract; developer docs | Small documented interfaces and reproducible clean-environment setup | [#11](https://github.com/thekiran/nero/issues/11) |
 | v1.0.0 — Stable release | Support policy and release acceptance | Core CLI, packaging, installation and critical failures verified on every claimed platform; no unresolved critical defects | [#11](https://github.com/thekiran/nero/issues/11) |
 
-A reviewed [v0.1.3 release readiness checklist](docs/release-candidate-v0.1.3.md) tracks the pre-publication verification gates. It is not evidence of a published release.
+The [v0.1.3 verification record](docs/release-candidate-v0.1.3.md) separates CI evidence from independent checks that have not been claimed.
 
 ## Distribution prerequisites
 

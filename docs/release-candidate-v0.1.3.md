@@ -1,41 +1,37 @@
-# v0.1.3 release readiness
+# v0.1.3 release verification
 
-This is a **release candidate checklist**, not a declaration that v0.1.3 has
-been built, tested, signed, or published. No release is created by this document.
+[v0.1.3](https://github.com/thekiran/nero/releases/tag/v0.1.3) was published on
+2026-11-08 from `f9904830d2caf3d57df16f36e876ebe56d2c0feb`.
+The evidence below comes from [Release packages #58](https://github.com/thekiran/nero/actions/runs/42478613983)
+and inspection of the published release. Do not rerun this version to replace
+published assets or move its tag.
 
-## Prerequisites
+## Verified
 
-- [x] [CLI version stamping](https://github.com/thekiran/nero/pull/28) merged
-      in commit `e135949`; verify package version output again for this candidate.
-- [ ] Review the open [stability tracker](https://github.com/thekiran/nero/issues/9)
-      against its regression evidence, keeping unfinished work open.
-- [ ] Confirm the intended `main` commit and update `CHANGELOG.md` with
-      user-visible changes and known limitations.
-- [ ] Confirm the version `v0.1.3` is new and its tag has not been published or moved.
+- [x] CLI version stamping PR #28 and documentation corrections PR #36 merged.
+- [x] New v0.1.3 tag created at the intended commit after package checks passed.
+- [x] macOS ARM64 and x86-64 Make, CMake, PTY and sanitizer jobs passed.
+- [x] Linux ARM64 and x86-64 Make, CMake, PTY and sanitizer jobs passed.
+- [x] Windows x86-64 native CLI, socket, console and installer job passed.
+- [x] All five archives, five `.sha256` sidecars and `SHA256SUMS` are present.
+- [x] Individual and aggregate SHA-256 checks passed in the final release job.
+- [x] Package jobs verified build metadata, executable contents and release version.
+- [x] Release notes reviewed with unsigned/not-notarized package limitations stated.
+- [x] Release published and shown as Latest with the expected commit and assets.
 
-## Build and verify
+## Independent follow-up
 
-Run the **Release packages** workflow on the intended `main` commit with
-`version=v0.1.3`. It must create a draft, not publish automatically.
+- [ ] Review [stability tracker #9](https://github.com/thekiran/nero/issues/9)
+      against its acceptance evidence before closing it.
+- [ ] Perform additional installation checks on fresh end-user machines.
+      CI packaging and installer checks are recorded above; separate manual
+      clean-machine validation is not claimed.
 
-- [ ] macOS ARM64 and x86-64 archives pass Make, CMake, PTY and sanitizer checks.
-- [ ] Linux ARM64 and x86-64 archives pass Make, CMake, PTY and sanitizer checks.
-- [ ] Windows x86-64 archive passes MinGW native CLI, socket, console and installer tests.
-- [ ] All five archives, five per-asset `.sha256` files and `SHA256SUMS` are present.
-- [ ] `sha256sum -c SHA256SUMS` passes against the downloaded archives.
-- [ ] `BUILD-INFO.json` has the expected commit, platform and binary digest.
-- [ ] Installation from every artifact works in a clean, disposable environment.
-      `version` displays `version v0.1.3` from the installed executable.
-- [ ] Review whether unsigned macOS/Windows packages need explicit user-facing
-      warnings; do not claim notarization or Authenticode signing.
+## Rollback
 
-## Publication and rollback
+Do not repoint a published tag or overwrite published assets. Fix discovered
+issues in a PR and prepare a new version. Follow the
+[installation guide](installation.md) for downloads and checksum verification.
 
-Only publish the verified draft after explicit maintainer review.
-Do not repoint an existing published version tag and do not overwrite published
-assets. If any gate fails, leave the draft unpublished, fix the issue in a PR,
-and prepare a new candidate. After publication, verify public download links
-and follow the [installation guide](installation.md).
-
-CI verifies offline fixtures and packaging. It does **not** certify the
-experimental raw-packet engine for uncontrolled networks.
+CI verifies offline fixtures, bounded local fixtures and packaging. It does
+not certify the experimental raw-packet engine for uncontrolled networks.
