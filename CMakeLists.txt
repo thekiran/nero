@@ -9,7 +9,7 @@ option(NERO_SANITIZERS "Enable ASan and UBSan for offline development targets" O
 set(NERO_RELEASE_VERSION "" CACHE STRING "Tag to stamp into the native Windows release CLI")
 if(NERO_RELEASE_VERSION AND NOT NERO_RELEASE_VERSION MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?$")
     message(FATAL_ERROR "NERO_RELEASE_VERSION must be a vMAJOR.MINOR.PATCH tag")
-endif
+endif()
 option(NERO_STATIC_ANALYSIS "Enable MSVC code analysis for foundation targets" OFF)
 # Source baseline hashes are an optional audit, not a quality gate. Enabling
 # this registers the non-gating source-baseline-audit test; it is OFF by
@@ -61,7 +61,7 @@ if(WIN32)
         target_compile_definitions(nero PRIVATE UNICODE_SUPPORT NERO_SYN_UNAVAILABLE)
         if(NERO_RELEASE_VERSION)
             target_compile_definitions(nero PRIVATE "NERO_BUILD_VERSION=\"${NERO_RELEASE_VERSION}\"")
-        endif
+        endif()
         target_link_libraries(nero PRIVATE Threads::Threads ws2_32 iphlpapi)
         target_link_options(nero PRIVATE -static) # self-contained exe (winpthread/libgcc)
         if(BUILD_TESTING)
@@ -77,7 +77,7 @@ if(WIN32)
             if(NERO_RELEASE_VERSION)
                 set_tests_properties(windows-native-cli PROPERTIES
                     ENVIRONMENT "NERO_EXPECTED_VERSION=${NERO_RELEASE_VERSION}")
-            endif
+            endif()
             foreach(fixture compat_boundaries console_restore socket_loopback)
                 add_executable(windows-${fixture} tests/windows/${fixture}.c)
                 nero_target(windows-${fixture})
