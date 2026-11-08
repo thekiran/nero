@@ -8,6 +8,7 @@ import unittest
 BINARY = Path(sys.argv.pop(1)).resolve()
 INTERFACES = Path(sys.argv.pop(1)).resolve()
 ENV = dict(os.environ, NO_COLOR='1', NERO_ASCII='1', TERM='dumb')
+EXPECTED_VERSION = ('version ' + os.environ.get('NERO_EXPECTED_VERSION', 'development')).encode()
 
 
 def run(data):
@@ -19,7 +20,7 @@ class NativeWindowsCLI(unittest.TestCase):
     def test_commands_and_history(self):
         result = run(b'version\nhelp\nhistory\nexit\n')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(b'version 1.0', result.stdout)
+        self.assertIn(EXPECTED_VERSION, result.stdout)
         self.assertIn(b'Available Commands:', result.stdout)
         self.assertIn(b'version\nhelp', result.stdout.replace(b'\r\n', b'\n'))
         self.assertIn(b'Exiting...', result.stdout)
@@ -33,7 +34,7 @@ class NativeWindowsCLI(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(b'Unknown command', result.stdout + result.stderr)
         self.assertIn(b'Command too long', result.stdout + result.stderr)
-        self.assertIn(b'version 1.0', result.stdout)
+        self.assertIn(EXPECTED_VERSION, result.stdout)
 
     def test_raw_engine_is_explicitly_unavailable(self):
         result = run(b'192.0.2.1 -Syn\nexit\n')
