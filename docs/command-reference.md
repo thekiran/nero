@@ -43,7 +43,7 @@ The core commands control session state, screen rendering, and input history. Th
 
 ### `history`
 * **Syntax:** `history`
-* **Description:** Displays chronological command history for the active session. History entries are stored in-memory during the session and written on clean exit.
+* **Description:** Displays chronological command history for the active session. The latest 256 nonblank entries are kept in memory (`CLI_HISTORY_CAPACITY`); older entries are discarded. History is not saved to disk or restored between sessions, including after a clean exit. Persistent application events are available separately through `log`.
 * **Platforms:** macOS, Linux, Windows.
 
 ### `history -clear`
@@ -89,12 +89,16 @@ Network diagnostics commands examine session configuration and perform controlle
 
 ### `<target> -Sc`
 * **Syntax:** `<target> -Sc`
-* **Description:** Runs TCP port scanner diagnostics against the specified IPv4 target address for standard service ports (e.g., 21, 22, 23, 25, 53, 80, 110, 143, 443, 3306, 3389, 8080).
+* **Description:** Runs TCP connect diagnostics across ports 1–65535 on the specified IPv4 target. Discovery does not gate the scan. Results distinguish open, closed, filtered, error/unknown and unscanned ports.
 * **Execution behavior:**
-  * **Live production builds (macOS, Linux, Windows):** Performs standard non-blocking `connect()` handshakes with timeout limits (1 second per port).
+  * **Live production builds (macOS, Linux, Windows):** Uses nonblocking `connect()` with per-socket deadlines. First-pass/retry timeouts are 500/1000 ms for Hizli, 1000/2000 ms for Orta (default), and 1500/3000 ms for Yavas. Manual first-pass timeouts range from 200–5000 ms; retries use twice that timeout, capped at 5000 ms. Every filtered or error/unknown result receives one retry; later profile-defined rounds retry only remaining error/unknown results. Silent targets can take many minutes.
+  * **Interactive controls:** Esc cancels. Once an open port appears, Enter stops scanning and opens port selection using the results found so far. Early selection reports partial coverage and leaves unfinished ports unscanned.
   * **Offline test builds (`NERO_SAFE_TEST` / `NERO_NETWORK_UNAVAILABLE`):** Simulates port state in memory without opening remote network sockets.
 * **Platforms:** macOS, Linux, Windows (native MinGW).
 * **Restrictions:** Target must be a valid IPv4 address in dotted-decimal notation.
+
+See [Port scanner reliability](portscanner-reliability.md) for retry rounds,
+resource limits, result meanings and cancellation behavior.
 
 ---
 
@@ -134,7 +138,7 @@ NERO provides a responsive line editor that handles key sequences across platfor
 | `Delete` (`\033[3~`) | Delete character at cursor |
 
 ### Tokenization and Limits
-* **Maximum command line length:** 4096 bytes. Input exceeding this threshold produces a `Command too long` warning and is rejected safely without buffer overflow.
+* **Maximum command line length:** 255 bytes (`CLI_LINE_CAPACITY` is 256 including the terminating NUL). This is a byte limit, not a Unicode character count. Longer input produces a `Command too long` warning and is rejected safely without buffer overflow.
 * **Maximum token count:** 64 tokens (`CLI_MAX_TOKENS`). Commands exceeding 64 tokens are rejected cleanly.
 * **Unrecognized commands:** Commands not matching the catalog report `Unknown command: <token>` and exit code `0` to keep the shell interactive.
 
