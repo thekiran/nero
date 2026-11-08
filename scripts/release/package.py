@@ -71,7 +71,7 @@ def main():
             env['PATH'] = str(command_dir) + os.pathsep + os.environ.get('PATH', '')
             result = subprocess.run(['nero'], input=b'version\nexit\n', capture_output=True,
                                     timeout=15, env=env, cwd=temp)
-            if result.returncode != 0 or b'version 1.0' not in result.stdout:
+            if result.returncode != 0 or f'version {args.version}'.encode() not in result.stdout:
                 raise RuntimeError('installed nero command verification failed')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_name(archive.name + '.sha256').write_text(f'{digest}  {archive.name}\n')
