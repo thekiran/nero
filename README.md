@@ -91,6 +91,17 @@ For complete step-by-step instructions, checksum validation, dependencies, and b
 
 ## Usage Example
 
+<details>
+<summary>Watch a recorded native terminal demo (GIF)</summary>
+
+<p align="center"><img src="docs/media/nero-demo.gif" alt="Recorded NERO terminal help, version, history and exit commands" width="680"></p>
+
+Recorded from a native macOS ARM64 PTY session; this is an earlier-build
+terminal demonstration, not a live scanner or raw-packet test.
+See [the recording notes](docs/media/README.md) for reproduction details.
+
+</details>
+
 Launch the interactive shell:
 
 ```text
