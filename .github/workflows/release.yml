@@ -128,6 +128,44 @@ jobs:
           COMMIT: ${{ needs.prepare.outputs.commit }}
           PLATFORM: ${{ matrix.platform }}
         run: python3 scripts/release/package.py --version "$VERSION" --platform "$PLATFORM" --commit "$COMMIT"
+      - name: Build graphical macOS installer
+        if: runner.os == 'macOS'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: python3 scripts/release/package_macos.py --binary ./nero --version "$VERSION" --commit "$COMMIT"
+      - name: Build native Linux package
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          sudo apt-get install -y dpkg-dev
+          python3 scripts/release/package_deb.py --binary ./nero --version "$VERSION" --commit "$COMMIT" --output .build/release
+      - name: Verify global command in normal and sudo shells
+        env:
+          NERO_LOG_FILE: ':memory:'
+          NERO_HISTORY_FILE: ':memory:'
+          EXPECTED_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" = Darwin ]; then
+            sudo installer -pkg ".build/release/nero-$EXPECTED_VERSION-${{ matrix.platform }}.pkg" -target /
+            expected_command=/usr/local/bin/nero
+          else
+            sudo dpkg --install .build/release/*.deb
+            expected_command=/usr/bin/nero
+          fi
+          cd "$RUNNER_TEMP"
+          test "$(command -v nero)" = "$expected_command"
+          printf 'version\nexit\n' | nero | grep -F "version $EXPECTED_VERSION"
+          sudo -n env EXPECTED_COMMAND="$expected_command" EXPECTED_VERSION="$EXPECTED_VERSION" NERO_LOG_FILE=:memory: NERO_HISTORY_FILE=:memory: sh -ec 'cd /; test "$(command -v nero)" = "$EXPECTED_COMMAND"; printf "version\nexit\n" | nero | grep -F "version $EXPECTED_VERSION"'
+          if [ "$(uname -s)" = Darwin ]; then
+            sudo rm /usr/local/bin/nero
+            sudo pkgutil --forget com.thekiran.nero
+          else
+            sudo dpkg --remove nero
+          fi
       - name: Upload verified package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -186,6 +224,20 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           COMMIT: ${{ needs.prepare.outputs.commit }}
         run: python scripts/release/package_windows.py --version "$VERSION" --commit "$COMMIT" --binary .build/windows-release/nero.exe
+      - name: Build native Windows Installer wizard and upgrade fixture
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          python scripts/release/package_msi.py --version "$VERSION" --commit "$COMMIT" --binary .build/windows-release/nero.exe
+          python scripts/release/package_msi.py --version "$VERSION" --commit "$COMMIT" --binary .build/windows-release/nero.exe --product-version 255.255.65535 --output .build/msi-upgrade
+      - name: Verify MSI install, upgrade, PATH and removal
+        shell: powershell
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $version = $env:VERSION
+          & ./tests/windows/msi_lifecycle.ps1 -MsiPath ".build/release/nero-${version}-windows-x86_64.msi" -UpgradeMsiPath ".build/msi-upgrade/nero-${version}-windows-x86_64.msi" -ExpectedVersion $version
       - name: Upload verified Windows package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -199,7 +251,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-logs-windows-x86_64
-          path: .build/windows-release/Testing/Temporary/LastTest.log
+          path: |
+            .build/windows-release/Testing/Temporary/LastTest.log
+            .build/msi-test-logs/*
           if-no-files-found: ignore
           retention-days: 14
           include-hidden-files: true
@@ -216,7 +270,7 @@ jobs:
           pattern: package-*
           path: dist
           merge-multiple: true
-      - name: Verify five packages and create aggregate checksum
+      - name: Verify portable archives and native installers with aggregate checksum
         working-directory: dist
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -232,6 +286,21 @@ jobs:
           sha256sum --check "$archive.sha256"
           test "$(find . -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
           test "$(find . -maxdepth 1 -name '*.zip' | wc -l)" -eq 1
+          for platform in macos-arm64 macos-x86_64; do
+            test -s "nero-$VERSION-$platform.pkg"
+            sha256sum --check "nero-$VERSION-$platform.pkg.sha256"
+          done
+          test -s "nero-$VERSION-windows-x86_64.msi"
+          sha256sum --check "nero-$VERSION-windows-x86_64.msi.sha256"
+          deb_version="${VERSION#v}"
+          deb_version="${deb_version/-/~}"
+          for arch in amd64 arm64; do
+            test -s "nero_${deb_version}_${arch}.deb"
+            sha256sum --check "nero_${deb_version}_${arch}.deb.sha256"
+          done
+          test "$(find . -maxdepth 1 -name '*.pkg' | wc -l)" -eq 2
+          test "$(find . -maxdepth 1 -name '*.deb' | wc -l)" -eq 2
+          test "$(find . -maxdepth 1 -name '*.msi' | wc -l)" -eq 1
           cat ./*.sha256 | LC_ALL=C sort -k2 > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Create or update draft only
@@ -262,10 +331,10 @@ jobs:
             [[ "$VERSION" != *-* ]] || args+=(--prerelease)
             gh release create "$VERSION" dist/* --verify-tag --draft --title "NERO $VERSION" --generate-notes "${args[@]}"
           fi
-          echo "Draft prepared for $VERSION at $COMMIT. Review all five packages before publication." >> "$GITHUB_STEP_SUMMARY"
+          echo "Draft prepared for $VERSION at $COMMIT. Review five native installers and five portable archives before publication." >> "$GITHUB_STEP_SUMMARY"
       - name: Report pull request package verification
         if: github.event_name == 'pull_request'
-        run: echo 'All five packages and aggregate checksums verified. Draft creation runs only for version tags or manual releases.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'All five native installers, five portable archives and aggregate checksums verified. Draft creation runs only for version tags or manual releases.' >> "$GITHUB_STEP_SUMMARY"
 
   release-checks:
     name: Release checks

@@ -6,6 +6,14 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+- Add native macOS Installer `.pkg` and Windows Installer `.msi` wizards,
+  plus Ubuntu-compatible `.deb` packages to the release pipeline. Normal
+  installation registers the global command without shell setup commands.
+- Add machine PATH and Start menu integration with managed MSI upgrades and
+  removal; notify Windows about manual user PATH changes.
+- Verify native package installation from unrelated folders, including normal
+  and sudo POSIX shells and fresh Windows PowerShell/CMD processes.
+
 - Persist recognized command history with bounded private storage, opt-out,
   explicit failures and cross-session clear behavior. Unknown commands and
   arbitrary arguments are excluded from disk history.

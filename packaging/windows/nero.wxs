@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="NERO" Language="1033" Version="$(var.ProductVersion)"
+           Manufacturer="Muhammed Emin Kiran"
+           UpgradeCode="40CC2895-508D-5383-91B5-148B51B481CA">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"/>
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer NERO version is already installed."/>
+    <MediaTemplate EmbedCab="yes"/>
+    <Property Id="ARPCOMMENTS" Value="Native C11 terminal and experimental network diagnostics"/>
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/thekiran/nero"/>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="NeroFolder" Name="Nero">
+          <Component Id="NeroLicenseComponent" Guid="E8E70E96-0066-45CF-86AD-4F24377B7418" Win64="yes">
+            <File Id="NeroLicense" Source="$(var.LicenseTextSource)" Name="LICENSE.txt" KeyPath="yes"/>
+          </Component>
+          <Component Id="NeroBuildInfoComponent" Guid="EDCC092D-72F8-497C-AED6-A8E69CFC7931" Win64="yes">
+            <File Id="NeroBuildInfo" Source="$(var.BuildInfoSource)" Name="BUILD-INFO.json" KeyPath="yes"/>
+          </Component>
+          <Directory Id="INSTALLDIR" Name="bin">
+            <Component Id="NeroExecutableComponent" Guid="3023E35A-A4D2-4310-9CB0-920FE18FA763" Win64="yes">
+              <File Id="NeroExecutable" Source="$(var.BinarySource)" Name="nero.exe" KeyPath="yes">
+                <Shortcut Id="NeroStartMenu" Directory="ProgramMenuFolder" Name="NERO"
+                          WorkingDirectory="INSTALLDIR" Advertise="yes"/>
+              </File>
+              <Environment Id="NeroSystemPath" Name="PATH" Action="set" Part="last"
+                           System="yes" Permanent="no" Value="[INSTALLDIR]"/>
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder"/>
+    </Directory>
+    <Feature Id="Complete" Title="NERO terminal" Level="1">
+      <ComponentRef Id="NeroExecutableComponent"/>
+      <ComponentRef Id="NeroLicenseComponent"/>
+      <ComponentRef Id="NeroBuildInfoComponent"/>
+    </Feature>
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR"/>
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseSource)"/>
+    <UIRef Id="WixUI_InstallDir"/>
+  </Product>
+</Wix>

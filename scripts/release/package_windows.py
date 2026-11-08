@@ -48,7 +48,7 @@ def main():
                 'raw_packet_engine': 'Unsupported', 'code_signed': False}
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(binary, f'{root}/bin/nero.exe')
-        for source, destination in [('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.ps1', 'install.ps1'), ('scripts/uninstall.ps1', 'uninstall.ps1')]:
+        for source, destination in [('LICENSE.txt', 'LICENSE.txt'), ('README.md', 'README.md'), ('docs/releases.md', 'INSTALL.md'), ('scripts/install.ps1', 'install.ps1'), ('scripts/uninstall.ps1', 'uninstall.ps1'), ('scripts/windows-env.ps1', 'windows-env.ps1')]:
             zip_file.write(source, f'{root}/{destination}')
         zip_file.writestr(f'{root}/BUILD-INFO.json', json.dumps(metadata, indent=2) + '\n')
     with zipfile.ZipFile(archive) as zip_file:

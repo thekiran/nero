@@ -1,5 +1,30 @@
 # Release and installation guide
 
+## Standard graphical installers (after v0.1.3)
+
+For normal installation, choose the native installer offered by the release:
+
+| System | Installer | Registers |
+| --- | --- | --- |
+| macOS 15+ ARM64/Intel | `nero-vX.Y.Z-macos-ARCH.pkg` | `/usr/local/bin/nero` through Apple Installer |
+| Windows 10/11 x86-64 | `nero-vX.Y.Z-windows-x86_64.msi` | Program Files, system PATH, Start menu and Installed apps |
+| Ubuntu-compatible amd64/arm64 | `nero_X.Y.Z_ARCH.deb` | `/usr/bin/nero` and an application menu entry through the package manager |
+
+Open the file and complete the operating system's normal installation screens.
+No developer tools, shell configuration or terminal installation commands are
+required. Existing Windows Terminal processes must be restarted to inherit
+the updated PATH. Afterwards `nero` works from any folder; POSIX systems also
+support `sudo nero` for privileged operations. Windows elevation uses an
+Administrator terminal. MSI upgrades/removal are managed by Windows Installer
+and remove only NERO's PATH entry, leaving other entries and user data intact.
+
+Native installers and portable archives each have a `.sha256` sidecar and
+are included in `SHA256SUMS`. There are five of each across the native matrix.
+macOS installers are unsigned/unnotarized and Windows installers are unsigned;
+publisher/security prompts are possible. No security or execution policy is
+changed. Published v0.1.3 assets remain unchanged and have only portable archives.
+The remaining sections describe that optional advanced installation path.
+
 ## Packages
 
 [NERO v0.1.3](https://github.com/thekiran/nero/releases/tag/v0.1.3) is publicly

@@ -26,6 +26,8 @@ function Remove-PathEntry([string]$current, [string]$entry) {
 if ($PathScope -ne 'Process') {
     $current = [Environment]::GetEnvironmentVariable('Path', $PathScope)
     [Environment]::SetEnvironmentVariable('Path', (Remove-PathEntry $current $destination), $PathScope)
+    . (Join-Path $PSScriptRoot 'windows-env.ps1')
+    Send-NeroEnvironmentChange
 }
 $env:Path = Remove-PathEntry $env:Path $destination
 Write-Host "Removed $target (user history and logs retained)."
