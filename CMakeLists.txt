@@ -217,5 +217,6 @@ endif()
 
 if(BUILD_TESTING)
     get_property(nero_test_names DIRECTORY PROPERTY TESTS)
-    set_tests_properties(${nero_test_names} PROPERTIES ENVIRONMENT "NERO_LOG_FILE=:memory:")
+    # Append rather than overwrite per-test release-version expectations.
+    set_property(TEST ${nero_test_names} APPEND PROPERTY ENVIRONMENT "NERO_LOG_FILE=:memory:")
 endif()
