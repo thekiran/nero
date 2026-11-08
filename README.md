@@ -1,24 +1,28 @@
 <div align="center">
 
-<img src="docs/media/nero-banner.webp" alt="NERO" width="100%">
+<h1><img src="docs/media/nero-banner.webp" alt="NERO — Native C Terminal &amp; Network Research" width="100%"></h1>
 
-**Native C Terminal & Network Research**
+<p><strong>Native C Terminal &amp; Network Research</strong></p>
 
-![C11](https://img.shields.io/badge/C11-2563EB?style=flat-square&logo=c&logoColor=white)
-![Platforms](https://img.shields.io/badge/macOS%20%7C%20Linux%20%7C%20Windows-1F2937?style=flat-square)
-[![MIT](https://img.shields.io/badge/License-MIT-1F2937?style=flat-square)](LICENSE.txt)
+<p>
+  <img src="https://img.shields.io/badge/C11-2563EB?style=flat-square&amp;logo=c&amp;logoColor=white" alt="C11">
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Linux%20%7C%20Windows-1F2937?style=flat-square" alt="macOS, Linux and Windows">
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-MIT-1F2937?style=flat-square" alt="MIT License"></a>
+</p>
 
-A native interactive terminal with command history, platform adapters and experimental
-network diagnostics, written in C11.
+<p>A native interactive terminal with command history, platform adapters, and experimental network diagnostics, written in C11.</p>
 
-[**Releases**](https://github.com/thekiran/nero/releases) ·
-[**Installation**](docs/installation.md) ·
-[**Command Reference**](docs/command-reference.md) ·
-[**Documentation**](docs/README.md) ·
-[**GitHub Wiki**](https://github.com/thekiran/nero/wiki) ·
-[**Roadmap**](ROADMAP.md)
+<p>
+  <a href="https://github.com/thekiran/nero/releases">Releases</a> ·
+  <a href="docs/installation.md">Installation</a> ·
+  <a href="docs/command-reference.md">Commands</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="ROADMAP.md">Roadmap</a>
+</p>
 
-<img src="https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084" alt="NERO terminal screenshot" width="780">
+<a href="https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084">
+  <img src="https://github.com/user-attachments/assets/270e73c3-a231-474a-a812-7a5dba635084" alt="NERO interactive terminal preview" width="680">
+</a>
 
 </div>
 
@@ -26,14 +30,12 @@ network diagnostics, written in C11.
 
 NERO provides a unified terminal interface across POSIX and Windows environments. Supported platforms are verified through native automated packaging and CI test runs:
 
-| Platform | Architecture | Binary Type | Verification Evidence |
-| --- | --- | --- | --- |
-| **macOS** 15+ | Apple Silicon (ARM64) | Native Mach-O 64-bit | Make, CMake, PTY tests, ASan/UBSan |
-| **macOS** 15+ | Intel (x86-64) | Native Mach-O 64-bit | Make, CMake, PTY tests, ASan/UBSan |
-| **Ubuntu** 24.04+ compatible | x86-64 | Native ELF 64-bit | Make, CMake, PTY tests, ASan/UBSan |
-| **Ubuntu** 24.04+ compatible | ARM64 | Native ELF 64-bit | Make, CMake, PTY tests, ASan/UBSan |
-| **Windows** 10 / 11 | x86-64 | Native PE32+ (MinGW UCRT64) | CMake + Ninja, Win32 console/socket CTest |
-| **Windows (WSL2)** | x86-64 / ARM64 | Linux package inside Ubuntu | Standard Linux execution path |
+| Platform | Native package / architectures | Verification |
+| --- | --- | --- |
+| **macOS 15+** | Mach-O 64-bit · ARM64 / x86-64 | Make, CMake, PTY, ASan/UBSan |
+| **Ubuntu 24.04+ compatible** | ELF 64-bit · x86-64 / ARM64 | Make, CMake, PTY, ASan/UBSan |
+| **Windows 10 / 11** | PE32+ (MinGW UCRT64) · x86-64 | CMake + Ninja, Win32 console/socket CTest |
+| **Windows (WSL2)** | Ubuntu Linux package · x86-64 / ARM64 | Standard Linux execution path |
 
 Windows ARM64 has no native package; use WSL2 on ARM64 hardware.
 
@@ -59,26 +61,27 @@ Windows ARM64 has no native package; use WSL2 on ARM64 hardware.
 
 ## Quick Installation
 
-Download the verified release package matching your operating system from [GitHub Releases](https://github.com/thekiran/nero/releases) and verify its `.sha256` checksum.
+Download the package matching your operating system from [GitHub Releases](https://github.com/thekiran/nero/releases) and verify its `.sha256` checksum before installing. If no release has been published yet, follow the [source-build instructions](docs/installation.md).
 
 ### macOS & Linux
-```bash
-# Extract and run the installer
-tar -xzf nero-v*.tar.gz
-cd nero-v*
-sudo sh install.sh
 
-# Run NERO
+```bash
+# Replace the version and platform with the package you downloaded.
+PACKAGE="nero-vX.Y.Z-macos-arm64"  # e.g. linux-x86_64 for Linux
+tar -xzf "$PACKAGE.tar.gz"
+sudo sh "$PACKAGE/install.sh"
 nero
 ```
 
 ### Windows (Native PowerShell)
-```powershell
-# Extract package and install to user PATH
-Expand-Archive nero-v*-windows-x86_64.zip -DestinationPath .
-& ".\nero-v*-windows-x86_64\install.ps1"
 
-# Run NERO (open a fresh terminal for updated PATH)
+```powershell
+# Replace X.Y.Z with the downloaded release version.
+$package = "nero-vX.Y.Z-windows-x86_64"
+Expand-Archive -Path "$package.zip" -DestinationPath . -Force
+& ".\$package\install.ps1"
+
+# The installer updates the current session PATH.
 nero
 ```
 
