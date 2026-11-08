@@ -242,6 +242,9 @@ static void run_scenario(int scenario) {
     int sync_p[2], ctrl_p[2];
     assert(pipe(sync_p) == 0 && pipe(ctrl_p) == 0);
 
+    /* Flush the parent's buffered PASS lines first: when stdout is a pipe (CI)
+     * the child would otherwise inherit them and print them into the pty. */
+    fflush(NULL);
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
@@ -262,6 +265,11 @@ static void run_scenario(int scenario) {
         char fdbuf[16]; snprintf(fdbuf, sizeof fdbuf, "%d", sync_p[1]);
         setenv("NERO_TEST_SYNC_FD", fdbuf, 1);
         unsetenv("NERO_SCAN_ICMP");
+        /* The scanner shows its speed-profile menu only on an interactive
+         * terminal (isatty + a non-"dumb" TERM). CI runners have no TERM, which
+         * skipped the menu and turned the profile-accepting Enter into a stray
+         * discovery Enter. Pin TERM so every environment follows one path. */
+        setenv("TERM", "xterm-256color", 1);
         ctrl_read_fd = ctrl_p[0];
         fcntl(ctrl_read_fd, F_SETFL, O_NONBLOCK);
         int rc = portscanner("127.0.0.1");
