@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -233,7 +234,7 @@ static void run_scenario(int scenario) {
 
     int master = posix_openpt(O_RDWR | O_NOCTTY);
     assert(master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0);
-    int slave = open(ptsname(master), O_RDWR);
+    int slave = open(ptsname(master), O_RDWR | O_NOCTTY);
     assert(slave >= 0);
     struct termios before = {0}, after = {0};
     assert(tcgetattr(slave, &before) == 0);
@@ -244,8 +245,17 @@ static void run_scenario(int scenario) {
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
-        /* child: the scanner process on the terminal */
+        /* child: the scanner process on the terminal. In a headless/CI run (no
+         * controlling tty, background process group) the scanner's tcsetattr()
+         * raw-mode calls would raise SIGTTOU and stop the process; a local run
+         * with an inherited controlling terminal hides this. Ignoring the job-
+         * control stop signals lets tcsetattr proceed (POSIX) while leaving the
+         * pty intact for the parent, instead of seizing it as a controlling
+         * terminal (which would tear the pty down when the child exits). */
         close(sync_p[0]); close(ctrl_p[1]);
+        signal(SIGTTOU, SIG_IGN);
+        signal(SIGTTIN, SIG_IGN);
+        signal(SIGHUP, SIG_IGN);
         dup2(slave, STDIN_FILENO); dup2(slave, STDOUT_FILENO); dup2(slave, STDERR_FILENO);
         if (slave > 2) close(slave);
         close(master);
