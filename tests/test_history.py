@@ -38,6 +38,7 @@ class HistoryTests(unittest.TestCase):
     def test_allowlist_excludes_secrets_and_unknown_arguments(self):
         self.cli(b"-mode off\nhelp password=secret\nunknown-token-123\nversion api_key=abc\n"
                  b"log -path bearer secret\n192.0.2.1 -Sc secret\n"
+                 b"192.0.2.1-Sc\n001.2.3.4 -Sc\n+1.2.3.4 -Sc\n"
                  b"192.0.2.1 -Sc\nversion\nexit\n")
         self.assertEqual(self.path.read_bytes(), b"-mode off\n192.0.2.1 -Sc\nversion\n")
 

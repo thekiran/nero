@@ -53,10 +53,12 @@ static int persistable(const char *line)
                &octet[2], &octet[3], &end) == 4 && end > 0 && line[end] == '\0') {
         for (size_t i = 0; i < 4; ++i)
             if (octet[i] > 255) return 0;
-        /* Exclude signs and other characters accepted by scanf's integers. */
-        for (int i = 0; i < end - 4; ++i)
-            if ((line[i] < '0' || line[i] > '9') && line[i] != '.') return 0;
-        return 1;
+        /* Require canonical IPv4 and exactly one separator; scanf alone also
+         * accepts signs, leading zeroes and a missing whitespace separator. */
+        char canonical[32];
+        int n = snprintf(canonical, sizeof(canonical), "%u.%u.%u.%u -Sc",
+                         octet[0], octet[1], octet[2], octet[3]);
+        return n > 0 && (size_t)n < sizeof(canonical) && strcmp(line, canonical) == 0;
     }
     return 0;
 }
