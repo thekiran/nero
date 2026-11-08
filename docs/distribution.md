@@ -19,7 +19,7 @@ fresh PowerShell/CMD resolution and unrelated system PATH preservation.
 
 ## macOS Homebrew
 
-The repository now contains `Formula/nero.rb`, pinned to the published v0.1.3
+The repository now contains `Formula/nero.rb`, pinned to the published v0.1.4
 macOS ARM64/Intel archives and their SHA-256 digests. It requires macOS 15+.
 It is a third-party tap formula, not a claim of inclusion in Homebrew Core:
 
@@ -31,10 +31,11 @@ brew reinstall thekiran/nero/nero
 brew uninstall thekiran/nero/nero
 ```
 
-These commands install the published v0.1.3 binary. Unreleased source features
-such as disk command history require a source build until a new release and
-formula update. macOS binaries remain unsigned and unnotarized. The Homebrew
-CI job installs, tests, reinstalls, retests and removes the actual formula.
+These commands install the published v0.1.4 binary, including persistent command
+history. The formula version, URLs, digests and version assertion must be updated
+together after each public release. macOS binaries remain unsigned and unnotarized. The Homebrew
+CI matrix installs, tests, reinstalls, retests and removes the actual formula
+on both Apple Silicon and Intel.
 
 ## Ubuntu-compatible Debian packages
 
