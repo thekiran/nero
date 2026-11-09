@@ -28,6 +28,21 @@
 
 #define DOCTOR_PATH_CAP 4096
 
+/* The CLI calls this collector synchronously; values never escape collection.
+ * Use the checked CRT API on MSVC without suppressing compiler diagnostics. */
+static const char *doctor_env(const char *name)
+{
+#ifdef _MSC_VER
+    static char value[32769];
+    size_t needed = 0;
+    if (getenv_s(&needed, value, sizeof(value), name) != 0 || needed == 0)
+        return NULL;
+    return value;
+#else
+    return getenv(name);
+#endif
+}
+
 static int executable_path(char *out, size_t capacity)
 {
 #ifdef _WIN32
@@ -73,7 +88,7 @@ static int same_executable(const char *candidate, const char *executable)
 
 static int path_status(const char *executable)
 {
-    const char *path = getenv("PATH");
+    const char *path = doctor_env("PATH");
     if (!path) return -1;
     size_t n = 0;
     while (n < 32768 && path[n]) n++;
@@ -93,7 +108,7 @@ static int path_status(const char *executable)
         size_t length = end ? (size_t)(end - p) : strlen(p);
         char candidate[DOCTOR_PATH_CAP];
         if (length + sizeof(suffix) >= sizeof(candidate)) return -1;
-        if (!length) { strcpy(candidate, "."); length = 1; }
+        if (!length) { candidate[0] = '.'; candidate[1] = 0; length = 1; }
         else memcpy(candidate, p, length);
         memcpy(candidate + length, suffix, sizeof(suffix));
         if (doctor_access(candidate, mode) == 0) {
@@ -134,17 +149,19 @@ void doctor_collect(doctor_snapshot *s)
 #endif
         s->path = path_status(executable);
     } else s->path = -1;
-    const char *term = getenv("TERM");
+    const char *term = doctor_env("TERM");
+    int plain_term = !term || !*term || strcmp(term, "dumb") == 0;
+    int no_color = doctor_env("NO_COLOR") != NULL;
     int tty = doctor_isatty(doctor_fileno(stdout));
-    s->terminal = !tty ? 0 : (getenv("NO_COLOR") || !term || !*term || strcmp(term, "dumb") == 0 ? 1 : 2);
+    s->terminal = !tty ? 0 : (no_color || plain_term ? 1 : 2);
 #ifdef _WIN32
     DWORD mode;
     if (s->terminal == 2 && (!GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) ||
         !(mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING))) s->terminal = 1;
-    const char *home = getenv("USERPROFILE");
+    const char *home = doctor_env("USERPROFILE");
     s->privilege = -1;
 #else
-    const char *home = getenv("HOME");
+    const char *home = doctor_env("HOME");
     s->privilege = geteuid() == 0;
 #endif
     struct stat info;
