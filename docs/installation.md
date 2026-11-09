@@ -42,6 +42,20 @@ uses an Administrator terminal for elevation. Downloading or extracting a
 portable archive alone does not register a global command; the following
 manual instructions are for that optional distribution path.
 
+macOS has no graphical uninstaller for `.pkg` files. The NERO package installs
+`/usr/local/bin/nero` and `/usr/local/share/doc/nero` under the receipt
+`com.thekiran.nero`; `pkgutil --files com.thekiran.nero` lists them. To remove
+it, delete both paths and then forget the receipt:
+
+```bash
+sudo rm -f /usr/local/bin/nero
+sudo rm -rf /usr/local/share/doc/nero
+sudo pkgutil --forget com.thekiran.nero
+```
+
+Installing a newer `.pkg` over an older one upgrades in place. Command history
+and logs are retained.
+
 The installers currently have no Developer ID/notarization or Authenticode
 signature. Operating-system publisher/security prompts can appear; no
 security setting or execution policy is changed by these packages. Native
