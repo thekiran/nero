@@ -14,9 +14,24 @@ from `f990483`. All five package jobs and aggregate checksums passed in
 | v0.1.3 — Published | Windows handle width, console cleanup, release serialization and support docs merged in PR #8 | Five native packages and SHA-256 checks passed; notes reviewed and release published | [#9](https://github.com/thekiran/nero/issues/9), [PR #8 (merged)](https://github.com/thekiran/nero/pull/8) |
 | v0.2.0 — Quality | Parser boundaries, deterministic terminal tests, static analysis, isolated TCP and install/uninstall coverage | Failures block merging; test scope and limitations are explicit; dependency updates and contribution templates maintained | [#10](https://github.com/thekiran/nero/issues/10) |
 | v0.3.0 — Developer experience | Command/platform API boundaries; install/upgrade/uninstall contract; developer docs | Small documented interfaces and reproducible clean-environment setup | [#11](https://github.com/thekiran/nero/issues/11) |
-| v1.0.0 — Stable release | Support policy and release acceptance | Core CLI, packaging, installation and critical failures verified on every claimed platform; no unresolved critical defects | [#11](https://github.com/thekiran/nero/issues/11) |
+| v1.0.0 — Stable release | Support policy and release acceptance | Proposed acceptance contract below; not a support announcement | [#11](https://github.com/thekiran/nero/issues/11) |
 
 The [v0.1.3 verification record](docs/release-candidate-v0.1.3.md) separates CI evidence from independent checks that have not been claimed.
+
+## Proposed v1.0.0 acceptance contract
+
+This is a proposal tracked in [#11](https://github.com/thekiran/nero/issues/11),
+not a support announcement.
+
+Record exact supported OS/architecture/runtime versions and reproduce install,
+upgrade and removal on all five native targets. Require parser/input/history
+privacy, terminal restoration, signal handling, loopback and package integrity
+checks, plus reviewed independent LAN observations for any claimed scanner
+behavior. Resolve critical regressions before release; review all public
+artifacts and state signing status accurately. Document breaking CLI/storage
+changes and migration before a stable major release. The present project
+remains experimental with no response-time SLA or certified raw-engine behavior;
+v1 support terms must be approved by the maintainer before publication.
 
 ## Distribution prerequisites
 

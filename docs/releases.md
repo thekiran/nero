@@ -18,6 +18,16 @@ support `sudo nero` for privileged operations. Windows elevation uses an
 Administrator terminal. MSI upgrades/removal are managed by Windows Installer
 and remove only NERO's PATH entry, leaving other entries and user data intact.
 
+A newer macOS `.pkg` upgrades an older one in place. macOS has no `.pkg`
+uninstaller; remove the payload recorded by the `com.thekiran.nero` receipt,
+then forget the receipt (user history and logs are retained):
+
+```bash
+sudo rm -f /usr/local/bin/nero
+sudo rm -rf /usr/local/share/doc/nero
+sudo pkgutil --forget com.thekiran.nero
+```
+
 Native installers and portable archives each have a `.sha256` sidecar and
 are included in `SHA256SUMS`. There are five of each across the native matrix.
 macOS installers are unsigned/unnotarized and Windows installers are unsigned;

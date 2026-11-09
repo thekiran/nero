@@ -36,6 +36,20 @@ into Program Files, registers system PATH, adds a Start menu shortcut and
 appears in Installed apps for repair/removal. Restart existing Windows Terminal
 processes once so they inherit the saved PATH.
 
+macOS has no graphical uninstaller for `.pkg` files. The NERO package installs
+`/usr/local/bin/nero` and `/usr/local/share/doc/nero` under the receipt
+`com.thekiran.nero`; `pkgutil --files com.thekiran.nero` lists them. To remove
+it, delete both paths and then forget the receipt:
+
+```bash
+sudo rm -f /usr/local/bin/nero
+sudo rm -rf /usr/local/share/doc/nero
+sudo pkgutil --forget com.thekiran.nero
+```
+
+Installing a newer `.pkg` over an older one upgrades in place. Command history
+and logs are retained.
+
 After setup, open a terminal in **any folder** and run `nero`. macOS/Linux also
 support `sudo nero` for operations needing administrator privileges. Windows
 uses an Administrator terminal for elevation. Downloading or extracting a

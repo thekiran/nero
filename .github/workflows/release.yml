@@ -206,6 +206,44 @@ jobs:
           retention-days: 14
           include-hidden-files: true
 
+  macos-pkg-upgrade:
+    # Runs the upgrade fixture from this workflow's own checkout (no computed
+    # ref) on a fresh runner. The older package is the exact artifact the
+    # package job built and verified.
+    name: macOS pkg upgrade (${{ matrix.platform }})
+    needs: [prepare, package]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+          - runner: macos-15-intel
+            platform: macos-x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package-${{ matrix.platform }}
+          path: .build/release
+      - name: Build macOS installer upgrade fixture
+        env:
+          UPGRADE_VERSION: v255.255.65535
+          COMMIT: ${{ github.sha }}
+        run: |
+          make CC=clang -j4 BUILD_DIR=.build/pkg-upgrade TARGET=.build/pkg-upgrade/nero NERO_RELEASE_VERSION="$UPGRADE_VERSION"
+          python3 scripts/release/package_macos.py --binary .build/pkg-upgrade/nero --version "$UPGRADE_VERSION" --commit "$COMMIT" --output .build/pkg-upgrade
+      - name: Verify macOS installer upgrade and complete removal
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          UPGRADE_VERSION: v255.255.65535
+          PLATFORM: ${{ matrix.platform }}
+        run: sh tests/macos/pkg_lifecycle.sh upgrade ".build/release/nero-$VERSION-$PLATFORM.pkg" "$VERSION" ".build/pkg-upgrade/nero-$UPGRADE_VERSION-$PLATFORM.pkg" "$UPGRADE_VERSION"
+
   windows:
     name: windows-x86_64
     needs: prepare
@@ -281,7 +319,7 @@ jobs:
           include-hidden-files: true
 
   draft:
-    needs: [prepare, package, windows]
+    needs: [prepare, package, macos-pkg-upgrade, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -428,13 +466,14 @@ jobs:
   release-checks:
     name: Release checks
     if: always()
-    needs: [prepare, package, windows, draft, publish]
+    needs: [prepare, package, macos-pkg-upgrade, windows, draft, publish]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every supported platform
         env:
           PREPARE: ${{ needs.prepare.result }}
           POSIX: ${{ needs.package.result }}
+          MACOS_PKG_UPGRADE: ${{ needs.macos-pkg-upgrade.result }}
           WINDOWS: ${{ needs.windows.result }}
           DRAFT: ${{ needs.draft.result }}
           PUBLICATION: ${{ needs.publish.result }}
@@ -442,6 +481,7 @@ jobs:
         run: |
           test "$PREPARE" = success
           test "$POSIX" = success
+          test "$MACOS_PKG_UPGRADE" = success
           test "$WINDOWS" = success
           test "$DRAFT" = success
           if [ "$TRUSTED_PUBLICATION" = true ]; then
