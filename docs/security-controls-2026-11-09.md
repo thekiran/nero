@@ -67,3 +67,45 @@ checks gate requires verification and successful publication for trusted release
 runs, or an explicitly skipped publisher for PR validation. Arbitrary branch
 workflow_dispatch can validate packages but cannot publish. Security regression
 assertions run under the existing required Clang static-analysis checks.
+
+## Verified rollout and remaining administrator step
+
+PR #67 merged as `2a1804a347d641daa937b472675b19e61b512978` after all native,
+release, static-analysis, fuzz and CodeQL checks passed. Trusted-main
+[run 42652688683](https://github.com/thekiran/nero/actions/runs/42652688683)
+then successfully built/uploaded the C/C++ and Actions analyses and produced the
+Scorecard JSON artifact. The PR's GitHub Advanced Security `CodeQL` result check
+also passed; that result check is PR-specific and is not claimed as a main job.
+C/C++ manual mode used a full database; the overlay-base optimization warning
+was a fallback to full analysis, not skipped source coverage.
+
+The new eight-check proposal was populated in the owner Settings form with the
+correct GitHub Actions / Advanced Security app bindings. **Saving was blocked by
+GitHub's Confirm access / sudo-mode reauthentication.** No new access was granted,
+no credential was read, and no existing control was removed. The actual server
+policy still has the four original required checks, strict/up-to-date enforcement,
+required PRs/resolved conversations, admin enforcement, no force pushes and no
+branch deletion. The JSON is a proposal until the owner completes GitHub access
+verification and the saved server policy is checked again. #55 stays open for
+this administrator step; do not describe the eight checks as active.
+
+### Scorecard triage
+
+Observed report: Scorecard v5.3.0, source `2a1804a`, overall 7.6. This is a supply
+chain audit score, not a product reliability rating or security certification.
+Token-Permissions, Dangerous-Workflow, Fuzzing and CI-Tests each scored 10.
+
+| Finding | Priority / owner | Disposition |
+| --- | --- | --- |
+| Branch-Protection -1 | P1 / owner | Tool token cannot read classic protection; owner UI verified existing controls. New eight-check save awaits GitHub reauthentication. Unknown is not disabled. |
+| Signed-Releases 0 | P2 / owner, #11 | Published artifacts remain unsigned; signing/provenance trust must not be fabricated. Existing owner credential/infrastructure blockers remain. |
+| Pinned-Dependencies 8 | P2 / maintainer | Follow-up task: verify the official multiarch Ubuntu 24.04 digest, pin tests/linux/Dockerfile and rebuild its container. All 35 reviewed Action references were pinned; this warning is the Docker base tag. |
+| Code-Review 0 | P2 / owner | Solo-maintainer policy currently requires zero approvals. Add an independent reviewer before requiring one approval; do not lock the maintainer out. |
+| SAST 7 | Informational / maintainer | CodeQL is newly enabled; 4 of the historical 30 commits had recognized scans. Keep it running; do not fabricate historical results or rewrite main for a score. |
+| Packaging -1 | Detection limitation / maintainer | Custom native release workflow was not recognized by Scorecard; actual five-platform installer/archive checks and public assets are separate positive evidence. |
+| CII-Best-Practices 0 | Optional / owner | Badge participation is optional and separate from essential release requirements. |
+| Contributors 0 | Informational / owner | Corporate-contributor diversity is not a correctness guarantee and will not be faked. |
+
+No new actionable high/critical CodeQL finding was reported by the successful
+PR result gate. Lower-severity or future findings still require normal triage;
+bounded analysis and a Scorecard score are not proofs of absence of defects.
