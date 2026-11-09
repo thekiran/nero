@@ -874,7 +874,10 @@ int portscanner_with_io(const char *target_ip, const scan_io *io)
     int selected_early =
         !cancelled && atomic_load_explicit(&s->scan_select_requested, memory_order_relaxed);
     int accounted = summary.open + summary.closed + summary.filtered + summary.unknown;
-    s->scan_duration_ms = scan_now_ms(s) - scan_started_ms;
+    /* A monotonic-clock failure makes scan_now_ms() return 0; never let that, or
+     * any clock anomaly, print a negative duration. */
+    int64_t scan_ended_ms = scan_now_ms(s);
+    s->scan_duration_ms = scan_ended_ms > scan_started_ms ? scan_ended_ms - scan_started_ms : 0;
     s->scan_completion = cancelled ? "cancelled"
                          : selected_early
                              ? "stopped early by user (partial coverage)"

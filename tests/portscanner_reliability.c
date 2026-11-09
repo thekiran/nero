@@ -108,7 +108,8 @@ enum {
     CAPPED,
     SELECT_EARLY,
     OPEN_THEN_HUP,
-    OUT_ERROR_EVENT
+    OUT_ERROR_EVENT,
+    CONNECT_LIMIT
 };
 
 static int handle_index(nero_socket_t fd)
@@ -174,6 +175,10 @@ static int fake_connect(nero_socket_t fd, const struct sockaddr *addr, socklen_t
     }
     if (scenario == ROUTE_FAILURE) {
         errno = EHOSTUNREACH;
+        return -1;
+    }
+    if (scenario == CONNECT_LIMIT) {
+        errno = EWOULDBLOCK;
         return -1;
     }
     if (scenario == MIXED && port == 54321)
@@ -553,6 +558,25 @@ static void test_initialization_error_logs(void)
     puts("PASS scanner mutex/banner initialization failures reach error logs");
 }
 
+static void test_connect_resource_exhaustion(void)
+{
+    /* A nonblocking connect() that fails with EWOULDBLOCK/EAGAIN is LOCAL
+     * exhaustion (no free ephemeral port, routing-cache or buffer shortage),
+     * not a pending probe and not evidence about the target. It must be recorded
+     * unknown and flagged as a resource failure so the adaptive back-off engages
+     * — never reported as closed, filtered or open. Before the fix this socket
+     * was queued to poll and resolved as closed via SO_ERROR. */
+    setup(CONNECT_LIMIT);
+    const int ports[] = {1, 65535};
+    scan_ports_batch(session, session->target_ip_global, ports, 2, 250);
+    CHECK(session->results_list[1].state == PORT_UNKNOWN);
+    CHECK(session->results_list[65535].state == PORT_UNKNOWN);
+    CHECK(session->results_list[1].error == EWOULDBLOCK);
+    CHECK(atomic_load(&session->resource_failures) == 1);
+    CHECK(atomic_load(&session->ports_scanned) == 2);
+    teardown();
+    puts("PASS EWOULDBLOCK connect is local exhaustion: unknown + resource back-off, never target evidence");
+}
 static void test_port_bounds(void)
 {
     setup(CLOSED);
@@ -778,6 +802,7 @@ int main(void)
     test_select_early();
     test_signal_interrupt();
     test_resource_recovery();
+    test_connect_resource_exhaustion();
     test_port_bounds();
     test_retry_precedence();
     test_adaptive_retry();

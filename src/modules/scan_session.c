@@ -177,16 +177,34 @@ static port_state classify_connect_error(int error)
 static int is_resource_error(int error)
 {
     return error == EMFILE || error == ENFILE || error == ENOBUFS || error == ENOMEM ||
-           error == EADDRNOTAVAIL;
+           error == EADDRNOTAVAIL
+#ifndef _WIN32
+           /* On POSIX a nonblocking TCP connect never means "in progress" with
+            * EAGAIN/EWOULDBLOCK; it signals local exhaustion (no free ephemeral
+            * port, routing-cache or socket-buffer shortage). Treat it like the
+            * sibling EADDRNOTAVAIL so it is recorded unknown, never as target
+            * evidence, and triggers the bounded back-off. */
+           || error == EAGAIN
+#if EAGAIN != EWOULDBLOCK
+           || error == EWOULDBLOCK
+#endif
+#endif
+        ;
 }
 
 int connect_pending(int error)
 {
-    return error == EINPROGRESS || error == EALREADY || error == EWOULDBLOCK || error == EINTR
 #ifdef _WIN32
-           || error == WSAEINTR || error == WSAEINPROGRESS
+    /* Winsock aliases EINPROGRESS == EWOULDBLOCK == WSAEWOULDBLOCK, and a
+     * nonblocking connect legitimately reports WSAEWOULDBLOCK as "in progress". */
+    return error == EINPROGRESS || error == EALREADY || error == EWOULDBLOCK || error == EINTR ||
+           error == WSAEINTR || error == WSAEINPROGRESS;
+#else
+    /* A nonblocking AF_INET connect reports an outstanding attempt only with
+     * EINPROGRESS (or EINTR when interrupted). EAGAIN/EWOULDBLOCK here is local
+     * resource exhaustion, handled by is_resource_error(), not a pending probe. */
+    return error == EINPROGRESS || error == EALREADY || error == EINTR;
 #endif
-        ;
 }
 
 int make_nonblocking(nero_socket_t fd)
