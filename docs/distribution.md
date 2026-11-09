@@ -88,3 +88,7 @@ complete. Never generate a self-signed substitute and present it as trusted.
 APT repository hosting/signing and Homebrew Core submission are separate
 publication steps. Native installer and archive distribution does not require
 either service.
+
+The [remaining readiness audit](release-readiness-2026-11-09.md) separates unsigned
+installer evidence, owner signing requirements, optional repository hosting and
+the independent physical-LAN checklist. Unexecuted cases are explicitly marked.
