@@ -25,6 +25,7 @@ CLI_SUPPORT_SOURCES := \
     src/cli/render.c \
     src/cli/operation_ui.c \
     src/cli/commands.c \
+    src/cli/workload.c \
     src/cli/ascii.c
 
 CLI_SOURCES := src/cli/terminal.c $(CLI_SUPPORT_SOURCES)

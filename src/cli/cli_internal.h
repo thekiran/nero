@@ -40,4 +40,18 @@ void cli_show_syn_status(void);
 /* commands.c: 1 = exit, 0 = continue, -1 = session failure. */
 int cli_dispatch_command(const char *command);
 
+/* Shared keyword-handler contract. Handlers live in commands.c and (for the
+ * offline simulation screen) workload.c; the dispatcher maps CLI_CMD_INVALID
+ * onto the "invalid parameters" path and forwards the rest unchanged. */
+typedef enum {
+    CLI_CMD_CONTINUE = 0,
+    CLI_CMD_EXIT = 1,
+    CLI_CMD_FAILURE = -1,
+    CLI_CMD_INVALID = -2
+} cli_cmd_result;
+
+/* workload.c: offline, read-only CPU/RAM profile screen (`sim`). Never opens
+ * a socket, resolves a name or reaches the legacy -Syn engine. */
+cli_cmd_result cmd_sim(char **tokens, size_t count);
+
 #endif

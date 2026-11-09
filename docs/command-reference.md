@@ -68,6 +68,24 @@ The core commands control session state, screen rendering, and input history. Th
 
 ---
 
+## Offline Workload Simulation
+
+### `sim`
+* **Syntax:** `sim`
+* **Classification:** **OFFLINE SIMULATION.** This screen performs **zero network I/O**. It opens no sockets, resolves no names, sends no packets, and never reaches the legacy `-Syn` engine, `THREAD_COUNT`, `portscanner()`, or `scan_session.c`.
+* **Description:** Reads basic **local** hardware facts using read-only native APIs — POSIX `sysctl`/`sysconf` (`/proc/meminfo` on Linux) and `GetSystemInfo`/`GlobalMemoryStatusEx` on Windows — and presents a conservative, documented simulation-only profile recommendation. The user always makes the final selection; nothing is auto-selected or auto-started.
+* **Detected data:** Logical processor count, physical core count (where the platform exposes it), total RAM, and available RAM (where exposed). Values that cannot be measured are shown as `Unavailable` rather than guessed. Displayed limitations note that logical cores differ from physical cores and that container/virtualization quotas can make host totals misleading.
+* **Recommendation rule (deterministic):**
+  * CPU or total RAM unavailable → **no recommendation** (manual selection only).
+  * `cpu_logical <= 2` **or** total RAM `<= 4 GiB` → **Low**.
+  * Otherwise → **Balanced**.
+* **Menu:** `[1] Low`, `[2] Balanced`, `[3] Custom`, `[0] Cancel`. The suggested profile is marked `(Recommended)`. `Custom` accepts a simulated worker count (`1`–`512`) and duration in seconds (`1`–`60`); out-of-range, signed, blank, or non-numeric input is rejected, never clamped silently.
+* **Simulation output:** Reports simulated worker/duration values, an explicit `Packets generated: 0` / `Sockets opened: 0`, and a note that the live `-Syn` engine is unchanged. The numbers are display data only and are **not** a safe real-network transmission rate.
+* **Platforms:** macOS, Linux, Windows.
+* **Exit status:** Remains in terminal session (`0`); `Ctrl+C`, `Esc`, `q`, or `0` cancel without selecting a profile.
+
+---
+
 ## Network Diagnostics Commands
 
 Network diagnostics commands examine session configuration and perform controlled TCP reachability checks.

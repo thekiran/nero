@@ -6,7 +6,17 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
-No additional unreleased changes are recorded.
+- Add the `sim` offline workload-profile screen (OFFLINE SIMULATION): it reads
+  local CPU/RAM with read-only native APIs, shows a deterministic, conservative
+  recommendation, and lets the user make the final selection. It opens no
+  sockets, sends no packets, and never reaches the legacy `-Syn` engine,
+  `THREAD_COUNT`, `portscanner()` or `scan_session.c`; offline binaries link no
+  network transmission symbols.
+- Fix macOS CPU detection: `hw.logicalcpu`/`hw.physicalcpu` are 32-bit sysctls
+  and were being discarded by a `sizeof(long)` length check, so the screen
+  reported the processor count as `Unavailable` on working Macs.
+- Fix a missing NUL terminator in the simulation menu's line reader that let a
+  previous entry's leftover stack bytes corrupt the next parsed value.
 
 ## 0.1.4 — native installer release
 

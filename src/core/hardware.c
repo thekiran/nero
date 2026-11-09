@@ -22,20 +22,24 @@ static int test_override_active;
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 
-static long sysctl_long(const char *name)
+static long sysctl_cpu_count(const char *name)
 {
-    long value = 0;
+    /* hw.logicalcpu / hw.physicalcpu are signed 32-bit sysctls on macOS, so
+     * the read must target an int: reading into a long leaves the returned
+     * length at 4 and a sizeof(long) check would wrongly reject a valid
+     * count. A non-positive or failed read is reported as unavailable. */
+    int value = 0;
     size_t length = sizeof(value);
     if (sysctlbyname(name, &value, &length, NULL, 0) != 0 ||
-        length != sizeof(value))
+        length != sizeof(value) || value <= 0)
         return NERO_HARDWARE_UNAVAILABLE;
     return value;
 }
 
 static int probe_posix(nero_hardware_info *info)
 {
-    info->cpu_logical = sysctl_long("hw.logicalcpu");
-    info->cpu_physical = sysctl_long("hw.physicalcpu");
+    info->cpu_logical = sysctl_cpu_count("hw.logicalcpu");
+    info->cpu_physical = sysctl_cpu_count("hw.physicalcpu");
     unsigned long long bytes = 0;
     size_t length = sizeof(bytes);
     if (sysctlbyname("hw.memsize", &bytes, &length, NULL, 0) == 0 &&

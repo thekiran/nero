@@ -68,12 +68,8 @@
 #define CLI_MAX_TOKENS 64
 #define TCP_TIMEOUT_SECONDS 1
 
-typedef enum {
-    CLI_CMD_CONTINUE = 0,
-    CLI_CMD_EXIT = 1,
-    CLI_CMD_FAILURE = -1,
-    CLI_CMD_INVALID = -2
-} cli_cmd_result;
+/* cli_cmd_result is declared in cli_internal.h so the offline simulation
+ * handler (workload.c) shares the dispatcher's return contract. */
 
 /* Session-level network diagnostics setting. */
 static int scan_enabled = 1;
