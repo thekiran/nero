@@ -45,7 +45,7 @@ class DoctorTests(unittest.TestCase):
                 if os.name == 'nt' and len(value) > 32000:
                     continue
                 env = dict(os.environ, PATH=value)
-                r = subprocess.run([str(executable), '--doctor'], env=env, capture_output=True, timeout=5)
+                r = subprocess.run([str(executable), '--doctor'], env=env, cwd=root, capture_output=True, timeout=5)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertIn(expected, r.stdout.decode())
                 self.assertNotIn(directory, r.stdout.decode())
