@@ -1,7 +1,9 @@
 """Automated tests for GitHub Wiki synchronization tooling."""
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -79,7 +81,7 @@ class TestWikiSync(unittest.TestCase):
             ).strip()
 
             # First sync: should write all pages and commit
-            sync_wiki_repo(temp_dir, push=False)
+            self.assertEqual(sync_wiki_repo(temp_dir, push=False), "committed")
 
             new_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=temp_dir, text=True
@@ -94,7 +96,7 @@ class TestWikiSync(unittest.TestCase):
             self.assertTrue((temp_dir / "_Footer.md").exists())
 
             # Second sync: idempotent check, must not create an empty commit
-            sync_wiki_repo(temp_dir, push=False)
+            self.assertEqual(sync_wiki_repo(temp_dir, push=False), "unchanged")
             latest_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=temp_dir, text=True
             ).strip()
@@ -142,7 +144,7 @@ class TestWikiCredentials(unittest.TestCase):
     def test_local_publication_push_and_remote_config(self):
         """Exercise real clone/sync/push offline; inspect the actual .git config."""
         from unittest.mock import patch
-        from scripts.docs.wiki_publish import publish
+        from scripts.docs.wiki_publish import OUTCOMES, publish
         real_run = subprocess.run
         sentinel = 'DUMMY-not-a-real-token-1905'
         with tempfile.TemporaryDirectory() as directory:
@@ -162,8 +164,12 @@ class TestWikiCredentials(unittest.TestCase):
                     configs.append((clone / '.git/config').read_text())
                 return result
             with patch('scripts.docs.wiki_publish.subprocess.run', side_effect=local_run):
-                publish('owner/repo', sentinel)
-            self.assertEqual(len(configs), 2)
+                first = publish('owner/repo', sentinel)
+                second = publish('owner/repo', sentinel)
+            self.assertEqual(first, OUTCOMES['pushed'])
+            self.assertEqual(second, OUTCOMES['unchanged'])
+            # Two publications, each inspected after clone and after sync/push.
+            self.assertEqual(len(configs), 4)
             for config in configs:
                 self.assertIn('https://github.com/owner/repo.wiki.git', config)
                 self.assertNotIn(sentinel, config)
@@ -191,6 +197,44 @@ class TestWikiCredentials(unittest.TestCase):
         with patch('scripts.docs.wiki_publish.subprocess.run', side_effect=failed_transport):
             with self.assertRaisesRegex(RuntimeError, 'Wiki clone failed'):
                 publish('owner/repo', sentinel)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX shell fake git')
+    def test_publish_process_never_prints_echoed_credentials(self):
+        """Run wiki_publish.py for real with a fake failing git first on PATH."""
+        sentinel = 'DUMMY-e2e-sentinel+/%40-not-a-token'
+        script = REPO_ROOT / 'scripts/docs/wiki_publish.py'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_bin = root / 'bin'
+            fake_bin.mkdir()
+            marker = root / 'fake-git-ran'
+            fake_git = fake_bin / 'git'
+            # Echo the credential (from the environment and as a literal) on
+            # both streams, record the call, then fail like a broken transport.
+            fake_git.write_text(
+                '#!/bin/sh\n'
+                f': > "{marker}"\n'
+                'printf "%s\\n" "$WIKI_TOKEN"\n'
+                'printf "%s\\n" "$WIKI_TOKEN" >&2\n'
+                f"printf '%s\\n' '{sentinel}'\n"
+                f"printf '%s\\n' '{sentinel}' >&2\n"
+                'exit 1\n', encoding='utf-8')
+            fake_git.chmod(0o700)
+            summary = root / 'summary.md'
+            env = {k: v for k, v in os.environ.items()
+                   if not k.startswith(('GIT_', 'WIKI_', 'GITHUB_'))}
+            env.update(PATH=str(fake_bin) + os.pathsep + env.get('PATH', ''),
+                       WIKI_TOKEN=sentinel, GITHUB_REPOSITORY='owner/repo',
+                       GITHUB_STEP_SUMMARY=str(summary))
+            result = subprocess.run([sys.executable, str(script)], cwd=root, env=env,
+                                    capture_output=True, timeout=60, check=False)
+            self.assertTrue(marker.exists(), 'fake git was not the git that ran')
+            self.assertNotEqual(result.returncode, 0)
+            for stream in (result.stdout, result.stderr, summary.read_bytes()):
+                self.assertNotIn(sentinel.encode(), stream)
+            self.assertIn(b'Wiki clone failed', result.stderr)
+            self.assertEqual(summary.read_text(encoding='utf-8').count('\n'), 1)
+            self.assertIn('Wiki clone failed', summary.read_text(encoding='utf-8'))
 
     def test_missing_credentials_and_invalid_repository_fail_closed(self):
         from scripts.docs.wiki_publish import publish
