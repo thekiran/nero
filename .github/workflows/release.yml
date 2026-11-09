@@ -156,6 +156,15 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           COMMIT: ${{ needs.prepare.outputs.commit }}
         run: python3 scripts/release/package_macos.py --binary ./nero --version "$VERSION" --commit "$COMMIT"
+      - name: Build macOS installer upgrade fixture
+        if: runner.os == 'macOS'
+        env:
+          UPGRADE_VERSION: v255.255.65535
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          # Separate objects and output keep ./nero and .build/release untouched.
+          make CC=${{ matrix.cc }} -j4 BUILD_DIR=.build/pkg-upgrade TARGET=.build/pkg-upgrade/nero NERO_RELEASE_VERSION="$UPGRADE_VERSION"
+          python3 scripts/release/package_macos.py --binary .build/pkg-upgrade/nero --version "$UPGRADE_VERSION" --commit "$COMMIT" --output .build/pkg-upgrade
       - name: Build native Linux package
         if: runner.os == 'Linux'
         env:
@@ -183,11 +192,18 @@ jobs:
           printf 'version\nexit\n' | nero | grep -F "version $EXPECTED_VERSION"
           sudo -n env EXPECTED_COMMAND="$expected_command" EXPECTED_VERSION="$EXPECTED_VERSION" NERO_LOG_FILE=:memory: NERO_HISTORY_FILE=:memory: sh -ec 'cd /; test "$(command -v nero)" = "$EXPECTED_COMMAND"; printf "version\nexit\n" | nero | grep -F "version $EXPECTED_VERSION"'
           if [ "$(uname -s)" = Darwin ]; then
-            sudo rm /usr/local/bin/nero
-            sudo pkgutil --forget com.thekiran.nero
+            # Remove every receipt-listed payload path (binary and doc dir), then forget it.
+            sh tests/macos/pkg_lifecycle.sh remove
           else
             sudo dpkg --remove nero
           fi
+      - name: Verify macOS installer upgrade and complete removal
+        if: runner.os == 'macOS'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          UPGRADE_VERSION: v255.255.65535
+          PLATFORM: ${{ matrix.platform }}
+        run: sh tests/macos/pkg_lifecycle.sh upgrade ".build/release/nero-$VERSION-$PLATFORM.pkg" "$VERSION" ".build/pkg-upgrade/nero-$UPGRADE_VERSION-$PLATFORM.pkg" "$UPGRADE_VERSION"
       - name: Upload verified package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
