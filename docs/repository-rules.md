@@ -33,3 +33,7 @@ gh api repos/thekiran/nero/branches/main/protection \
 Review existing repository rules before applying this payload; do not replace a
 stronger policy with it. Check the API response and Settings to confirm that the
 policy is active.
+
+The [9 November 2026 audit](security-controls-2026-11-09.md) records partial live
+API evidence and outstanding administrator checks. New analysis jobs are not
+required merge checks merely because they run on pull requests.
