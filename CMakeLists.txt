@@ -21,6 +21,8 @@ include(cmake/NeroTargets.cmake)
 
 set(NERO_CLI_SUPPORT_SOURCES
     src/core/log.c
+    src/core/platform.c
+    src/core/hardware.c
     src/cli/parser/parser.c
     src/cli/input.c
     src/cli/history.c
@@ -38,6 +40,12 @@ if(BUILD_TESTING)
     add_executable(parser-boundaries tests/parser_boundaries.c src/cli/parser/parser.c)
     nero_target(parser-boundaries)
     add_test(NAME parser-boundaries COMMAND parser-boundaries)
+    # Deterministic hardware recommendation fixtures; the real machine probe
+    # is never asserted (issue #62).
+    add_executable(workload-profile tests/workload_profile.c src/core/hardware.c src/core/platform.c)
+    nero_target(workload-profile)
+    target_compile_definitions(workload-profile PRIVATE NERO_HARDWARE_TEST_HOOKS)
+    add_test(NAME workload-profile COMMAND workload-profile)
     if(UNIX)
         add_test(NAME installation-lifecycle COMMAND ${Python3_EXECUTABLE}
             "${PROJECT_SOURCE_DIR}/tests/test_installation.py")

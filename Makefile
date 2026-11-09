@@ -17,6 +17,8 @@ UNAME_S := $(shell uname -s)
 
 CLI_SUPPORT_SOURCES := \
     src/core/log.c \
+    src/core/platform.c \
+    src/core/hardware.c \
     src/cli/parser/parser.c \
     src/cli/input.c \
     src/cli/history.c \
@@ -142,6 +144,11 @@ $(TEST_DIR)/logging-fixture: tests/logging_fixture.c src/core/log.c include/nero
 $(TEST_DIR)/parser-boundaries: tests/parser_boundaries.c src/cli/parser/parser.c include/nero/cli/parser.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/parser_boundaries.c src/cli/parser/parser.c -o $@
 
+# Deterministic hardware recommendation and simulation-bound parser tests.
+# Fixtures inject fake CPU/RAM data; the real machine probe is never asserted.
+$(TEST_DIR)/workload-profile: tests/workload_profile.c src/core/hardware.c src/core/platform.c include/nero/hardware.h include/nero/platform.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) -DNERO_HARDWARE_TEST_HOOKS tests/workload_profile.c src/core/hardware.c src/core/platform.c -o $@
+
 # Deterministic PTY smoke test for live early port selection (macOS/Linux). Mock
 # sockets only, no real traffic; defines NERO_SCAN_TEST_HOOKS itself for the
 # scanner's test-only, timing-free synchronization signals.
@@ -151,7 +158,8 @@ $(TEST_DIR)/live-select-pty: tests/linux/live_select_pty.c $(SCANNER_SOURCES) sr
 TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
              $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults \
              $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability $(TEST_DIR)/logging-fixture \
-             $(TEST_DIR)/scanner-runtime $(TEST_DIR)/live-select-pty $(TEST_DIR)/parser-boundaries $(TEST_DIR)/scan-session
+             $(TEST_DIR)/scanner-runtime $(TEST_DIR)/live-select-pty $(TEST_DIR)/parser-boundaries $(TEST_DIR)/scan-session \
+             $(TEST_DIR)/workload-profile
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
@@ -176,6 +184,7 @@ endif
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/scan-session
 	python3 tests/test_installation.py
 	$(TEST_DIR)/parser-boundaries
+	$(TEST_DIR)/workload-profile
 	python3 tests/test_history.py $(TEST_DIR)/nero-safe
 	python3 tests/test_logging.py $(TEST_DIR)/nero-safe $(TEST_DIR)/logging-fixture
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/portscanner-reliability
