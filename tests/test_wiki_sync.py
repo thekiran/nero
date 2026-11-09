@@ -104,5 +104,108 @@ class TestWikiSync(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+
+class TestWikiCredentials(unittest.TestCase):
+    def test_secret_never_enters_arguments_files_or_diagnostics(self):
+        from contextlib import redirect_stdout, redirect_stderr
+        import io
+        from unittest.mock import patch
+        from scripts.docs.wiki_publish import publish
+        sentinel = "DUMMY-token:/+%40-secret"
+        for failure in (0, 1, None):
+            calls = []
+            output = io.StringIO()
+            def fake_run(args, **kwargs):
+                calls.append(args)
+                self.assertNotIn(sentinel, repr(args))
+                self.assertEqual(kwargs['env']['WIKI_TOKEN'], sentinel)
+                self.assertEqual(kwargs['stdout'], subprocess.DEVNULL)
+                self.assertEqual(kwargs['stderr'], subprocess.DEVNULL)
+                helper = Path(kwargs['env']['GIT_ASKPASS'])
+                self.assertNotIn(sentinel, helper.read_text())
+                for path in helper.parent.rglob('*'):
+                    if path.is_file():
+                        self.assertNotIn(sentinel.encode(), path.read_bytes())
+                return subprocess.CompletedProcess(args, int(len(calls) - 1 == failure))
+            with patch('scripts.docs.wiki_publish.subprocess.run', side_effect=fake_run):
+                with redirect_stdout(output), redirect_stderr(output):
+                    if failure is None:
+                        publish('owner/repo', sentinel)
+                    else:
+                        with self.assertRaises(RuntimeError) as caught:
+                            publish('owner/repo', sentinel)
+                        self.assertNotIn(sentinel, str(caught.exception))
+            self.assertNotIn(sentinel, output.getvalue())
+            self.assertEqual(calls[0][3], 'https://github.com/owner/repo.wiki.git')
+            self.assertFalse(Path(calls[0][4]).exists())
+
+    def test_local_publication_push_and_remote_config(self):
+        """Exercise real clone/sync/push offline; inspect the actual .git config."""
+        from unittest.mock import patch
+        from scripts.docs.wiki_publish import publish
+        real_run = subprocess.run
+        sentinel = 'DUMMY-not-a-real-token-1905'
+        with tempfile.TemporaryDirectory() as directory:
+            remote = Path(directory) / 'wiki.git'
+            subprocess.check_call(['git', 'init', '--bare', str(remote)],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            configs = []
+            def local_run(args, **kwargs):
+                env = dict(kwargs['env'])
+                env.update(GIT_CONFIG_COUNT='3',
+                           GIT_CONFIG_KEY_2='url.' + str(remote) + '.insteadOf',
+                           GIT_CONFIG_VALUE_2='https://github.com/owner/repo.wiki.git')
+                kwargs['env'] = env
+                result = real_run(args, **kwargs)
+                clone = Path(args[4]) if args[0] == 'git' else Path(args[-2])
+                if (clone / '.git/config').exists():
+                    configs.append((clone / '.git/config').read_text())
+                return result
+            with patch('scripts.docs.wiki_publish.subprocess.run', side_effect=local_run):
+                publish('owner/repo', sentinel)
+            self.assertEqual(len(configs), 2)
+            for config in configs:
+                self.assertIn('https://github.com/owner/repo.wiki.git', config)
+                self.assertNotIn(sentinel, config)
+                self.assertNotIn('extraheader', config.lower())
+            pages = subprocess.check_output(['git', '--git-dir', str(remote),
+                                             'ls-tree', '--name-only', 'HEAD'], text=True)
+            self.assertIn('Home.md', pages)
+
+    def test_askpass_and_transport_failure_do_not_echo_credentials(self):
+        import os
+        from unittest.mock import patch
+        from scripts.docs.wiki_publish import publish
+        real_run = subprocess.run
+        sentinel = 'DUMMY-sensitive+/encoded'
+        def failed_transport(args, **kwargs):
+            helper = kwargs['env']['GIT_ASKPASS']
+            for prompt, expected in [('Username', 'x-access-token'), ('Password', sentinel)]:
+                reply = real_run([helper, prompt], env=kwargs['env'], capture_output=True,
+                                 text=True, check=True)
+                self.assertEqual(reply.stdout.strip(), expected)
+            # Simulate a transport that echoes a credential in both streams.
+            return real_run(['python3', '-c',
+                             'import os,sys; print(os.environ["WIKI_TOKEN"]); '
+                             'print(os.environ["WIKI_TOKEN"], file=sys.stderr); sys.exit(1)'], **kwargs)
+        with patch('scripts.docs.wiki_publish.subprocess.run', side_effect=failed_transport):
+            with self.assertRaisesRegex(RuntimeError, 'Wiki clone failed'):
+                publish('owner/repo', sentinel)
+
+    def test_missing_credentials_and_invalid_repository_fail_closed(self):
+        from scripts.docs.wiki_publish import publish
+        for repo, token in [('owner/repo', ''), ('owner/repo\n--evil', 'dummy')]:
+            with self.assertRaises(ValueError):
+                publish(repo, token)
+
+    def test_workflow_keeps_credentials_out_of_pr_validation(self):
+        workflow = (REPO_ROOT / '.github/workflows/wiki-sync.yml').read_text()
+        validate, publish = workflow.split('\n  publish:', 1)
+        self.assertNotIn('secrets.', validate)
+        self.assertIn("github.event_name != 'pull_request' && github.ref == 'refs/heads/main'", publish)
+        self.assertNotIn('x-access-token:', workflow)
+        self.assertNotIn('cat clone_err', workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
