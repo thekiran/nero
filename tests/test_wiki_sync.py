@@ -104,5 +104,55 @@ class TestWikiSync(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+
+class TestWikiCredentials(unittest.TestCase):
+    def test_secret_never_enters_arguments_files_or_diagnostics(self):
+        from contextlib import redirect_stdout, redirect_stderr
+        import io
+        from unittest.mock import patch
+        from scripts.docs.wiki_publish import publish
+        sentinel = "DUMMY-token:/+%40-secret"
+        for failure in (0, 1, None):
+            calls = []
+            output = io.StringIO()
+            def fake_run(args, **kwargs):
+                calls.append(args)
+                self.assertNotIn(sentinel, repr(args))
+                self.assertEqual(kwargs['env']['WIKI_TOKEN'], sentinel)
+                self.assertEqual(kwargs['stdout'], subprocess.DEVNULL)
+                self.assertEqual(kwargs['stderr'], subprocess.DEVNULL)
+                helper = Path(kwargs['env']['GIT_ASKPASS'])
+                self.assertNotIn(sentinel, helper.read_text())
+                for path in helper.parent.rglob('*'):
+                    if path.is_file():
+                        self.assertNotIn(sentinel.encode(), path.read_bytes())
+                return subprocess.CompletedProcess(args, int(len(calls) - 1 == failure))
+            with patch('scripts.docs.wiki_publish.subprocess.run', side_effect=fake_run):
+                with redirect_stdout(output), redirect_stderr(output):
+                    if failure is None:
+                        publish('owner/repo', sentinel)
+                    else:
+                        with self.assertRaises(RuntimeError) as caught:
+                            publish('owner/repo', sentinel)
+                        self.assertNotIn(sentinel, str(caught.exception))
+            self.assertNotIn(sentinel, output.getvalue())
+            self.assertEqual(calls[0][3], 'https://github.com/owner/repo.wiki.git')
+            self.assertFalse(Path(calls[0][4]).exists())
+
+    def test_missing_credentials_and_invalid_repository_fail_closed(self):
+        from scripts.docs.wiki_publish import publish
+        for repo, token in [('owner/repo', ''), ('owner/repo\n--evil', 'dummy')]:
+            with self.assertRaises(ValueError):
+                publish(repo, token)
+
+    def test_workflow_keeps_credentials_out_of_pr_validation(self):
+        workflow = (REPO_ROOT / '.github/workflows/wiki-sync.yml').read_text()
+        validate, publish = workflow.split('\n  publish:', 1)
+        self.assertNotIn('secrets.', validate)
+        self.assertIn("github.event_name != 'pull_request' && github.ref == 'refs/heads/main'", publish)
+        self.assertNotIn('x-access-token:', workflow)
+        self.assertNotIn('cat clone_err', workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
