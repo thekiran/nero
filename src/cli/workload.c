@@ -9,6 +9,20 @@
 #include "nero/hardware.h"
 #include "nero/log.h"
 
+/* The `preflight` screen describes what the live -Syn engine would attempt in
+ * THIS build. The engine is compiled in only when none of the offline/safe
+ * guards are set (the same guards the dispatcher uses in commands.c). When it
+ * is present we pull in its public header purely for the read-only compile-
+ * time worker count NERO_SYN_THREAD_COUNT; no engine symbol is referenced, so
+ * offline binaries still link no network code. */
+#if !defined(NERO_SAFE_TEST) && !defined(NERO_NETWORK_UNAVAILABLE) && \
+    !defined(NERO_SYN_UNAVAILABLE)
+#include "nero/syn_flood_powered.h"
+#define PREFLIGHT_ENGINE_COMPILED 1
+#else
+#define PREFLIGHT_ENGINE_COMPILED 0
+#endif
+
 #include <signal.h>
 #ifndef _WIN32
 #include <poll.h>
@@ -347,6 +361,113 @@ cli_cmd_result cmd_sim(char **tokens, size_t count)
 
     /* Ctrl+C during the menu is a Cancel, not a session abort: the scanner
      * commands reset the same session flag after consuming the interrupt. */
+    if (cli_termination_signal == SIGINT)
+        cli_termination_signal = 0;
+
+    return CLI_CMD_CONTINUE;
+}
+
+/* ============================================================
+ * READ-ONLY -Syn PREFLIGHT SCREEN (`preflight`)
+ * ============================================================ */
+
+/* Describes what the live -Syn engine in THIS build would attempt, as an
+ * upper bound. It opens no sockets, sends no packets, resolves no names and
+ * never starts -Syn; the only syscall it makes about privilege is a read-only
+ * geteuid(). All figures are qualified as attempt ceilings, never throughput
+ * and never a safe transmission rate (issue #60). */
+static void preflight_print_engine(void)
+{
+#if PREFLIGHT_ENGINE_COMPILED
+    const long workers = NERO_SYN_THREAD_COUNT;
+    const long descriptors = workers * 2 + 64;
+
+    fputs("Live -Syn engine:     Compiled into this build (experimental)\n",
+          stdout);
+    fputs("Raw-socket mode:      Requires root or CAP_NET_RAW; "
+          "unavailable without it\n", stdout);
+#ifndef _WIN32
+    /* Read-only privilege check: no escalation is attempted or offered. */
+    printf("Running as root now:  %s        "
+           "[read-only check; -Syn would fail without it]\n",
+           geteuid() == 0 ? "yes" : "no");
+#endif
+    printf("Fixed worker count:   %ld "
+           "(compile-time; an upper bound, never a guarantee)\n", workers);
+    fputs("Actual workers:       Not guaranteed - thread and raw-socket "
+          "creation can\n"
+          "                      fail; the engine reports the real count "
+          "when it runs.\n", stdout);
+    putchar('\n');
+    fputs("If you later run -Syn, this build may attempt "
+          "(upper bounds, not throughput):\n", stdout);
+    printf("  - Threads:          up to %ld, subject to OS limits\n", workers);
+    fputs("  - Raw sockets:      up to 2 per worker, each requiring "
+          "privilege\n", stdout);
+    printf("  - File descriptors: up to %ld (%ld x 2 + 64), raised via "
+           "setrlimit only\n"
+           "                      when permitted\n", descriptors, workers);
+#else
+    fputs("Live -Syn engine:     Not built into this target "
+          "(offline / safe build)\n", stdout);
+    fputs("Raw-socket mode:      Unsupported in this build\n", stdout);
+    fputs("                      No workers, sockets or packets can be "
+          "created here.\n", stdout);
+#endif
+}
+
+static void preflight_screen(void)
+{
+    nero_hardware_info info;
+    nero_hardware_probe(&info);
+
+    fputs("\nNERO - -Syn Preflight (READ-ONLY)\n", stdout);
+    fputs("This screen is informational only. It opens no sockets, sends no "
+          "packets,\n"
+          "resolves no names, and never starts the -Syn operation. Running "
+          "-Syn itself\n"
+          "is unchanged by viewing this screen.\n\n", stdout);
+    printf("Platform:             %s / %s\n", info.os, info.architecture);
+    preflight_print_engine();
+    putchar('\n');
+    fputs("These are upper bounds the build may attempt. They are not "
+          "measured\n"
+          "throughput and not a safe transmission rate.\n", stdout);
+    fputs("Laboratory safety:    docs/laboratory-safety.md\n\n", stdout);
+
+    for (;;) {
+        fputs("[1] Return to shell\n[0] Cancel\n\nYour choice: ", stdout);
+        fflush(stdout);
+
+        char buffer[SIM_INPUT_MAX];
+        int status = sim_read_line(buffer, sizeof(buffer));
+        if (status == INPUT_EOF || status == INPUT_CANCELLED) {
+            fputs("Returning to shell.\n", stdout);
+            return;
+        }
+        if (status == INPUT_OVERFLOW) {
+            fputs("Input too long; enter 1 or 0.\n", stdout);
+            continue;
+        }
+        if (strcmp(buffer, "0") == 0 || strcmp(buffer, "1") == 0) {
+            fputs("Returning to shell.\n", stdout);
+            return;
+        }
+        fputs("Invalid choice; enter 1 or 0.\n", stdout);
+    }
+}
+
+cli_cmd_result cmd_preflight(char **tokens, size_t count)
+{
+    if (tokens == NULL || count != 1)
+        return CLI_CMD_INVALID;
+
+    nero_log_write(NERO_LOG_INFO, "preflight",
+                   "Read-only -Syn preflight screen viewed (no network I/O)");
+    preflight_screen();
+
+    /* Ctrl+C during the screen is a Return, not a session abort; mirror the
+     * sim screen's handling of the shared interrupt flag. */
     if (cli_termination_signal == SIGINT)
         cli_termination_signal = 0;
 

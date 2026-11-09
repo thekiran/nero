@@ -84,6 +84,20 @@ The core commands control session state, screen rendering, and input history. Th
 * **Platforms:** macOS, Linux, Windows.
 * **Exit status:** Remains in terminal session (`0`); `Ctrl+C`, `Esc`, `q`, or `0` cancel without selecting a profile.
 
+### `preflight`
+* **Syntax:** `preflight`
+* **Classification:** **READ-ONLY.** Opens no sockets, sends no packets, resolves no names, starts no subprocess, and does not escalate privileges. It never enters or alters the `-Syn` execution path.
+* **Description:** Reports what the experimental `-Syn` engine in **this build** would attempt, so a user can understand the expected resource use before deciding to run it. It does not configure anything — there is no way to change the worker count, packet rate, or packet volume from this screen.
+* **Reported facts:**
+  * Whether the live `-Syn` engine is **compiled into this target**. Offline and safe builds state plainly that live raw mode is **unsupported** and that no workers, sockets, or packets can be created.
+  * The fixed, compile-time worker count (`NERO_SYN_THREAD_COUNT`, currently `512`), described as an **upper bound, never a guarantee**. Thread and raw-socket creation can fail, so the actual number of workers is only known at run time and is reported by the engine itself.
+  * The raw-socket privilege requirement (root / `CAP_NET_RAW`) and a **read-only** check (`geteuid()`) of whether the current process is privileged.
+  * Qualified upper-bound estimates for threads, raw sockets per worker, and file descriptors (`512 × 2 + 64`, raised via `setrlimit` only when permitted).
+* **Not throughput:** Every figure is an attempt ceiling, explicitly **not** measured throughput and **not** a safe network transmission rate.
+* **Safety:** Links to [laboratory-safety.md](laboratory-safety.md).
+* **Platforms:** macOS, Linux, Windows (renders on all CLI targets; identifies unsupported live raw modes clearly).
+* **Exit status:** Remains in terminal session (`0`); `[1]` Return, `[0]` Cancel, or `Ctrl+C`/`Esc`/`q` leave the screen without starting anything.
+
 ---
 
 ## Network Diagnostics Commands

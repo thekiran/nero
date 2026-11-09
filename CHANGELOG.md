@@ -6,6 +6,14 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+- Add the `preflight` read-only `-Syn` preflight screen: it reports, as
+  qualified upper bounds, what the experimental engine in the current build
+  would attempt (compile-time worker count, raw-socket privilege requirement,
+  thread/descriptor ceilings) and clearly flags builds where live raw mode is
+  not compiled in. It opens no sockets, sends no packets, starts no subprocess,
+  escalates no privilege, and never enters the `-Syn` path; no knob to
+  configure worker count, packet rate or packet volume is introduced. Expose
+  the engine's fixed worker count as read-only `NERO_SYN_THREAD_COUNT`.
 - Add the `sim` offline workload-profile screen (OFFLINE SIMULATION): it reads
   local CPU/RAM with read-only native APIs, shows a deterministic, conservative
   recommendation, and lets the user make the final selection. It opens no

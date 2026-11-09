@@ -54,4 +54,9 @@ typedef enum {
  * a socket, resolves a name or reaches the legacy -Syn engine. */
 cli_cmd_result cmd_sim(char **tokens, size_t count);
 
+/* workload.c: read-only -Syn preflight screen (`preflight`). Describes the
+ * engine's compile-time limits and platform support without opening a socket,
+ * sending a packet or starting -Syn. */
+cli_cmd_result cmd_preflight(char **tokens, size_t count);
+
 #endif

@@ -49,6 +49,26 @@ class SafeTests(unittest.TestCase):
         self.assertNotIn(b"-Syn operation failed", output)
         self.assertIn(b"Exiting", output)
 
+    def test_preflight_read_only(self):
+        # The -Syn preflight screen (issue #60) is informational only. On this
+        # offline binary the live engine is not built, so it must say so and
+        # must never link any packet/socket symbol — the strongest form of
+        # "zero calls to packet/socket APIs from the preflight entry point".
+        self.assert_no_network_symbols("nero-safe")
+        output = self.cli(b"preflight\n0\npreflight\n1\nexit\n")
+        self.assertIn(b"-Syn Preflight (READ-ONLY)", output)
+        self.assertIn(b"opens no sockets, sends no packets", output)
+        self.assertIn(b"not measured", output)
+        self.assertIn(b"not a safe transmission rate", output)
+        self.assertIn(b"docs/laboratory-safety.md", output)
+        # Offline/safe target: live raw mode is unsupported and clearly flagged.
+        self.assertIn(b"Not built into this target", output)
+        self.assertIn(b"Unsupported in this build", output)
+        # Both the Cancel (0) and Return (1) paths leave the screen cleanly.
+        self.assertEqual(output.count(b"Returning to shell."), 2)
+        # The read-only screen never claims to run or start anything.
+        self.assertNotIn(b"workers are running", output)
+
     def test_mode_off_gates_syn_at_dispatch(self):
         # -mode off must block -Syn at the command handler, consistently with
         # -Sc, before the legacy engine is ever entered. With diagnostics off,
