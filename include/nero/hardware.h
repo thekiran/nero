@@ -1,14 +1,14 @@
 #ifndef NERO_HARDWARE_H
 #define NERO_HARDWARE_H
 
-/* Offline, read-only local resource probing and the deterministic workload
- * recommendation behind the `sim` screen (OFFLINE SIMULATION).
+/* Read-only local resource probing and the deterministic workload
+ * recommendation used by the live `-Syn` run-time settings prompt.
  *
  * Scope contract (issue #62): this module reads basic CPU/RAM facts with
  * supported native APIs, never guesses missing values, and never touches the
- * legacy packet engine, THREAD_COUNT, portscanner() or scan_session.c.
- * The recommendation is informational only; the user always makes the final
- * choice and nothing is auto-started. */
+ * legacy packet engine, portscanner() or scan_session.c. The recommendation
+ * is informational only; the operator always makes the final choice and
+ * nothing is auto-started. */
 
 #include <stddef.h>
 
@@ -54,21 +54,24 @@ typedef enum {
  *   - otherwise                               -> BALANCED
  * reason (when reason_size > 0) is always filled with a plain-language
  * explanation, including the explicit "unavailable" case. The result is a
- * conservative simulation preset suggestion, not a network transmission rate. */
+ * conservative worker-count suggestion, not a network transmission rate. */
 nero_workload_profile nero_workload_recommend(
     const nero_hardware_info *info, char *reason, size_t reason_size);
 
-/* Documented simulation-only bounds for the offline screen (issue #59).
- * These values configure nothing: the live -Syn engine keeps its fixed
- * THREAD_COUNT and is never reachable from the offline screen. The workers
- * cap mirrors the display scale of the engine's compiled-in worker count so
- * the simulated numbers stay relatable, while remaining pure display data. */
-#define NERO_SIM_WORKERS_MIN 1
-#define NERO_SIM_WORKERS_MAX 512
-#define NERO_SIM_SECONDS_MIN 1
-#define NERO_SIM_SECONDS_MAX 60
+/* Conservative worker ceilings for the two documented profiles. They are
+ * starting points shown by the `-Syn` settings prompt, not hard limits: the
+ * operator may still choose any value the engine accepts. */
+#define NERO_WORKLOAD_LOW_WORKERS 64
+#define NERO_WORKLOAD_BALANCED_WORKERS 256
 
-/* Strict parser for bounded simulation counts (workers, seconds).
+/* Maps nero_workload_recommend() to the profile's suggested worker ceiling.
+ * Returns 0 when no recommendation can be made (probe unavailable), in which
+ * case the caller supplies its own fallback. `reason`, when non-NULL, receives
+ * the same plain-language explanation as nero_workload_recommend(). */
+long nero_workload_suggested_workers(
+    const nero_hardware_info *info, char *reason, size_t reason_size);
+
+/* Strict parser for bounded run-time counts (worker count, packet size).
  *
  * Accepts only a whole decimal number in [min, max] with no surrounding
  * characters. Rejects empty/blank input, signs ("+5", "-1"), non-numeric
@@ -77,7 +80,7 @@ nero_workload_profile nero_workload_recommend(
  *
  * Returns 0 and stores the parsed value in *out on success; returns -1
  * without touching *out otherwise. Input may not be NULL. */
-int nero_sim_count_parse(const char *text, long min, long max, long *out);
+int nero_count_parse(const char *text, long min, long max, long *out);
 
 #ifdef NERO_HARDWARE_TEST_HOOKS
 /* Deterministic offline fixtures (tests/workload_profile.c) override the

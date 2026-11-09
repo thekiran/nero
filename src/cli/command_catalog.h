@@ -10,7 +10,6 @@
     X(clear, cmd_clear) \
     X(version, cmd_version) \
     X(log, cmd_log) \
-    X(sim, cmd_sim) \
     X(preflight, cmd_preflight)
 
 #define CLI_HELP_ENTRIES(X) \
@@ -22,7 +21,6 @@
     X("clear", ": Clear the screen") \
     X("history", ": Show command history") \
     X("version", ": Show program version") \
-    X("sim", ": Offline workload profile (OFFLINE SIMULATION, no network I/O)") \
     X("preflight", ": Read-only -Syn preflight: expected resource use, no network I/O") \
     X("log", ": Show recent application logs") \
     X("log -errors", ": Show warnings and errors") \

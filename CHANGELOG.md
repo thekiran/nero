@@ -6,25 +6,30 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+- Add a run-time settings prompt to the live `-Syn` engine: before any worker
+  is spawned it probes local CPU/RAM (read-only), shows the measured hardware
+  and a suggested maximum worker count, then asks for the worker thread count
+  and the UDP packet size (`60`–`4096` bytes, default `4096`). The worker count
+  defaults to the hardware suggestion (64 on low-resource machines, otherwise
+  256) and is accepted up to the `NERO_SYN_THREAD_HARD_MAX` safety bound, so the
+  old fixed 512 ceiling is gone. Enter keeps the default, out-of-range input is
+  rejected rather than clamped, and `Esc`/`q`/`Ctrl+C` cancels without starting.
+  The TCP leg remains a 40-byte header-only SYN. There is no separate command:
+  the values are just part of `-Syn`, so further run-time parameters can be
+  added to the same prompt.
 - Add the `preflight` read-only `-Syn` preflight screen: it reports, as
   qualified upper bounds, what the experimental engine in the current build
-  would attempt (compile-time worker count, raw-socket privilege requirement,
-  thread/descriptor ceilings) and clearly flags builds where live raw mode is
-  not compiled in. It opens no sockets, sends no packets, starts no subprocess,
-  escalates no privilege, and never enters the `-Syn` path; no knob to
-  configure worker count, packet rate or packet volume is introduced. Expose
-  the engine's fixed worker count as read-only `NERO_SYN_THREAD_COUNT`.
-- Add the `sim` offline workload-profile screen (OFFLINE SIMULATION): it reads
-  local CPU/RAM with read-only native APIs, shows a deterministic, conservative
-  recommendation, and lets the user make the final selection. It opens no
-  sockets, sends no packets, and never reaches the legacy `-Syn` engine,
-  `THREAD_COUNT`, `portscanner()` or `scan_session.c`; offline binaries link no
-  network transmission symbols.
+  would attempt (hardware-suggested worker count, absolute worker/descriptor
+  bounds, raw-socket privilege requirement) and clearly flags builds where live
+  raw mode is not compiled in. It opens no sockets, sends no packets, starts no
+  subprocess, escalates no privilege, and never enters the `-Syn` path.
+- Remove the `sim` offline simulation screen; its read-only CPU/RAM probing and
+  deterministic workload recommendation now feed the live `-Syn` settings
+  prompt instead of a separate command.
 - Fix macOS CPU detection: `hw.logicalcpu`/`hw.physicalcpu` are 32-bit sysctls
-  and were being discarded by a `sizeof(long)` length check, so the screen
-  reported the processor count as `Unavailable` on working Macs.
-- Fix a missing NUL terminator in the simulation menu's line reader that let a
-  previous entry's leftover stack bytes corrupt the next parsed value.
+  and were being discarded by a `sizeof(long)` length check, so the `-Syn`
+  hardware suggestion reported the processor count as `Unavailable` on working
+  Macs.
 
 ## 0.1.4 — native installer release
 

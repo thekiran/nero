@@ -68,21 +68,7 @@ The core commands control session state, screen rendering, and input history. Th
 
 ---
 
-## Offline Workload Simulation
-
-### `sim`
-* **Syntax:** `sim`
-* **Classification:** **OFFLINE SIMULATION.** This screen performs **zero network I/O**. It opens no sockets, resolves no names, sends no packets, and never reaches the legacy `-Syn` engine, `THREAD_COUNT`, `portscanner()`, or `scan_session.c`.
-* **Description:** Reads basic **local** hardware facts using read-only native APIs — POSIX `sysctl`/`sysconf` (`/proc/meminfo` on Linux) and `GetSystemInfo`/`GlobalMemoryStatusEx` on Windows — and presents a conservative, documented simulation-only profile recommendation. The user always makes the final selection; nothing is auto-selected or auto-started.
-* **Detected data:** Logical processor count, physical core count (where the platform exposes it), total RAM, and available RAM (where exposed). Values that cannot be measured are shown as `Unavailable` rather than guessed. Displayed limitations note that logical cores differ from physical cores and that container/virtualization quotas can make host totals misleading.
-* **Recommendation rule (deterministic):**
-  * CPU or total RAM unavailable → **no recommendation** (manual selection only).
-  * `cpu_logical <= 2` **or** total RAM `<= 4 GiB` → **Low**.
-  * Otherwise → **Balanced**.
-* **Menu:** `[1] Low`, `[2] Balanced`, `[3] Custom`, `[0] Cancel`. The suggested profile is marked `(Recommended)`. `Custom` accepts a simulated worker count (`1`–`512`) and duration in seconds (`1`–`60`); out-of-range, signed, blank, or non-numeric input is rejected, never clamped silently.
-* **Simulation output:** Reports simulated worker/duration values, an explicit `Packets generated: 0` / `Sockets opened: 0`, and a note that the live `-Syn` engine is unchanged. The numbers are display data only and are **not** a safe real-network transmission rate.
-* **Platforms:** macOS, Linux, Windows.
-* **Exit status:** Remains in terminal session (`0`); `Ctrl+C`, `Esc`, `q`, or `0` cancel without selecting a profile.
+## Read-Only Screens
 
 ### `preflight`
 * **Syntax:** `preflight`
@@ -90,9 +76,9 @@ The core commands control session state, screen rendering, and input history. Th
 * **Description:** Reports what the experimental `-Syn` engine in **this build** would attempt, so a user can understand the expected resource use before deciding to run it. It does not configure anything — there is no way to change the worker count, packet rate, or packet volume from this screen.
 * **Reported facts:**
   * Whether the live `-Syn` engine is **compiled into this target**. Offline and safe builds state plainly that live raw mode is **unsupported** and that no workers, sockets, or packets can be created.
-  * The fixed, compile-time worker count (`NERO_SYN_THREAD_COUNT`, currently `512`), described as an **upper bound, never a guarantee**. Thread and raw-socket creation can fail, so the actual number of workers is only known at run time and is reported by the engine itself.
+  * The run-time-selectable worker count (`1`–`NERO_SYN_THREAD_HARD_MAX`, absolute safety bound) and UDP packet size (`NERO_SYN_PACKET_SIZE_MIN`–`NERO_SYN_PACKET_SIZE_MAX`), described as an **upper bound, never a guarantee**. The `-Syn` prompt shows a hardware-derived suggested maximum and uses it as the default; there is no fixed 512 ceiling. Both values are chosen in the `-Syn` settings prompt right before a run; this screen only reports their bounds. Thread and raw-socket creation can fail, so the actual number of workers is only known at run time and is reported by the engine itself.
   * The raw-socket privilege requirement (root / `CAP_NET_RAW`) and a **read-only** check (`geteuid()`) of whether the current process is privileged.
-  * Qualified upper-bound estimates for threads, raw sockets per worker, and file descriptors (`512 × 2 + 64`, raised via `setrlimit` only when permitted).
+  * Qualified upper-bound estimates for threads at the suggested worker count, raw sockets per worker, and file descriptors (suggested workers × 2 + 64, raised via `setrlimit` only when permitted).
 * **Not throughput:** Every figure is an attempt ceiling, explicitly **not** measured throughput and **not** a safe network transmission rate.
 * **Safety:** Links to [laboratory-safety.md](laboratory-safety.md).
 * **Platforms:** macOS, Linux, Windows (renders on all CLI targets; identifies unsupported live raw modes clearly).
@@ -142,6 +128,10 @@ resource limits, result meanings and cancellation behavior.
 ### `<network IP> -Syn`
 * **Syntax:** `<network IP> -Syn` or `-Syn <network IP>`
 * **Description:** Initiates raw TCP/UDP packet transmission routines against the specified target.
+* **Run-time settings prompt:** After the target and raw-socket checks pass, the engine probes local CPU/RAM and shows the measured hardware plus a suggested maximum worker count, then asks for the values to use for this run before spawning any worker. Pressing Enter keeps the default; input must be a whole number within the shown bounds (rejected, never silently clamped). `Esc`, `q` or `Ctrl+C` cancels the run without starting anything.
+  * **Worker thread count:** `1`–`65535` (`NERO_SYN_THREAD_HARD_MAX`, an absolute safety bound for input and allocation). The default is the hardware suggestion: **64** on a Low-resource machine (`<= 2` logical CPUs or `<= 4 GiB` RAM) or **256** otherwise, falling back to `512` (`NERO_SYN_THREAD_COUNT`) when probing is unavailable. There is no fixed 512 ceiling. The real count can be lower if thread or raw-socket creation fails.
+  * **Packet size (bytes):** `60`–`4096` (default `4096`). This sets the **UDP datagram** size on the wire (payload = packet size − 28 bytes of IP/UDP headers). The **TCP** leg is always a 40-byte header-only SYN and is not affected.
+  * The selected values apply to this invocation only. There is no separate command or stored profile for them; running `-Syn` again prompts again.
 * **Platform Availability & Runtime Requirements:**
   * **Linux (native):** Supported in live Make builds. Requires `root` privileges (`sudo nero`) and `CAP_NET_RAW` capability to open `AF_INET, SOCK_RAW` sockets.
   * **macOS (native):** Supported in live Make builds. Requires `root` privileges (`sudo nero`) for Berkeley Packet Filter (BPF) and raw IP socket access.

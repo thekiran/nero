@@ -1,9 +1,6 @@
 /* Read-only local hardware probing and the deterministic offline workload
  * recommendation. No network I/O, no subprocesses, no privilege changes and
  * no telemetry; missing values are reported as unavailable, never guessed. */
-#ifdef _WIN32
-#include "../platform/windows/nero_win_compat.h"
-#endif
 #include "nero/hardware.h"
 #include "nero/platform.h"
 
@@ -53,6 +50,7 @@ static int probe_posix(nero_hardware_info *info)
 }
 
 #elif defined(__linux__)
+#include <unistd.h>
 
 /* /proc/meminfo is read-only and always present on Linux; parsing it avoids
  * the non-POSIX sysconf(_SC_PHYS_PAGES) extension so the strict offline
@@ -99,6 +97,9 @@ static int probe_posix(nero_hardware_info *info)
 #endif
 
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
 #include <windows.h>
 
 static int probe_windows(nero_hardware_info *info)
@@ -114,7 +115,7 @@ static int probe_windows(nero_hardware_info *info)
 
     MEMORYSTATUSEX status;
     memset(&status, 0, sizeof(status));
-    status.dwLength = sizeof(status);
+    status.dwLength = (DWORD)sizeof(status);
     if (GlobalMemoryStatusEx(&status))
         info->ram_total_bytes = status.ullTotalPhys;
     return 1;
@@ -199,7 +200,20 @@ nero_workload_profile nero_workload_recommend(
     return profile;
 }
 
-int nero_sim_count_parse(const char *text, long min, long max, long *out)
+long nero_workload_suggested_workers(
+    const nero_hardware_info *info, char *reason, size_t reason_size)
+{
+    switch (nero_workload_recommend(info, reason, reason_size)) {
+    case NERO_WORKLOAD_PROFILE_LOW:
+        return NERO_WORKLOAD_LOW_WORKERS;
+    case NERO_WORKLOAD_PROFILE_BALANCED:
+        return NERO_WORKLOAD_BALANCED_WORKERS;
+    default:
+        return 0; /* No recommendation: caller supplies its own fallback. */
+    }
+}
+
+int nero_count_parse(const char *text, long min, long max, long *out)
 {
     if (text == NULL || out == NULL || min > max)
         return -1;

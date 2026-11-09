@@ -412,6 +412,12 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
 
 #endif
 
+    /* Ctrl+C during the -Syn settings prompt is a Cancel, not a session
+     * abort; consume the interrupt flag like the scanner and preflight
+     * commands so the shell keeps running. */
+    if (cli_termination_signal == SIGINT)
+        cli_termination_signal = 0;
+
     return CLI_CMD_CONTINUE;
 }
 

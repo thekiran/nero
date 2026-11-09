@@ -1,5 +1,5 @@
 /* Deterministic offline tests for hardware probing hooks, the workload
- * recommendation rule and the strict simulation-count parser (issue #62).
+ * recommendation rule and the strict run-time count parser.
  * Real machine hardware is never asserted; fixtures override the probe. */
 #include "nero/hardware.h"
 
@@ -82,8 +82,7 @@ static void test_extreme_counts(void)
     expect(nero_workload_recommend(&info, reason, sizeof(reason)) ==
                NERO_WORKLOAD_PROFILE_BALANCED,
            "LONG_MAX cores handled without overflow");
-    nero_hardware_info negative = fixture(-2147483648L,
-                                          16ULL * 1024 * 1024 * 1024);
+    nero_hardware_info negative = fixture(-3, 16ULL * 1024 * 1024 * 1024);
     expect(nero_workload_recommend(&negative, reason, sizeof(reason)) ==
                NERO_WORKLOAD_PROFILE_NONE,
            "negative CPU count -> no recommendation");
@@ -110,40 +109,52 @@ static void test_probe_fixture_override(void)
            "real probe is plausible or unavailable");
 }
 
-static void test_sim_count_parse(void)
+static void test_suggested_workers(void)
+{
+    char reason[256];
+    nero_hardware_info low = fixture(2, 2ULL * 1024 * 1024 * 1024);
+    expect(nero_workload_suggested_workers(&low, reason, sizeof(reason)) ==
+               NERO_WORKLOAD_LOW_WORKERS,
+           "low-resource -> low worker suggestion");
+    nero_hardware_info balanced = fixture(8, 16ULL * 1024 * 1024 * 1024);
+    expect(nero_workload_suggested_workers(&balanced, reason, sizeof(reason)) ==
+               NERO_WORKLOAD_BALANCED_WORKERS,
+           "8 cores / 16 GiB -> balanced worker suggestion");
+    nero_hardware_info failed = fixture(-1, 0);
+    expect(nero_workload_suggested_workers(&failed, reason, sizeof(reason)) == 0,
+           "unavailable hardware -> no worker suggestion");
+}
+
+static void test_count_parse(void)
 {
     long out = 0;
-    /* Valid bounds. */
-    expect(nero_sim_count_parse("1", NERO_SIM_WORKERS_MIN,
-                                NERO_SIM_WORKERS_MAX, &out) == 0 &&
-               out == 1,
+    const long max = 65535;
+    /* Valid bounds, including values well above the old 512 display cap. */
+    expect(nero_count_parse("1", 1, max, &out) == 0 && out == 1,
            "parse lower bound 1");
-    expect(nero_sim_count_parse("512", NERO_SIM_WORKERS_MIN,
-                                NERO_SIM_WORKERS_MAX, &out) == 0 &&
-               out == 512,
-           "parse upper bound 512");
-    expect(nero_sim_count_parse("60", NERO_SIM_SECONDS_MIN,
-                                NERO_SIM_SECONDS_MAX, &out) == 0 && out == 60,
-           "parse seconds bound 60");
+    expect(nero_count_parse("1000", 1, max, &out) == 0 && out == 1000,
+           "parse value above 512");
+    expect(nero_count_parse("65535", 1, max, &out) == 0 && out == 65535,
+           "parse upper bound 65535");
     /* Rejections: empty, signed, non-numeric, junk, overflow, range. */
-    expect(nero_sim_count_parse("", 1, 512, &out) == -1, "reject empty");
-    expect(nero_sim_count_parse(" ", 1, 512, &out) == -1, "reject blank");
-    expect(nero_sim_count_parse("abc", 1, 512, &out) == -1, "reject letters");
-    expect(nero_sim_count_parse("-1", 1, 512, &out) == -1, "reject negative");
-    expect(nero_sim_count_parse("+5", 1, 512, &out) == -1, "reject signed");
-    expect(nero_sim_count_parse("0", 1, 512, &out) == -1, "reject zero");
-    expect(nero_sim_count_parse("513", 1, 512, &out) == -1, "reject above max");
-    expect(nero_sim_count_parse("5x", 1, 512, &out) == -1, "reject trailing junk");
-    expect(nero_sim_count_parse("5 ", 1, 512, &out) == -1,
+    expect(nero_count_parse("", 1, max, &out) == -1, "reject empty");
+    expect(nero_count_parse(" ", 1, max, &out) == -1, "reject blank");
+    expect(nero_count_parse("abc", 1, max, &out) == -1, "reject letters");
+    expect(nero_count_parse("-1", 1, max, &out) == -1, "reject negative");
+    expect(nero_count_parse("+5", 1, max, &out) == -1, "reject signed");
+    expect(nero_count_parse("0", 1, max, &out) == -1, "reject zero");
+    expect(nero_count_parse("65536", 1, max, &out) == -1, "reject above max");
+    expect(nero_count_parse("5x", 1, max, &out) == -1, "reject trailing junk");
+    expect(nero_count_parse("5 ", 1, max, &out) == -1,
            "reject trailing space");
-    expect(nero_sim_count_parse(" 5", 1, 512, &out) == -1,
+    expect(nero_count_parse(" 5", 1, max, &out) == -1,
            "reject leading space");
-    expect(nero_sim_count_parse("999999999999999999999", 1, 512, &out) == -1,
+    expect(nero_count_parse("999999999999999999999", 1, max, &out) == -1,
            "reject long overflow");
-    expect(nero_sim_count_parse("4294967296", 1, 512, &out) == -1,
+    expect(nero_count_parse("4294967296", 1, max, &out) == -1,
            "reject 2^32");
-    expect(nero_sim_count_parse(NULL, 1, 512, &out) == -1, "reject NULL text");
-    expect(nero_sim_count_parse("5", 1, 512, NULL) == -1, "reject NULL out");
+    expect(nero_count_parse(NULL, 1, max, &out) == -1, "reject NULL text");
+    expect(nero_count_parse("5", 1, max, NULL) == -1, "reject NULL out");
 }
 
 int main(void)
@@ -154,7 +165,8 @@ int main(void)
     test_failed_probe();
     test_extreme_counts();
     test_probe_fixture_override();
-    test_sim_count_parse();
+    test_suggested_workers();
+    test_count_parse();
 
     if (failures != 0) {
         fprintf(stderr, "%d workload-profile test(s) failed\n", failures);
