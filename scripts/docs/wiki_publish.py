@@ -3,6 +3,8 @@
 
 Git output is deliberately not forwarded: transports and helpers may echo an
 encoded credential that GitHub's literal secret masking would not recognize.
+The outcome comes from a fixed status word that wiki_sync.py writes to a file,
+never from transport output, and only allowlisted words are ever reported.
 """
 import os
 from pathlib import Path
@@ -20,6 +22,13 @@ elif "Password" in sys.argv[1]:
 else:
     sys.exit(1)
 '''
+
+# Fixed, non-secret result lines keyed by the wiki_sync.py status word.
+OUTCOMES = {
+    "pushed": "Wiki publication succeeded: documentation changes were pushed.",
+    "unchanged": "Wiki publication succeeded: no changes; the Wiki was already current.",
+}
+UNREPORTED = "Wiki publication finished, but synchronization reported no outcome."
 
 
 def publish(repo, token):
@@ -43,10 +52,11 @@ def publish(repo, token):
                    GIT_CONFIG_VALUE_0="", GIT_CONFIG_KEY_1="core.hooksPath",
                    GIT_CONFIG_VALUE_1=os.devnull)
         checkout = root / "wiki"
+        status_file = root / "sync-status"
         commands = [
             ["git", "clone", "--", f"https://github.com/{repo}.wiki.git", str(checkout)],
             [sys.executable, str(Path(__file__).with_name("wiki_sync.py")),
-             "--sync", str(checkout), "--push"],
+             "--status-file", str(status_file), "--sync", str(checkout), "--push"],
         ]
         for index, command in enumerate(commands):
             # Never write diagnostic artifacts or transport output, even on a
@@ -59,16 +69,36 @@ def publish(repo, token):
             if result.returncode:
                 phase = "clone" if index == 0 else "sync/push"
                 raise RuntimeError(f"Wiki {phase} failed; check credential scope and Wiki initialization")
-    print("Wiki publication succeeded.")
+        try:
+            status = status_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            status = ""
+    message = OUTCOMES.get(status, UNREPORTED)
+    print(message)
+    return message
+
+
+def write_step_summary(line):
+    """Append one fixed, non-secret line to the GitHub Actions job summary."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as summary:
+            summary.write(line + "\n")
+    except OSError:
+        print("::warning::Could not write the job summary.", file=sys.stderr)
 
 
 def main():
     token = os.environ.pop("WIKI_TOKEN", "")
     try:
-        publish(os.environ.get("GITHUB_REPOSITORY", ""), token)
+        message = publish(os.environ.get("GITHUB_REPOSITORY", ""), token)
     except (ValueError, RuntimeError) as error:
         print(f"::error::{error}", file=sys.stderr)
+        write_step_summary(str(error))
         return 1
+    write_step_summary(message)
     return 0
 
 

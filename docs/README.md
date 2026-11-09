@@ -29,6 +29,7 @@ Pages for the **[GitHub Wiki](https://github.com/thekiran/nero/wiki)** are gener
 ## Project Policies and Governance
 
 * **[Wiki Publication](wiki-publication.md):** Set up Wiki credentials and verify actual publication (not only validation).
+* **[Wiki Publishing Credentials](wiki-publishing-security.md):** Token scope, handling, migration, rotation and revocation for Wiki publishing.
 * **[Contributing Guidelines](../CONTRIBUTING.md):** Contributor workflow, commit expectations, and validation rules.
 * **[Project Roadmap](../ROADMAP.md):** Target milestones, feature scope, and distribution prerequisites.
 * **[Security Disclosure Policy](../SECURITY.md):** Responsible reporting guidelines for experimental modules.
