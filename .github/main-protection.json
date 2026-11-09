@@ -1,11 +1,39 @@
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": [
-      "Release checks",
-      "clang (ubuntu-latest)",
-      "clang (macos-latest)",
-      "msvc"
+    "checks": [
+      {
+        "context": "Release checks",
+        "app_id": 15368
+      },
+      {
+        "context": "clang (ubuntu-latest)",
+        "app_id": 15368
+      },
+      {
+        "context": "clang (macos-latest)",
+        "app_id": 15368
+      },
+      {
+        "context": "msvc",
+        "app_id": 15368
+      },
+      {
+        "context": "CodeQL (c-cpp)",
+        "app_id": 15368
+      },
+      {
+        "context": "CodeQL (actions)",
+        "app_id": 15368
+      },
+      {
+        "context": "CodeQL",
+        "app_id": 57789
+      },
+      {
+        "context": "Offline fuzz corpus and bounded campaign",
+        "app_id": 15368
+      }
     ]
   },
   "enforce_admins": true,
