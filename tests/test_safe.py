@@ -12,6 +12,7 @@ import unittest
 
 ROOT = pathlib.Path(sys.argv.pop(1)).resolve()
 ENV = dict(os.environ, TERM="xterm", UBSAN_OPTIONS="halt_on_error=1", NERO_HISTORY_FILE=":memory:")
+INTERFACE_BINARY = "interfaces-mock" if sys.platform.startswith("linux") else "interfaces"
 ANSI = re.compile(rb"\x1b\[[0-9;]*[A-Za-z]")
 
 
@@ -85,7 +86,7 @@ class SafeTests(unittest.TestCase):
         self.cli(b"clear\n" * 100 + b"exit\n")
 
     def test_interface_selection(self):
-        result = run("interfaces", b"1\n")
+        result = run(INTERFACE_BINARY, b"1\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         output = ANSI.sub(b"", result.stdout)
         self.assertIn(b"Available Network Interfaces", output)
@@ -95,7 +96,7 @@ class SafeTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertIn(b"SELECTED:" + names[0], output)
         for data in (b"0\n", b"-1\n", b"999\n", b"invalid\n", b""):
-            invalid = run("interfaces", data)
+            invalid = run(INTERFACE_BINARY, data)
             self.assertEqual(invalid.returncode, 1)
             self.assertIn(b"Invalid selection.", invalid.stderr)
 

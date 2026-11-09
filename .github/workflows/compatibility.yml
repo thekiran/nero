@@ -29,6 +29,9 @@ jobs:
         run: make CC=${{ matrix.cc }}
       - name: No-network regression tests
         run: make test CC=${{ matrix.cc }}
+      - name: Native Linux interface enumeration
+        if: runner.os == 'Linux'
+        run: python3 tests/linux/interface_regression.py .build/tests/interfaces
       - name: No-network memory safety tests
         run: make test-sanitize CC=${{ matrix.cc }}
       - name: Scanner thread safety (macOS Clang)

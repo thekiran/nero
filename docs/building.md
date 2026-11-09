@@ -9,16 +9,17 @@ Run all commands from the repository root.
 | Command | Result |
 | --- | --- |
 | `make` | Build the platform-specific `nero` executable |
-| `make test` | Run 10 core and 21 terminal regression tests, plus the operation-layout fixture on macOS |
+| `make test` | Run CLI, history, parser, logger, scanner, installer and terminal regressions |
 | `make test-sanitize` | Run the same offline tests with ASan/UBSan |
-| `make analyze` | Analyze the CLI and selected macOS adapter with Clang |
+| `make analyze` | Analyze the CLI, scanner and host interface adapter with Clang |
 | `make help` | List development commands |
 | `make clean` | Remove the generated executable and `.build/` directory |
 
 Requirements: a C11 compiler, Make, and Python 3 for tests.
 On macOS, the Xcode Command Line Tools / SDK are sufficient.
-The existing Linux Make target also uses the curl, cJSON, ldns and ncurses
-development libraries. Offline tests do not link the network modules.
+The current Linux targets use libc and pthreads; cJSON is bundled. Unused curl,
+external cJSON, ldns and ncurses link flags have been removed. Scanner tests link
+the production TCP core; synthetic tests inject I/O and runtime tests use loopback.
 
 ## CMake
 
