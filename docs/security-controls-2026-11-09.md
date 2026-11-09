@@ -6,24 +6,24 @@ A checked-in workflow/policy is configuration intent, not proof of enforcement.
 | Control | Observed state | Evidence / limitation |
 | --- | --- | --- |
 | Main protected | Enabled | GET `/repos/thekiran/nero/branches/main`: protected=true |
-| Required check names | Enabled, partial visibility | Same response lists Release checks, clang (ubuntu-latest), clang (macos-latest), msvc, app_id 15368, enforcement everyone |
+| Required check names | Enabled with the original 4 checks; 8-check proposal **not saved** server-side | Live state lists Release checks, clang (macos-latest), clang (ubuntu-latest), msvc (app_id 15368, enforcement everyone). The 8-check `.github/main-protection.json` proposal awaits owner re-authentication; do not describe it as active |
 | Strict/up-to-date and admin enforcement | Enabled | Authenticated Settings branch rule 85993164: require PR, up-to-date checks, conversation resolution and no bypass are checked |
 | Force push / deletion / review | Force push and deletion disabled; approval not required | Authenticated branch rule: allow force pushes/deletions unchecked; require approvals unchecked, stale approvals dismissed |
 | Repository rulesets | None returned | GET `/repos/thekiran/nero/rulesets` returns [] |
 | CodeQL baseline setup | Disabled | Authenticated Advanced Security page offers Set up; no configured CodeQL workflow |
-| New advanced CodeQL | Proposed, execution pending | security.yml, C/C++ manual production Linux build and Actions analysis; must inspect first run/SARIF |
+| New advanced CodeQL | Enabled in source; trusted-main runs succeeded | security.yml C/C++ manual production Linux build and Actions analysis uploaded on main in [run 42652688683](https://github.com/thekiran/nero/actions/runs/42652688683) (`2a1804a`) and [run 42656860302](https://github.com/thekiran/nero/actions/runs/42656860302) (`0161f6f`) |
 | Dependency graph / Dependabot alerts / security updates | Disabled | Authenticated Advanced Security page: Off for all three |
 | Private vulnerability reporting | Disabled | Authenticated Advanced Security page: Enable private vulnerability reporting |
 | Secret scanning / push protection | Enabled | Authenticated Advanced Security page: Secret Protection Disable button, Push protection On |
 | Code scanning failure threshold | High or higher | Authenticated Advanced Security protection rules (standard alerts: only errors) |
-| Scorecard | Proposed, execution pending | Trusted-main bounded JSON artifact; no public-results upload, OIDC, PAT or extra write token |
+| Scorecard | Enabled in source; trusted-main runs succeeded | Bounded JSON artifact from [run 42652688683](https://github.com/thekiran/nero/actions/runs/42652688683) (`2a1804a`) and [run 42656860302](https://github.com/thekiran/nero/actions/runs/42656860302) (`0161f6f`); no public-results upload, OIDC, PAT or extra write token |
 | SHA-pinned Actions | Enabled in reviewed source | Existing and new external uses carry full 40-character commit hashes |
 | Repository workflow permissions | Read-only default | Authenticated Actions settings selects Read repository contents and packages; create/approve PR unchecked |
 | Fork execution approval | First-time contributors | Authenticated Actions settings; not all external contributors |
 | Server SHA pin enforcement | Disabled | Require actions pinned to full SHA unchecked; reviewed source pins remain intact |
 | Workflow token permissions | Read-only default | All reviewed workflows default contents:read; trusted release publish alone grants contents:write; CodeQL grants security-events:write only for analysis |
 | PR publication secrets | Excluded in source | No pull_request_target; Wiki publisher excludes PRs and requires main; tag release publication is gated; checkout credentials are disabled |
-| Fuzz/CodeQL required checks | Not enabled by this change | Administrator must compare observed job names and add mandatory checks without replacing stronger existing rules |
+| Fuzz/CodeQL required checks | Proposed, not saved | Listed in the 8-check JSON proposal; `tests/test_workflow_security.py` asserts every proposed context matches a real job. Owner must save it without replacing stronger existing rules |
 
 CodeQL uses a real `make CC=gcc -B` compilation, covering Linux production parser,
 history, logging, scanner, packet engine and Linux adapters without executing the
@@ -99,7 +99,7 @@ Token-Permissions, Dangerous-Workflow, Fuzzing and CI-Tests each scored 10.
 | --- | --- | --- |
 | Branch-Protection -1 | P1 / owner | Tool token cannot read classic protection; owner UI verified existing controls. New eight-check save awaits GitHub reauthentication. Unknown is not disabled. |
 | Signed-Releases 0 | P2 / owner, #11 | Published artifacts remain unsigned; signing/provenance trust must not be fabricated. Existing owner credential/infrastructure blockers remain. |
-| Pinned-Dependencies 8 | P2 / maintainer | Follow-up task: verify the official multiarch Ubuntu 24.04 digest, pin tests/linux/Dockerfile and rebuild its container. All 35 reviewed Action references were pinned; this warning is the Docker base tag. |
+| Pinned-Dependencies 8 | P2 / maintainer | Addressed in source: tests/linux/Dockerfile now pins the official multi-arch Ubuntu 24.04 index digest (amd64 and arm64), Dependabot tracks it, and `tests/test_workflow_security.py` rejects unpinned `FROM` lines. Rebuild the local validation container before relying on it; the score updates on the next Scorecard run. |
 | Code-Review 0 | P2 / owner | Solo-maintainer policy currently requires zero approvals. Add an independent reviewer before requiring one approval; do not lock the maintainer out. |
 | SAST 7 | Informational / maintainer | CodeQL is newly enabled; 4 of the historical 30 commits had recognized scans. Keep it running; do not fabricate historical results or rewrite main for a score. |
 | Packaging -1 | Detection limitation / maintainer | Custom native release workflow was not recognized by Scorecard; actual five-platform installer/archive checks and public assets are separate positive evidence. |
