@@ -46,9 +46,10 @@ suppress findings merely to make CI green.
 Authenticated owner-session Settings pages were inspected read-only on this date:
 Advanced Security, Actions General, and branch rule 85993164. No settings were
 changed. API protection details still return 403, but the UI verified the saved
-policy above. Remaining verification: compare required check names with current
-check-runs, review first CodeQL/SARIF and Scorecard output, and add new checks
-after successful runs. Disabled dependency/private-reporting controls are owner
+policy above. CodeQL and Scorecard have now run successfully on trusted main, and
+`tests/test_workflow_security.py` checks the proposed required check names
+against the workflow job names offline. Remaining verification: the owner saves
+the proposed checks server-side and confirms the saved state. Disabled dependency/private-reporting controls are owner
 follow-ups, not silently claimed enabled. Preserve the sole-owner review policy.
 Do not apply the sample JSON blindly.
 
