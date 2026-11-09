@@ -259,3 +259,45 @@ Log recovery and clearing behavior:
   reports failure and retains recent memory records if the persistent clear is
   unsuccessful. A successful clear also restores disk logging when possible.
 - Session end records contain the actual exit status and stdout error flag.
+
+### Offline environment diagnostics
+
+Run `doctor` in the shell, or `nero --doctor` for a standalone report that bypasses
+session logging/history and Windows socket initialization. Both paths are read-only
+and never transmit packets, escalate privileges, fix files or read log/history
+contents. Personal paths, addresses and environment values are omitted by default.
+The report shows build/OS/architecture, redacted installation location, PATH
+resolution, terminal support, user storage-root availability and compiled network
+features. Capabilities and privileges are observations, not successful socket tests.
+Build tools are not runtime dependencies. Missing loader libraries can prevent the
+program itself from starting, so doctor cannot diagnose them from inside the program.
+
+Plain output is used for redirects, `NO_COLOR`, `TERM=dumb` and missing terminal
+capabilities. Consult [installation](installation.md) for a missing/global command,
+and [troubleshooting](troubleshooting.md) for terminal or storage diagnoses. The
+existing interactive shell still owns its usual session history/log lifecycle;
+use `--doctor` when collecting a report without any session storage changes.
+
+### Readable command names
+
+`help` groups commands under GENERAL, HISTORY, LOGGING, DIAGNOSTICS, NETWORK and
+LABORATORY. `help --all` adds the detailed scope notice and legacy syntax table.
+Existing commands remain valid:
+
+| Readable command | Existing equivalent |
+| --- | --- |
+| `help --all` | `help -All` |
+| `history clear` | `history -clear` |
+| `logs [errors\|path\|clear]` | `log [-errors\|-path\|-clear]` |
+| `network status` | `-mode` |
+| `network enable` / `network disable` | `-mode on` / `-mode off` |
+| `scan <IP>` | `<IP> -Sc` / `-Sc <IP>` |
+| `syn preflight` | `preflight` |
+| `syn <IP>` | `<IP> -Syn` / `-Syn <IP>` |
+
+These aliases reuse the same handlers, validation, mode gate, port selection and
+hardware settings prompt. `syn <IP>` starts the existing packet-flood operation;
+it does not mean an offline simulation. Use only the documented authorized lab
+scope. Tests use safe/mock builds or disabled network mode. `sim` remains absent.
+Recognized benign history aliases and canonical `scan <IP>` persist under the
+existing bounded privacy allowlist; malformed/secret arguments do not.

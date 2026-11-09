@@ -21,6 +21,7 @@ include(cmake/NeroTargets.cmake)
 
 set(NERO_CLI_SUPPORT_SOURCES
     src/core/log.c
+    src/core/doctor.c
     src/core/platform.c
     src/core/hardware.c
     src/cli/parser/parser.c
@@ -38,6 +39,13 @@ nero_target(nero-platform-info)
 
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(doctor-render tests/doctor_render.c src/core/doctor.c)
+    nero_target(doctor-render)
+    target_compile_definitions(doctor-render PRIVATE NERO_NETWORK_UNAVAILABLE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(doctor-render PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+    endif()
+    add_test(NAME doctor-render COMMAND doctor-render)
     add_executable(parser-boundaries tests/parser_boundaries.c src/cli/parser/parser.c)
     nero_target(parser-boundaries)
     add_test(NAME parser-boundaries COMMAND parser-boundaries)
@@ -261,6 +269,14 @@ if(BUILD_TESTING AND NOT MSVC)
     add_test(NAME logging COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/test_logging.py" $<TARGET_FILE:${logging_cli_target}> $<TARGET_FILE:logging-fixture>)
     set_tests_properties(logging PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND TARGET nero-safe)
+    add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero-safe>)
+elseif(BUILD_TESTING AND TARGET nero)
+    add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero>)
 endif()
 
 if(BUILD_TESTING)

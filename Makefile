@@ -17,6 +17,7 @@ UNAME_S := $(shell uname -s)
 
 CLI_SUPPORT_SOURCES := \
     src/core/log.c \
+    src/core/doctor.c \
     src/core/platform.c \
     src/core/hardware.c \
     src/cli/parser/parser.c \

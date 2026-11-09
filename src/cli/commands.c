@@ -37,6 +37,7 @@
 #include "nero/network_diagnostics.h"
 #include "nero/operation_ui.h"
 #include "nero/log.h"
+#include "nero/doctor.h"
 #include "nero/socket_handle.h"
 #ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/portscanner.h"
@@ -428,11 +429,12 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
 static cli_cmd_result cmd_help(char **tokens, size_t count)
 {
     if (count > 2 ||
-        (count == 2 && strcmp(tokens[1], "-All") != 0)) {
+        (count == 2 && strcmp(tokens[1], "-All") != 0 && strcmp(tokens[1], "--all") != 0)) {
         return CLI_CMD_INVALID;
     }
 
     cli_show_help();
+    if (count == 2) cli_show_help_details();
 
     return CLI_CMD_CONTINUE;
 }
@@ -443,7 +445,7 @@ static cli_cmd_result cmd_help(char **tokens, size_t count)
 
 static cli_cmd_result cmd_history(char **tokens, size_t count)
 {
-    if (count == 2 && strcmp(tokens[1], "-clear") == 0) {
+    if (count == 2 && (strcmp(tokens[1], "-clear") == 0 || strcmp(tokens[1], "clear") == 0)) {
         if (cli_history_clear() == 0)
             printf("\nHistory cleared.\n");
         else
@@ -501,6 +503,13 @@ static cli_cmd_result cmd_clear(char **tokens, size_t count)
  * VERSION
  * ============================================================ */
 
+static cli_cmd_result cmd_doctor(char **tokens, size_t count)
+{
+    (void)tokens;
+    if (count != 1) return CLI_CMD_INVALID;
+    return nero_doctor(stdout) ? CLI_CMD_FAILURE : CLI_CMD_CONTINUE;
+}
+
 static cli_cmd_result cmd_version(char **tokens, size_t count)
 {
     (void)tokens;
@@ -529,6 +538,47 @@ static cli_cmd_result cmd_log(char **tokens, size_t count)
         else fprintf(stderr, "Could not clear persisted logs: %s\n", strerror(errno));
     } else return CLI_CMD_INVALID;
     return CLI_CMD_CONTINUE;
+}
+
+/* Readable aliases reuse the existing handlers and their validation/gates.
+ * No scanner, selection, settings or transmission path is duplicated here. */
+static cli_cmd_result cmd_logs(char **tokens, size_t count)
+{
+    if (count == 1) return cmd_log(tokens, count);
+    if (count != 2) return CLI_CMD_INVALID;
+    char *option;
+    if (strcmp(tokens[1], "errors") == 0) option = "-errors";
+    else if (strcmp(tokens[1], "path") == 0) option = "-path";
+    else if (strcmp(tokens[1], "clear") == 0) option = "-clear";
+    else return CLI_CMD_INVALID;
+    char *legacy[] = {"log", option};
+    return cmd_log(legacy, 2);
+}
+
+static cli_cmd_result cmd_network(char **tokens, size_t count)
+{
+    if (count != 2) return CLI_CMD_INVALID;
+    char *legacy[] = {"-mode", NULL};
+    if (strcmp(tokens[1], "status") == 0) return cmd_mode(legacy, 1);
+    if (strcmp(tokens[1], "enable") == 0) legacy[1] = "on";
+    else if (strcmp(tokens[1], "disable") == 0) legacy[1] = "off";
+    else return CLI_CMD_INVALID;
+    return cmd_mode(legacy, 2);
+}
+
+static cli_cmd_result cmd_scan_alias(char **tokens, size_t count)
+{
+    if (count != 2) return CLI_CMD_INVALID;
+    char *legacy[] = {tokens[1], "-Sc"};
+    return cmd_scan(legacy, 2);
+}
+
+static cli_cmd_result cmd_syn_alias(char **tokens, size_t count)
+{
+    if (count != 2) return CLI_CMD_INVALID;
+    if (strcmp(tokens[1], "preflight") == 0) return cmd_preflight(tokens + 1, 1);
+    char *legacy[] = {tokens[1], "-Syn"};
+    return cmd_syn(legacy, 2);
 }
 
 /* ============================================================

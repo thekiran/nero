@@ -97,7 +97,7 @@ class SafeTests(unittest.TestCase):
 
     def test_history_navigation(self):
         output = self.cli(b"version\nhelp\n\x1b[A\x1b[A\x1b[B\nexit\n")
-        self.assertEqual(output.count(b"Available Commands"), 2)
+        self.assertEqual(output.count(b"NERO COMMANDS"), 2)
         output = self.cli(b"version\n\x1b[A\nexit\n")
         self.assertEqual(output.count(b"version development"), 2)
 

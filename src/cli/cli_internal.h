@@ -35,6 +35,7 @@ int cli_history_clear(void);
 void cli_render_prompt(void);
 void cli_render_line(const cli_line *line);
 void cli_show_help(void);
+void cli_show_help_details(void);
 void cli_show_syn_status(void);
 
 /* commands.c: 1 = exit, 0 = continue, -1 = session failure. */
