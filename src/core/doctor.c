@@ -106,11 +106,12 @@ static int path_status(const char *executable)
     for (int i = 0; i < 256; ++i) {
         const char *end = strchr(p, separator);
         size_t length = end ? (size_t)(end - p) : strlen(p);
-        char candidate[DOCTOR_PATH_CAP];
+        char candidate[DOCTOR_PATH_CAP] = {0};
         if (length + sizeof(suffix) >= sizeof(candidate)) return -1;
-        if (!length) { candidate[0] = '.'; candidate[1] = 0; length = 1; }
-        else memcpy(candidate, p, length);
-        memcpy(candidate + length, suffix, sizeof(suffix));
+        int printed = snprintf(candidate, sizeof(candidate), "%.*s%s",
+                               (int)(length ? length : 1), length ? p : ".", suffix);
+        if (printed < 0 || (size_t)printed >= sizeof(candidate)) return -1;
+        candidate[sizeof(candidate) - 1] = 0;
         if (doctor_access(candidate, mode) == 0) {
             struct stat info;
             if (stat(candidate, &info) == 0 && S_ISREG(info.st_mode))
