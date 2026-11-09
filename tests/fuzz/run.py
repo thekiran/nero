@@ -26,4 +26,12 @@ for name in ('parser', 'history', 'log'):
                     '-artifact_prefix=' + temp + '/']
         else:
             args = [str(binary), *map(str, seeds)]
-        subprocess.run(args, check=True, timeout=60)
+        try:
+            subprocess.run(args, check=True, timeout=60)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            artifacts = a.build.resolve() / 'failures' / name
+            artifacts.mkdir(parents=True, exist_ok=True)
+            for item in Path(temp).iterdir():
+                if item.is_file():
+                    shutil.copy2(item, artifacts / item.name)
+            raise

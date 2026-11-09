@@ -35,8 +35,10 @@ CI runs reviewed seeds and bounded campaigns on every PR. This job must be added
 to server-required checks by the administrator before it can be called a mandatory
 merge gate; a workflow definition alone does not enforce branch protection.
 
-For a crash, preserve the emitted `crash-*` input privately before temporary
-cleanup (run a binary directly with an explicit artifact directory for debugging),
+For a crash, the runner preserves emitted inputs under the build directory
+`failures/<target>` and CI uploads them for seven days. Only synthetic reviewed
+seeds/mutations enter these targets. For interactive debugging, use an explicit
+artifact directory when running a binary directly,
 reproduce with the same binary/input, and minimize with `-minimize_crash=1`
 `-exact_artifact_path=reproducer`. Commit the smallest non-sensitive reproducer
 and a targeted regression after confirming a production defect. Do not upload
