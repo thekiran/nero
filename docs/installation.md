@@ -36,12 +36,6 @@ into Program Files, registers system PATH, adds a Start menu shortcut and
 appears in Installed apps for repair/removal. Restart existing Windows Terminal
 processes once so they inherit the saved PATH.
 
-After setup, open a terminal in **any folder** and run `nero`. macOS/Linux also
-support `sudo nero` for operations needing administrator privileges. Windows
-uses an Administrator terminal for elevation. Downloading or extracting a
-portable archive alone does not register a global command; the following
-manual instructions are for that optional distribution path.
-
 macOS has no graphical uninstaller for `.pkg` files. The NERO package installs
 `/usr/local/bin/nero` and `/usr/local/share/doc/nero` under the receipt
 `com.thekiran.nero`; `pkgutil --files com.thekiran.nero` lists them. To remove
@@ -55,6 +49,12 @@ sudo pkgutil --forget com.thekiran.nero
 
 Installing a newer `.pkg` over an older one upgrades in place. Command history
 and logs are retained.
+
+After setup, open a terminal in **any folder** and run `nero`. macOS/Linux also
+support `sudo nero` for operations needing administrator privileges. Windows
+uses an Administrator terminal for elevation. Downloading or extracting a
+portable archive alone does not register a global command; the following
+manual instructions are for that optional distribution path.
 
 The installers currently have no Developer ID/notarization or Authenticode
 signature. Operating-system publisher/security prompts can appear; no

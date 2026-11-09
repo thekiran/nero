@@ -193,7 +193,7 @@ jobs:
           sudo -n env EXPECTED_COMMAND="$expected_command" EXPECTED_VERSION="$EXPECTED_VERSION" NERO_LOG_FILE=:memory: NERO_HISTORY_FILE=:memory: sh -ec 'cd /; test "$(command -v nero)" = "$EXPECTED_COMMAND"; printf "version\nexit\n" | nero | grep -F "version $EXPECTED_VERSION"'
           if [ "$(uname -s)" = Darwin ]; then
             # Remove every receipt-listed payload path (binary and doc dir), then forget it.
-            sh tests/macos/pkg_lifecycle.sh remove
+            sh "$GITHUB_WORKSPACE/tests/macos/pkg_lifecycle.sh" remove
           else
             sudo dpkg --remove nero
           fi
