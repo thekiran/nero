@@ -277,3 +277,27 @@ capabilities. Consult [installation](installation.md) for a missing/global comma
 and [troubleshooting](troubleshooting.md) for terminal or storage diagnoses. The
 existing interactive shell still owns its usual session history/log lifecycle;
 use `--doctor` when collecting a report without any session storage changes.
+
+### Readable command names
+
+`help` groups commands under GENERAL, HISTORY, LOGGING, DIAGNOSTICS, NETWORK and
+LABORATORY. `help --all` adds the detailed scope notice and legacy syntax table.
+Existing commands remain valid:
+
+| Readable command | Existing equivalent |
+| --- | --- |
+| `help --all` | `help -All` |
+| `history clear` | `history -clear` |
+| `logs [errors\|path\|clear]` | `log [-errors\|-path\|-clear]` |
+| `network status` | `-mode` |
+| `network enable` / `network disable` | `-mode on` / `-mode off` |
+| `scan <IP>` | `<IP> -Sc` / `-Sc <IP>` |
+| `syn preflight` | `preflight` |
+| `syn <IP>` | `<IP> -Syn` / `-Syn <IP>` |
+
+These aliases reuse the same handlers, validation, mode gate, port selection and
+hardware settings prompt. `syn <IP>` starts the existing packet-flood operation;
+it does not mean an offline simulation. Use only the documented authorized lab
+scope. Tests use safe/mock builds or disabled network mode. `sim` remains absent.
+Recognized benign history aliases and canonical `scan <IP>` persist under the
+existing bounded privacy allowlist; malformed/secret arguments do not.

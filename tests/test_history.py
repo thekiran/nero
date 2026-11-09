@@ -42,6 +42,14 @@ class HistoryTests(unittest.TestCase):
                  b"192.0.2.1 -Sc\nversion\nexit\n")
         self.assertEqual(self.path.read_bytes(), b"-mode off\n192.0.2.1 -Sc\nversion\n")
 
+    def test_readable_aliases_preserve_privacy_allowlist_and_clear(self):
+        self.cli(b"network disable\nhelp --all\nlogs path\nscan 192.0.2.1\n"
+                 b"scan 001.2.3.4\nscan 192.0.2.1 secret\nlogs password=secret\nexit\n")
+        self.assertEqual(self.path.read_bytes(),
+                         b"network disable\nhelp --all\nlogs path\nscan 192.0.2.1\n")
+        self.cli(b"history clear\nexit\n")
+        self.assertEqual(self.path.read_bytes(), b"")
+
     def test_bounded_history_and_malformed_import(self):
         self.path.write_bytes(b"help\n" * 20000 + b"version\x1b[31m\nhelp\x00\n"
                               b"unknown-secret\nversion\nhelp")

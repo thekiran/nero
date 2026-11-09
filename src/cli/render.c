@@ -121,6 +121,34 @@ void cli_render_line(const cli_line *line)
 
 void cli_show_help(void)
 {
+    static const char *const rows[][3] = {
+#define CLI_GROUP_ROW(group, usage, description) {group, usage, description},
+        CLI_GROUPED_HELP(CLI_GROUP_ROW)
+#undef CLI_GROUP_ROW
+    };
+    pthread_mutex_lock(&ekran_mutex);
+    puts("\nNERO COMMANDS");
+    if (terminal_unicode_enabled())
+        puts("──────────────────────────────────────");
+    else
+        puts("--------------------------------------");
+    const char *previous = "";
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        if (strcmp(previous, rows[i][0]) != 0) {
+            if (terminal_color_enabled()) printf("\n\033[1;32m%s\033[0m\n", rows[i][0]);
+            else printf("\n%s\n", rows[i][0]);
+            previous = rows[i][0];
+        }
+        printf("  %-20s %s\n", rows[i][1], rows[i][2]);
+    }
+    puts("\nEXPERIMENTAL SOFTWARE - LABORATORY USE ONLY. Use 'help --all' for scope and legacy aliases.");
+    row_location = row_location > INT_MAX - 32 ? 16 : row_location + 32;
+    fflush(stdout);
+    pthread_mutex_unlock(&ekran_mutex);
+}
+
+void cli_show_help_details(void)
+{
     pthread_mutex_lock(&ekran_mutex);
     row_location = row_location > INT_MAX - 11 ? 16 : row_location + 11;
     static const char *const commands[][2] = {

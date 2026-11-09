@@ -35,6 +35,9 @@ static int complete_line(cli_line *line)
     static const char *const candidates[] = {
 #define CLI_CANDIDATE(usage, description) usage,
         CLI_HELP_ENTRIES(CLI_CANDIDATE)
+#define CLI_GROUP_CANDIDATE(group, usage, description) usage,
+        CLI_GROUPED_HELP(CLI_GROUP_CANDIDATE)
+#undef CLI_GROUP_CANDIDATE
 #undef CLI_CANDIDATE
     };
     const char *match = NULL;
@@ -44,7 +47,7 @@ static int complete_line(cli_line *line)
         if (candidates[index][0] == '<' ||
             strncmp(candidates[index], line->text, line->length) != 0)
             continue;
-        if (match != NULL)
+        if (match != NULL && strcmp(match, candidates[index]) != 0)
             return 0;
         match = candidates[index];
     }
