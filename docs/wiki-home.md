@@ -117,14 +117,17 @@ being populated.
 
 Automatic publication runs only for `main` pushes or manual runs on `main`,
 after documentation validation. An owner must initialize the Wiki by creating
-its first page, then configure the repository Actions secret `WIKI_PUSH_TOKEN`
-with a credential authorized to push to `thekiran/nero.wiki.git` (for a classic
-personal access token, use the `repo` scope). Do not commit the credential.
-Pull requests validate and archive generated pages without publishing.
+its first page, then store an expiring fine-grained personal access token,
+restricted to this repository with only Contents read/write permission, as the
+repository Actions secret `WIKI_PUSH_TOKEN`. Do not use a broad classic token,
+and never commit, print or paste the credential value. Rotate or revoke it as
+described in the [Wiki publishing credentials](wiki-publishing-security.md)
+guide. Pull requests validate and archive generated pages without publishing.
 
 On `main`, a missing credential, clone failure or push failure fails the
 publication job. The `wiki-pages` artifact remains available from validation
-when publication is blocked. Check the publication job and its synchronization
-summary before claiming that the Wiki is current.
+when publication is blocked. Check the publication job and its job summary line,
+which reports whether changes were pushed or the Wiki was already current,
+before claiming that the Wiki is current.
 
 NERO is distributed under the [MIT License](https://github.com/thekiran/nero/blob/main/LICENSE.txt).

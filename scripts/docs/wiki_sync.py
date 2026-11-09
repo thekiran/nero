@@ -10,6 +10,7 @@ Usage:
     python3 scripts/docs/wiki_sync.py --check
     python3 scripts/docs/wiki_sync.py --build <output-directory>
     python3 scripts/docs/wiki_sync.py --sync <wiki-git-directory> [--push]
+        [--status-file <path>]
 """
 import argparse
 import os
@@ -43,6 +44,9 @@ PAGE_MAP = {
 }
 
 MANAGED_SYSTEM_FILES = {"_Sidebar.md", "_Footer.md"}
+
+# Fixed, non-secret outcomes reported by --sync (and --status-file).
+SYNC_STATUSES = ("unchanged", "committed", "pushed")
 
 
 def get_sidebar_content() -> str:
@@ -238,8 +242,12 @@ def build_wiki_pages(output_dir: Path) -> None:
     print(f"\nSuccessfully generated {len(pages)} Wiki pages in {output_dir}")
 
 
-def sync_wiki_repo(wiki_git_dir: Path, push: bool = False) -> None:
-    """Synchronize generated pages into a local clone of the Wiki repository."""
+def sync_wiki_repo(wiki_git_dir: Path, push: bool = False) -> str:
+    """Synchronize generated pages into a local clone of the Wiki repository.
+
+    Returns one of SYNC_STATUSES: "unchanged" when nothing differed,
+    "committed" for a local-only commit, or "pushed" after a successful push.
+    """
     if not (wiki_git_dir / ".git").exists():
         raise ValueError(f"'{wiki_git_dir}' is not a valid Git repository.")
 
@@ -268,7 +276,7 @@ def sync_wiki_repo(wiki_git_dir: Path, push: bool = False) -> None:
 
     if not status:
         print("Idempotent check: No changes detected. Wiki repository is already up to date.")
-        return
+        return "unchanged"
 
     print("Detected changes to Wiki documentation:")
     for line in status.splitlines():
@@ -301,8 +309,9 @@ def sync_wiki_repo(wiki_git_dir: Path, push: bool = False) -> None:
         ).strip()
         subprocess.check_call(["git", "push", "origin", branch], cwd=wiki_git_dir)
         print("Wiki publication completed successfully.")
-    else:
-        print("Local sync completed. (Run with --push to publish to remote Wiki).")
+        return "pushed"
+    print("Local sync completed. (Run with --push to publish to remote Wiki).")
+    return "committed"
 
 
 def main():
@@ -313,7 +322,12 @@ def main():
     group.add_argument("--sync", type=Path, help="Sync generated Wiki pages into cloned Wiki Git repository")
 
     parser.add_argument("--push", action="store_true", help="Push changes when running --sync")
+    parser.add_argument("--status-file", type=Path,
+                        help="With --sync, write the fixed outcome word "
+                             f"({', '.join(SYNC_STATUSES)}) to this file on success")
     args = parser.parse_args()
+    if args.status_file and not args.sync:
+        parser.error("--status-file requires --sync")
 
     if args.check:
         valid = check_wiki_docs()
@@ -321,7 +335,9 @@ def main():
     elif args.build:
         build_wiki_pages(args.build)
     elif args.sync:
-        sync_wiki_repo(args.sync, push=args.push)
+        status = sync_wiki_repo(args.sync, push=args.push)
+        if args.status_file:
+            args.status_file.write_text(status + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

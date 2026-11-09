@@ -7,15 +7,18 @@ is a generated mirror, not a second independent source of truth.
 
 1. Initialize the [Wiki](https://github.com/thekiran/nero/wiki) by creating
    its first page if the Wiki Git repository does not exist yet.
-2. Create an owner-controlled, revocable token authorized to push to
-   `thekiran/nero.wiki.git`. Keep permissions as narrow as your GitHub
-   token type allows. Never commit or print the credential.
+2. Create an expiring fine-grained personal access token restricted to this
+   repository with only Contents read/write permission. Never commit or
+   print the credential.
 3. In **Settings → Secrets and variables → Actions**, add the repository
    secret `WIKI_PUSH_TOKEN`.
 4. Run **Actions → Documentation and Wiki Sync → Run workflow** on `main`.
 5. Confirm both the link validation and the publish step, then inspect the
-   generated Wiki pages. The run summary explicitly reports
-   successful synchronization or a failed publication job.
+   generated Wiki pages. The publish job summary states whether changes were
+   pushed, the Wiki was already current, or publication failed.
+
+See [Wiki publishing credentials](wiki-publishing-security.md) for how the
+token is handled, migrating from a classic token, rotation and revocation.
 
 A green validation workflow means the docs could be built; it does not alone
 prove they were published. When the secret is absent or the Wiki repository
