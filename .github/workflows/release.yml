@@ -284,9 +284,6 @@ jobs:
     needs: [prepare, package, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -329,6 +326,38 @@ jobs:
           test "$(find . -maxdepth 1 -name '*.msi' | wc -l)" -eq 1
           cat ./*.sha256 | LC_ALL=C sort -k2 > SHA256SUMS
           sha256sum --check SHA256SUMS
+      - name: Preserve verified package set
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-release-set
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Report pull request package verification
+        if: github.event_name == 'pull_request'
+        run: echo 'All five native installers, five portable archives and aggregate checksums verified. Publication requires an explicit main release intent or manual publish request; other builds remain drafts.' >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: [prepare, draft]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-release-set
+          path: dist
+      - name: Reverify immutable package bytes before publishing
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
       - name: Create draft and honor explicit publication request
         if: github.event_name != 'pull_request'
         env:
@@ -395,14 +424,11 @@ jobs:
             fi
           fi
 
-      - name: Report pull request package verification
-        if: github.event_name == 'pull_request'
-        run: echo 'All five native installers, five portable archives and aggregate checksums verified. Publication requires an explicit main release intent or manual publish request; other builds remain drafts.' >> "$GITHUB_STEP_SUMMARY"
 
   release-checks:
     name: Release checks
     if: always()
-    needs: [prepare, package, windows, draft]
+    needs: [prepare, package, windows, draft, publish]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every supported platform
@@ -411,8 +437,15 @@ jobs:
           POSIX: ${{ needs.package.result }}
           WINDOWS: ${{ needs.windows.result }}
           DRAFT: ${{ needs.draft.result }}
+          PUBLICATION: ${{ needs.publish.result }}
+          TRUSTED_PUBLICATION: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
         run: |
           test "$PREPARE" = success
           test "$POSIX" = success
           test "$WINDOWS" = success
           test "$DRAFT" = success
+          if [ "$TRUSTED_PUBLICATION" = true ]; then
+            test "$PUBLICATION" = success
+          else
+            test "$PUBLICATION" = skipped
+          fi

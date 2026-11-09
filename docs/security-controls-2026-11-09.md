@@ -21,7 +21,7 @@ A checked-in workflow/policy is configuration intent, not proof of enforcement.
 | Repository workflow permissions | Read-only default | Authenticated Actions settings selects Read repository contents and packages; create/approve PR unchecked |
 | Fork execution approval | First-time contributors | Authenticated Actions settings; not all external contributors |
 | Server SHA pin enforcement | Disabled | Require actions pinned to full SHA unchecked; reviewed source pins remain intact |
-| Workflow token permissions | Read-only default | All reviewed workflows default contents:read; release publish alone grants contents:write; CodeQL grants security-events:write only for analysis |
+| Workflow token permissions | Read-only default | All reviewed workflows default contents:read; trusted release publish alone grants contents:write; CodeQL grants security-events:write only for analysis |
 | PR publication secrets | Excluded in source | No pull_request_target; Wiki publisher excludes PRs and requires main; tag release publication is gated; checkout credentials are disabled |
 | Fuzz/CodeQL required checks | Not enabled by this change | Administrator must compare observed job names and add mandatory checks without replacing stronger existing rules |
 
@@ -55,3 +55,15 @@ Do not apply the sample JSON blindly.
 References: [CodeQL setup](https://github.com/github/codeql-action),
 [Scorecard action](https://github.com/ossf/scorecard-action),
 [branch rule verification](repository-rules.md).
+
+## Release permission finding and correction
+
+Source review found that the baseline `draft` aggregation job requested
+contents:write even on PRs, although its actual publication step was excluded.
+No token disclosure was observed. Package/checksum verification now stays in a
+read-only job and hands a verified artifact set to a separate main/tag-only
+publication job. The privileged job rechecks SHA256SUMS. The aggregate Release
+checks gate requires verification and successful publication for trusted release
+runs, or an explicitly skipped publisher for PR validation. Arbitrary branch
+workflow_dispatch can validate packages but cannot publish. Security regression
+assertions run under the existing required Clang static-analysis checks.

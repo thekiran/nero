@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Workflow permission regressions
+        run: python3 -m unittest tests/test_workflow_security.py
       - name: Existing portable CLI analysis
         run: make analyze
       - name: New foundation analysis
