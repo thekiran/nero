@@ -1,0 +1,24 @@
+name: Offline coverage-guided fuzzing
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fuzz:
+    name: Offline fuzz corpus and bounded campaign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure isolated harnesses
+        run: cmake -S . -B .build/fuzz -DCMAKE_C_COMPILER=clang -DBUILD_TESTING=OFF -DNERO_FUZZING=ON
+      - name: Build with libFuzzer, ASan and UBSan
+        run: cmake --build .build/fuzz --target fuzz-parser fuzz-history fuzz-log --parallel 2
+      - name: Replay every reviewed seed
+        run: python3 tests/fuzz/run.py .build/fuzz
+      - name: Bounded coverage-guided campaign
+        run: python3 tests/fuzz/run.py .build/fuzz --campaign
