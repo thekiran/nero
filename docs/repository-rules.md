@@ -37,3 +37,12 @@ policy is active.
 The [9 November 2026 audit](security-controls-2026-11-09.md) records partial live
 API evidence and outstanding administrator checks. New analysis jobs are not
 required merge checks merely because they run on pull requests.
+
+The hardening policy also proposes `CodeQL (c-cpp)`, `CodeQL (actions)`, the
+GitHub Advanced Security `CodeQL` result check, and `Offline fuzz corpus and
+bounded campaign`. Apply them only after those exact live check names succeed
+on current main, preserving the existing app bindings and all stronger settings. The reviewed
+payload binds CI jobs to GitHub Actions (15368) and the result check to GitHub
+Advanced Security (57789), as observed in the live check-runs API.
+The CodeQL result check enforces the configured high-or-higher alert threshold;
+successful execution of the analysis job alone does not mean zero findings.

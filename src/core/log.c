@@ -261,14 +261,12 @@ static void remember_import(char *line, size_t length) {
 }
 /* Called by pthread_once, before acquiring the writer lock. Import at most
  * one MiB per file; avoid stream-position/EOF ambiguities after failed seeks. */
-static void load_recent(const char *name) {
-    FILE *file = open_log(name, 0, 1);
-    if (!file) return;
-    if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return; }
+static void import_recent(FILE *file) {
+    if (fseek(file, 0, SEEK_END) != 0) return;
     long end = ftell(file);
-    if (end < 0) { fclose(file); return; }
+    if (end < 0) return;
     long start = end > LOG_LIMIT ? end - LOG_LIMIT : 0;
-    if (fseek(file, start, SEEK_SET) != 0) { fclose(file); return; }
+    if (fseek(file, start, SEEK_SET) != 0) return;
     long remaining = end - start;
     int discard = start > 0;
     char chunk[8192], line[LOG_LINE];
@@ -287,8 +285,14 @@ static void load_recent(const char *name) {
         if (read_count < wanted) break;
     }
     if (!discard && length) remember_import(line, length);
+}
+static void load_recent(const char *name) {
+    FILE *file = open_log(name, 0, 1);
+    if (!file) return;
+    import_recent(file);
     fclose(file);
 }
+
 static int create_parent(void) {
     char parent[LOG_PATH];
     memcpy(parent, path, strlen(path) + 1);
