@@ -76,3 +76,10 @@ community conduct expectations and a shorter README with dedicated installation 
 - Add native macOS ARM64/Intel and Linux x86-64/ARM64 release builds.
 - Gate packaging on offline regressions and POSIX ASan/UBSan tests.
 - Produce archives, build metadata, SHA-256 sidecars and an aggregate manifest.
+
+### Scanner session reliability (unreleased)
+
+- Extract the production TCP core into independently owned scan sessions and replace source-inclusion tests with per-session I/O injection.
+- Preserve successful writable connections that already have a hangup; count worker failures and fail explicitly on clock errors.
+- Add simultaneous-session, stop/cleanup, known-listener and Linux interface-fallback regressions.
+- Separate deterministic interface tests from mandatory native Linux enumeration and remove unused Linux link dependencies.

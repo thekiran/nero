@@ -1,0 +1,167 @@
+NERO quality validation / 2026-11-09
+Baseline: 56598f0ec9ea814163d74e093a5836a0586dc9e8
+GCC: 14.2.0
+Source SHA-256:
+a9497062188b638bca9c6d77c87916985c02dca0e879563703e571db08478418  src/modules/scan_session.c
+d7f8b69d4f952c14df9ae825131ce399c430f4f5d313b22c51e346adcc7e0798  src/modules/portscanner.c
+f8b5d23038554583a9e864b74e88ae6fb425c60b7941e2fb28cf03c9524d1069  src/modules/scan_internal.h
+bcfc7dd68d131e57bc9c98fbbf6d94e61772b39db1b5904a215466d32eba48ba  include/nero/scan_session.h
+9c24f6ee28d1965d7d1098c83e7546f3a890f896a05a8e960ad682a68e47a159  src/platform/linux/select_interface.c
+72aec7048d5e038e609c298c6841a40bcf19b63fbd752b5bd46fdce90177b306  tests/scan_session.c
+cc813844cb56d225c1933bd7d549ff9d2a5e174dd2e08a1c172d20224a60aae2  tests/portscanner_reliability.c
+84ed719aee2e1aadfa402c8c3dff91514cf7487caee5f2a9bf408b2873b403bd  tests/linux/scanner_runtime.c
+87f33f98cf0c8bf1e7360b0b235e52aecccf6b89ff609c833bf36dcb758f67af  tests/linux/live_select_pty.c
+
+Make final exit=0
+PASS session ownership, validation, initialization/clock failures, caller fallback and one-shot lifecycle
+PASS simultaneous sessions keep targets, cancellation, ledgers and outcomes separate
+PASS cancelling one session cannot stop a concurrent independent session
+PASS concurrent snapshots, busy rejection, bounded stop, socket cleanup and fresh restart
+Ran 1 test in 0.075s
+OK
+PASS parser capacity, malformed syntax and borrowed storage boundaries
+Ran 7 tests in 0.077s
+OK
+Ran 14 tests in 0.145s
+OK
+PASS scanner mutex/banner initialization failures reach error logs
+PASS early selection logs partial coverage with stable diagnostic keys
+PASS error diagnostics: operation/errno counts, retry replacement and unresolved readiness
+PASS all closed: exact 1..65535 coverage, no duplicate workers, partial/all thread creation failure
+PASS unknown discovery does not gate full scan; all retry windows drained beyond old cutoff
+PASS timeout, delayed connect, resource/nonblocking/poll/SO_ERROR/routing failures, invalid/HUP/pending events and EINTR
+PASS full filtered target: invariant holds, 3 rounds still retry each silent port exactly once, host stays unknown
+PASS cancellation cleans active sockets and reports unscanned separately; invalid IPv4 rejected
+PASS user early-select stops the scan as partial, stays distinct from cancel, and does not persist
+PASS async interrupt stops work before attempts and a restart re-covers every port
+PASS every socket resource failure accounted as unknown, then retried to closed
+PASS first/last port probed; port 0 and out-of-range indices never enter the ledger
+PASS retries never downgrade open/closed/filtered evidence, including under concurrent writers
+PASS adaptive retry backs off to a descriptor ceiling, recovers every port, and rounds stay bounded
+PASS progress counts completed probes and reaches 100% only after the deep phase
+PASS Esc/Ctrl+C/SIGINT cancel the port menu, and Esc stops queued scan work as unscanned
+PASS production entry point: unknown discovery proceeds to all ports and cleans its ledger
+PASS scanner reliability: no real sockets or external targets contacted
+PASS real worker: loopback listener open, refused port closed, attempts accounted
+PASS async interrupt before work leaves every port explicitly unscanned
+PASS menu EOF on pipe -> -1 (no selection guessed)
+PASS menu Enter/arrow on pty -> expected ports, slave termios restored
+PASS end-to-end loopback scans (incl. one with partial worker-creation failure) complete, report profile/duration/status, and restart cleanly
+PASS public headless API: known real listener found in 3/3 complete scans
+PASS scanner runtime: loopback only, no external targets, descriptor baseline restored
+PASS pty: Enter after first open port stops the scan and opens the port menu (partial)
+PASS pty: Esc cancels the whole operation, distinct from early selection
+PASS pty: without Enter the scan completes normally
+PASS live-select pty: deterministic, mock sockets only, terminal restored on every path
+Ran 11 tests in 0.148s
+OK (skipped=2)
+Ran 24 tests in 0.596s
+OK
+PASS operation layout: scrolling, resize, logo, NO_COLOR, Escape and termios
+
+CTest final exit=0
+ 1/14 Test  #1: parser-boundaries ................   Passed    0.00 sec
+ 2/14 Test  #2: installation-lifecycle ...........   Passed    0.17 sec
+ 3/14 Test  #3: foundation .......................   Passed    0.09 sec
+ 4/14 Test  #4: simulation .......................   Passed    0.00 sec
+ 5/14 Test  #5: interface-fallback ...............   Passed    0.00 sec
+ 6/14 Test  #6: terminal-quality .................   Passed    0.84 sec
+ 7/14 Test  #7: operation-layout .................   Passed    3.72 sec
+ 8/14 Test  #8: history-persistence ..............   Passed    0.20 sec
+ 9/14 Test  #9: legacy-safe-regression ...........   Passed    0.13 sec
+10/14 Test #10: scan-session .....................   Passed    0.24 sec
+11/14 Test #11: portscanner-reliability ..........   Passed    0.51 sec
+12/14 Test #12: scanner-runtime ..................   Passed    1.83 sec
+13/14 Test #13: live-select-pty ..................   Passed    0.70 sec
+14/14 Test #14: logging ..........................   Passed    0.24 sec
+100% tests passed out of 14
+Total Test time (real) =   8.67 sec
+
+ASan/UBSan detect_leaks=0 exit=0
+PASS session ownership, validation, initialization/clock failures, caller fallback and one-shot lifecycle
+PASS simultaneous sessions keep targets, cancellation, ledgers and outcomes separate
+PASS cancelling one session cannot stop a concurrent independent session
+PASS concurrent snapshots, busy rejection, bounded stop, socket cleanup and fresh restart
+Ran 1 test in 0.072s
+OK
+PASS parser capacity, malformed syntax and borrowed storage boundaries
+Ran 7 tests in 0.776s
+OK
+Ran 14 tests in 0.388s
+OK
+PASS scanner mutex/banner initialization failures reach error logs
+PASS early selection logs partial coverage with stable diagnostic keys
+PASS error diagnostics: operation/errno counts, retry replacement and unresolved readiness
+PASS all closed: exact 1..65535 coverage, no duplicate workers, partial/all thread creation failure
+PASS unknown discovery does not gate full scan; all retry windows drained beyond old cutoff
+PASS timeout, delayed connect, resource/nonblocking/poll/SO_ERROR/routing failures, invalid/HUP/pending events and EINTR
+PASS full filtered target: invariant holds, 3 rounds still retry each silent port exactly once, host stays unknown
+PASS cancellation cleans active sockets and reports unscanned separately; invalid IPv4 rejected
+PASS user early-select stops the scan as partial, stays distinct from cancel, and does not persist
+PASS async interrupt stops work before attempts and a restart re-covers every port
+PASS every socket resource failure accounted as unknown, then retried to closed
+PASS first/last port probed; port 0 and out-of-range indices never enter the ledger
+PASS retries never downgrade open/closed/filtered evidence, including under concurrent writers
+PASS adaptive retry backs off to a descriptor ceiling, recovers every port, and rounds stay bounded
+PASS progress counts completed probes and reaches 100% only after the deep phase
+PASS Esc/Ctrl+C/SIGINT cancel the port menu, and Esc stops queued scan work as unscanned
+PASS production entry point: unknown discovery proceeds to all ports and cleans its ledger
+PASS scanner reliability: no real sockets or external targets contacted
+PASS real worker: loopback listener open, refused port closed, attempts accounted
+PASS async interrupt before work leaves every port explicitly unscanned
+PASS menu EOF on pipe -> -1 (no selection guessed)
+PASS menu Enter/arrow on pty -> expected ports, slave termios restored
+PASS end-to-end loopback scans (incl. one with partial worker-creation failure) complete, report profile/duration/status, and restart cleanly
+PASS public headless API: known real listener found in 3/3 complete scans
+PASS scanner runtime: loopback only, no external targets, descriptor baseline restored
+PASS pty: Enter after first open port stops the scan and opens the port menu (partial)
+PASS pty: Esc cancels the whole operation, distinct from early selection
+PASS pty: without Enter the scan completes normally
+PASS live-select pty: deterministic, mock sockets only, terminal restored on every path
+Ran 11 tests in 0.226s
+OK (skipped=2)
+Ran 24 tests in 0.887s
+OK
+PASS operation layout: scrolling, resize, logo, NO_COLOR, Escape and termios
+
+TSan exit=0
+PASS session ownership, validation, initialization/clock failures, caller fallback and one-shot lifecycle
+PASS simultaneous sessions keep targets, cancellation, ledgers and outcomes separate
+PASS cancelling one session cannot stop a concurrent independent session
+PASS concurrent snapshots, busy rejection, bounded stop, socket cleanup and fresh restart
+PASS scanner mutex/banner initialization failures reach error logs
+PASS early selection logs partial coverage with stable diagnostic keys
+PASS error diagnostics: operation/errno counts, retry replacement and unresolved readiness
+PASS all closed: exact 1..65535 coverage, no duplicate workers, partial/all thread creation failure
+PASS unknown discovery does not gate full scan; all retry windows drained beyond old cutoff
+PASS timeout, delayed connect, resource/nonblocking/poll/SO_ERROR/routing failures, invalid/HUP/pending events and EINTR
+PASS full filtered target: invariant holds, 3 rounds still retry each silent port exactly once, host stays unknown
+PASS cancellation cleans active sockets and reports unscanned separately; invalid IPv4 rejected
+PASS user early-select stops the scan as partial, stays distinct from cancel, and does not persist
+PASS async interrupt stops work before attempts and a restart re-covers every port
+PASS every socket resource failure accounted as unknown, then retried to closed
+PASS first/last port probed; port 0 and out-of-range indices never enter the ledger
+PASS retries never downgrade open/closed/filtered evidence, including under concurrent writers
+PASS adaptive retry backs off to a descriptor ceiling, recovers every port, and rounds stay bounded
+PASS progress counts completed probes and reaches 100% only after the deep phase
+PASS Esc/Ctrl+C/SIGINT cancel the port menu, and Esc stops queued scan work as unscanned
+PASS production entry point: unknown discovery proceeds to all ports and cleans its ledger
+PASS scanner reliability: no real sockets or external targets contacted
+PASS real worker: loopback listener open, refused port closed, attempts accounted
+PASS async interrupt before work leaves every port explicitly unscanned
+PASS menu EOF on pipe -> -1 (no selection guessed)
+PASS menu Enter/arrow on pty -> expected ports, slave termios restored
+PASS end-to-end loopback scans (incl. one with partial worker-creation failure) complete, report profile/duration/status, and restart cleanly
+PASS public headless API: known real listener found in 3/3 complete scans
+PASS scanner runtime: loopback only, no external targets, descriptor baseline restored
+PASS pty: Enter after first open port stops the scan and opens the port menu (partial)
+PASS pty: Esc cancels the whole operation, distinct from early selection
+PASS pty: without Enter the scan completes normally
+PASS live-select pty: deterministic, mock sockets only, terminal restored on every path
+
+Expected negative control: original HUP policy -> new regression exit 1.
+Native metadata enumeration: blocked (getifaddrs EPERM, sysfs absent).
+Default LeakSanitizer: blocked by traced execution; not certified.
+Native deb: blocked by missing dpkg libc dependency metadata.
+GCC -fanalyzer core/adapter/Linux enumeration: exit 0.
+Production Linux build/version: exit 0; SIGINT=130, SIGTERM=143.

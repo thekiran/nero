@@ -57,6 +57,7 @@ jobs:
         run: |
           make CC=gcc
           make test CC=gcc
+          python3 tests/linux/interface_regression.py .build/tests/interfaces
       - name: Preserve macOS Make path
         if: runner.os == 'macOS'
         run: |

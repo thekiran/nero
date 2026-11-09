@@ -23,6 +23,15 @@ an application-wide header. Make and CMake share their CLI source lists between
 production and test targets; the fault fixture replaces only `terminal.c`.
 Make object and dependency files live in `.build/obj/`, outside the source tree.
 
+The TCP scanner is split into `src/modules/scan_session.c` (terminal-independent
+production core) and `src/modules/portscanner.c` (interactive adapter). The public
+session API is `include/nero/scan_session.h`; private I/O and adapter contracts
+are in `src/modules/scan_internal.h` and `scan_cli_internal.h`. Sessions own their
+ledger, profile, cancellation and work state. Synthetic tests inject per-session
+I/O, while runtime tests use guarded loopback connections. The existing
+`portscanner(target)` entry point and menu remain available. See the
+[quality acceptance plan](engineering/quality-plan.md).
+
 `src/modules/` holds the packet engine and scanner. Their header is retained as
 `include/nero/syn_flood_powered.h`. Both Linux and macOS Make builds link them;
 macOS raw sockets require root. The offline-safe executables use

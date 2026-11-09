@@ -1,3 +1,5 @@
+> Historical record: this describes an earlier source revision, not current certification. See [current quality validation](engineering/quality-validation.md).
+
 # Gerçek ağ doğrulaması — 2026-11-03
 
 ## Ortam ve kapsam

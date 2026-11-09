@@ -117,7 +117,7 @@ distributions may require different dependency package names.
 **1. Install build dependencies:**
 
 ```bash
-sudo apt update && sudo apt install -y git build-essential libcurl4-openssl-dev libcjson-dev libldns-dev libncurses-dev python3 clang
+sudo apt update && sudo apt install -y git build-essential python3 clang
 ```
 
 **2. Download and build:**

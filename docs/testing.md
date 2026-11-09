@@ -8,7 +8,7 @@ NERO maintains a deterministic, automated test infrastructure. All automated CI 
 
 ## Testing Principles
 
-1. **Deterministic Execution:** Tests avoid network timing dependencies, external DNS lookups, or unmocked remote endpoints.
+1. **Deterministic Execution:** Synthetic tests avoid network timing and external DNS; bounded runtime fixtures use only guarded loopback endpoints.
 2. **Offline Safety:** CI and test executables use `NERO_SAFE_TEST` or `NERO_NETWORK_UNAVAILABLE`. The raw packet engine is excluded from automated test binaries.
 3. **Exact Terminal Restoration:** Terminal quality tests verify that every session cleans up signal masks, restoring raw mode flags to original `termios` (POSIX) or console input/output modes and code page (Windows).
 4. **Platform Isolation:** Platform-specific features (e.g., POSIX PTY sessions vs. Win32 console handles) use native test fixtures rather than silent skips.
@@ -166,3 +166,19 @@ when a backup cannot be cleared, read-only stdout, FIFO/Windows device targets,
 and pre-existing oversized current/backup files. The scanner fixture injects
 mutex and banner worker initialization failures and verifies their log records.
 These cases require no real device or remote network traffic.
+
+## Session quality gates
+
+`tests/scan_session.c` links only the production core and logger, without UI
+objects. It covers owned configuration, independent simultaneous sessions,
+concurrent snapshots, busy/repeat run rejection, cancellation, early stop,
+clock/init/worker failure and cleanup. All scanner fixtures link production
+objects normally; none includes the production scanner `.c` file.
+
+Linux selection/parser tests use deterministic metadata from
+`tests/mocks/interfaces_linux.c`. Native enumeration remains a separate mandatory
+Linux CI invocation of `tests/linux/interface_regression.py`; permissions errors
+are reported, not converted to an empty successful result.
+
+See [validation and limitations](engineering/quality-validation.md), especially
+the distinction between ASan/UBSan and LeakSanitizer support.

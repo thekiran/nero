@@ -46,12 +46,10 @@ static int loopback_connect(int fd, const struct sockaddr *address, socklen_t le
     atomic_fetch_add(&guarded_connects, 1);
     return connect(fd, address, length);
 }
-#define pthread_create injected_pthread_create
-#define connect loopback_connect
-#include "../../src/modules/portscanner.c"
-#undef connect
-#undef pthread_create
-
+#include "../../src/modules/scan_cli_internal.h"
+static nero_scan_session *session;
+static const scan_io fixture_io = {.connect_fn = loopback_connect,
+                                   .thread_create_fn = injected_pthread_create};
 #include <assert.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -59,37 +57,35 @@ static int loopback_connect(int fd, const struct sockaddr *address, socklen_t le
 #include <unistd.h>
 
 /* Open descriptor count (portable: probe each slot below the soft limit). */
-static int descriptors(void) {
+static int descriptors(void)
+{
     long limit = sysconf(_SC_OPEN_MAX);
-    if (limit < 0 || limit > 65536) limit = 65536;
+    if (limit < 0 || limit > 65536)
+        limit = 65536;
     int n = 0;
     for (int fd = 0; fd < limit; ++fd)
-        if (fcntl(fd, F_GETFD) != -1) n++;
+        if (fcntl(fd, F_GETFD) != -1)
+            n++;
     return n;
 }
 
-static void scan_reset(void) {
-    assert(results_list == NULL);
-    results_list = calloc(SCAN_TOTAL_PORTS + 1, sizeof(*results_list));
-    assert(results_list);
-    assert(pthread_mutex_init(&results_mutex, NULL) == 0);
-    atomic_init(&scan_cancel_requested, 0);
-    atomic_init(&ports_scanned, 0);
-    atomic_init(&host_responded, 0);
-    atomic_init(&latest_probe_port, 0);
-    atomic_init(&scan_progress_total, SCAN_TOTAL_PORTS);
+static void scan_reset(void)
+{
+    assert(session == NULL);
+    session = scan_create_with_io("127.0.0.1", NULL, &fixture_io);
+    assert(session);
+    session->interrupt_requested = &portscanner_interrupt_requested;
     portscanner_interrupt_requested = 0;
-    target_ip_global = "127.0.0.1";
 }
-
-static void scan_release(void) {
-    assert(pthread_mutex_destroy(&results_mutex) == 0);
-    free(results_list);
-    results_list = NULL;
+static void scan_release(void)
+{
+    nero_scan_destroy(session);
+    session = NULL;
 }
 
 /* Bind a listener on loopback; *port receives the ephemeral port. */
-static int listen_loopback(int *port) {
+static int listen_loopback(int *port)
+{
     int server = socket(AF_INET, SOCK_STREAM, 0);
     assert(server >= 0);
     struct sockaddr_in addr = {0};
@@ -104,7 +100,8 @@ static int listen_loopback(int *port) {
 }
 
 /* Reserve then release a loopback port so the next connect is refused. */
-static int reserve_closed_port(void) {
+static int reserve_closed_port(void)
+{
     int server = socket(AF_INET, SOCK_STREAM, 0);
     assert(server >= 0);
     struct sockaddr_in addr = {0};
@@ -118,34 +115,37 @@ static int reserve_closed_port(void) {
     return port;
 }
 
-static void test_open_closed_pair(int open_port, int closed_port) {
+static void test_open_closed_pair(int open_port, int closed_port)
+{
     scan_reset();
     const int ports[2] = {open_port, closed_port};
-    run_scan_phase(ports, 2, 2, 2, 500);
-    scan_summary s = summarize_scan();
-    assert(results_list[open_port].state == PORT_OPEN);
-    assert(results_list[closed_port].state == PORT_CLOSED);
+    run_scan_phase(session, ports, 2, 2, 2, 500);
+    scan_summary s = summarize_scan(session);
+    assert(session->results_list[open_port].state == PORT_OPEN);
+    assert(session->results_list[closed_port].state == PORT_CLOSED);
     assert(s.open == 1 && s.closed == 1 && s.unscanned == SCAN_TOTAL_PORTS - 2);
-    assert(results_list[open_port].attempts == 1);
-    assert(results_list[closed_port].attempts == 1);
+    assert(session->results_list[open_port].attempts == 1);
+    assert(session->results_list[closed_port].attempts == 1);
     scan_release();
     puts("PASS real worker: loopback listener open, refused port closed, attempts accounted");
 }
 
-static void test_interrupt_keeps_unscanned_honest(void) {
+static void test_interrupt_keeps_unscanned_honest(void)
+{
     scan_reset();
     portscanner_interrupt_requested = 1;
-    run_scan_phase(NULL, SCAN_TOTAL_PORTS, 4, 64, 50);
-    scan_summary s = summarize_scan();
-    assert(scan_cancelled());
+    run_scan_phase(session, NULL, SCAN_TOTAL_PORTS, 4, 64, 50);
+    scan_summary s = summarize_scan(session);
+    assert(scan_cancelled(session));
     assert(s.unscanned == SCAN_TOTAL_PORTS && s.closed == 0);
     portscanner_interrupt_requested = 0;
-    atomic_store(&scan_cancel_requested, 0);
+    atomic_store(&session->scan_cancel_requested, 0);
     scan_release();
     puts("PASS async interrupt before work leaves every port explicitly unscanned");
 }
 
-static void test_menu_eof_pipe(void) {
+static void test_menu_eof_pipe(void)
+{
     int fds[2];
     assert(pipe(fds) == 0);
     assert(close(fds[1]) == 0);
@@ -159,20 +159,24 @@ static void test_menu_eof_pipe(void) {
 
 /* Plays the terminal's role on the pty master: consume the slave's echo so
  * TCSADRAIN can complete (macOS blocks until echoed output is read). */
-typedef struct { int fd; atomic_int stop; } pty_drain;
-static void *drain_master(void *arg) {
+typedef struct {
+    int fd;
+    atomic_int stop;
+} pty_drain;
+static void *drain_master(void *arg)
+{
     pty_drain *d = arg;
     char sink[256];
     while (!atomic_load(&d->stop)) {
         struct pollfd p = {d->fd, POLLIN, 0};
-        if (poll(&p, 1, 20) > 0 && (p.revents & POLLIN) &&
-            read(d->fd, sink, sizeof(sink)) <= 0)
+        if (poll(&p, 1, 20) > 0 && (p.revents & POLLIN) && read(d->fd, sink, sizeof(sink)) <= 0)
             break;
     }
     return NULL;
 }
 
-static void test_menu_valid_and_termios_restore(void) {
+static void test_menu_valid_and_termios_restore(void)
+{
     int master = posix_openpt(O_RDWR | O_NOCTTY);
     assert(master >= 0);
     assert(grantpt(master) == 0);
@@ -215,7 +219,8 @@ static void test_menu_valid_and_termios_restore(void) {
 }
 
 /* Point STDIN at a pipe primed with Enter keystrokes for menu selection. */
-static int feed_stdin(const char *keys) {
+static int feed_stdin(const char *keys)
+{
     int fds[2];
     assert(pipe(fds) == 0);
     assert(write(fds[1], keys, strlen(keys)) == (ssize_t)strlen(keys));
@@ -224,8 +229,9 @@ static int feed_stdin(const char *keys) {
     return fds[1]; /* keep open so the pipe never signals EOF */
 }
 
-/* Capture report_scan_summary()/portscanner() stdout into a heap buffer. */
-static char *capture_stdout(void (*run)(void *), void *context) {
+/* Capture report_scan_summary(session)/portscanner() stdout into a heap buffer. */
+static char *capture_stdout(void (*run)(void *), void *context)
+{
     fflush(stdout);
     int saved = dup(STDOUT_FILENO);
     assert(saved >= 0);
@@ -252,28 +258,36 @@ typedef struct {
     int rc;
 } scan_call;
 
-static void run_portscanner(void *context) {
+static void run_portscanner(void *context)
+{
     scan_call *call = context;
-    call->rc = portscanner(call->ip);
+    call->rc = portscanner_with_io(call->ip, &fixture_io);
 }
 
 /* Behaves like a real service: accept and close every connection, so the
  * kernel accept queue never fills across repeated scans and banner probes.
  * (A full queue makes Linux drop SYNs, which the scanner rightly reports as
  * filtered rather than open.) */
-typedef struct { int fd; atomic_int stop; } loopback_service;
-static void *serve_loopback(void *arg) {
+typedef struct {
+    int fd;
+    atomic_int stop;
+} loopback_service;
+static void *serve_loopback(void *arg)
+{
     loopback_service *svc = arg;
     while (!atomic_load(&svc->stop)) {
         struct pollfd p = {svc->fd, POLLIN, 0};
-        if (poll(&p, 1, 20) <= 0 || !(p.revents & POLLIN)) continue;
+        if (poll(&p, 1, 20) <= 0 || !(p.revents & POLLIN))
+            continue;
         int peer = accept(svc->fd, NULL, NULL);
-        if (peer >= 0) assert(close(peer) == 0);
+        if (peer >= 0)
+            assert(close(peer) == 0);
     }
     return NULL;
 }
 
-static void test_end_to_end_restart(int run_count) {
+static void test_end_to_end_restart(int run_count)
+{
     scan_call call = {.ip = "127.0.0.1"};
     for (int i = 0; i < run_count; ++i) {
         create_count = 0;
@@ -293,7 +307,28 @@ static void test_end_to_end_restart(int run_count) {
          "failure) complete, report profile/duration/status, and restart cleanly");
 }
 
-int main(void) {
+/* Verifies a specific known listener through the public headless API, rather
+ * than accepting whichever open service happens to appear first in the menu. */
+static void test_headless_known_listener(int open_port)
+{
+    for (int trial = 0; trial < 3; ++trial) {
+        nero_scan_session *scan = scan_create_with_io("127.0.0.1", NULL, &fixture_io);
+        assert(scan);
+        assert(nero_scan_run(scan) == NERO_SCAN_COMPLETE);
+        nero_scan_counts counts;
+        assert(nero_scan_snapshot(scan, &counts) == 0);
+        assert(counts.open + counts.closed + counts.filtered + counts.unknown == SCAN_TOTAL_PORTS);
+        assert(counts.unscanned == 0);
+        nero_scan_result known;
+        assert(nero_scan_get_result(scan, open_port, &known) == 0);
+        assert(known.state == NERO_PORT_OPEN);
+        nero_scan_destroy(scan);
+    }
+    puts("PASS public headless API: known real listener found in 3/3 complete scans");
+}
+
+int main(void)
+{
     int baseline = descriptors();
     int stdin_save = dup(STDIN_FILENO);
     assert(stdin_save >= 0);
@@ -315,6 +350,7 @@ int main(void) {
     pthread_t service_thread;
     assert(pthread_create(&service_thread, NULL, serve_loopback, &service) == 0);
     test_end_to_end_restart(2);
+    test_headless_known_listener(open_port);
     atomic_store(&service.stop, 1);
     assert(pthread_join(service_thread, NULL) == 0);
 
@@ -324,7 +360,7 @@ int main(void) {
     assert(close(server) == 0);
     assert(descriptors() == baseline);
     /* Two full scans plus the pair test all went through the loopback guard. */
-    assert(atomic_load(&guarded_connects) >= 2L * SCAN_TOTAL_PORTS + 2);
+    assert(atomic_load(&guarded_connects) >= 5L * SCAN_TOTAL_PORTS + 2);
     puts("PASS scanner runtime: loopback only, no external targets, descriptor baseline restored");
     return 0;
 }
