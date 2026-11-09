@@ -82,42 +82,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Check publication secret availability
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        id: auth-check
-        env:
-          WIKI_TOKEN: ${{ secrets.WIKI_PUSH_TOKEN }}
-        run: |
-          if [ -z "$WIKI_TOKEN" ]; then
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "::error title=Wiki publication blocked::Configure WIKI_PUSH_TOKEN with write access to the Wiki repository. Documentation generation succeeded, but the Wiki was not published."
-            echo "Wiki publication blocked: WIKI_PUSH_TOKEN is missing. Generated pages are available in the wiki-pages artifact." >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          else
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Verify Wiki without publishing
         run: |
           python3 scripts/docs/wiki_sync.py --check
           python3 scripts/docs/wiki_sync.py --build .build/wiki-preview
 
       - name: Clone and sync Wiki repository
-        if: steps.auth-check.outputs.has_token == 'true'
         env:
           WIKI_TOKEN: ${{ secrets.WIKI_PUSH_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          WIKI_URL="https://x-access-token:${WIKI_TOKEN}@github.com/${REPO}.wiki.git"
-
-          echo "Cloning Wiki repository..."
-          if ! git clone "$WIKI_URL" wiki_repo 2>clone_err.log; then
-            echo "::error title=Wiki clone failed::Check WIKI_PUSH_TOKEN access and initialize the Wiki at https://github.com/${REPO}/wiki if it has no pages. The Wiki was not published."
-            cat clone_err.log || true
-            exit 1
-          fi
-
-          echo "Synchronizing documentation to Wiki Git repository..."
-          python3 scripts/docs/wiki_sync.py --sync wiki_repo --push
-          echo "Wiki synchronization succeeded for source commit ${GITHUB_SHA}." >> "$GITHUB_STEP_SUMMARY"
+        run: python3 scripts/docs/wiki_publish.py
