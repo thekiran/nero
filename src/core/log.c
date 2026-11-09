@@ -171,6 +171,14 @@ static FILE *open_log(const char *name, int truncate, int reading) {
     struct stat info;
     if (fstat(fd, &info) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
     if (!S_ISREG(info.st_mode)) { log_close(fd); errno = EINVAL; return NULL; }
+    /* Refuse a log file owned by another user or carrying extra hard links:
+     * that is the case where a different local user controls or shares the
+     * target, so fall back to in-memory logging rather than appending into it
+     * (O_NOFOLLOW above already blocks symlink swaps). The permission bits are
+     * deliberately not dictated here: unlike the always-0600 history file, the
+     * log path is user-selectable via NERO_LOG_FILE, so the owner's own choice
+     * of mode on a file they own is respected. */
+    if (info.st_uid != geteuid() || info.st_nlink != 1) { log_close(fd); errno = EPERM; return NULL; }
     if (truncate && ftruncate(fd, 0) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
     FILE *file = fdopen(fd, reading ? "r" : "a+");
 #endif
