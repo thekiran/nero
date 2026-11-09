@@ -36,6 +36,12 @@ static int injected_pthread_create(pthread_t *thread, const pthread_attr_t *attr
 #include <stdio.h>
 #include <sys/socket.h>
 static atomic_long guarded_connects;
+static atomic_long socket_attempts;
+static int counted_socket(int domain, int type, int protocol)
+{
+    atomic_fetch_add(&socket_attempts, 1);
+    return socket(domain, type, protocol);
+}
 static int loopback_connect(int fd, const struct sockaddr *address, socklen_t length)
 {
     const struct sockaddr_in *in = (const struct sockaddr_in *)(const void *)address;
@@ -48,7 +54,8 @@ static int loopback_connect(int fd, const struct sockaddr *address, socklen_t le
 }
 #include "../../src/modules/scan_cli_internal.h"
 static nero_scan_session *session;
-static const scan_io fixture_io = {.connect_fn = loopback_connect,
+static const scan_io fixture_io = {.socket_fn = counted_socket,
+                                   .connect_fn = loopback_connect,
                                    .thread_create_fn = injected_pthread_create};
 #include <assert.h>
 #include <fcntl.h>
@@ -322,6 +329,7 @@ static void test_headless_known_listener(int open_port)
         nero_scan_result known;
         assert(nero_scan_get_result(scan, open_port, &known) == 0);
         assert(known.state == NERO_PORT_OPEN);
+        assert(known.attempts >= 1);
         nero_scan_destroy(scan);
     }
     puts("PASS public headless API: known real listener found in 3/3 complete scans");
@@ -359,8 +367,12 @@ int main(void)
     assert(close(stdin_save) == 0);
     assert(close(server) == 0);
     assert(descriptors() == baseline);
-    /* Two full scans plus the pair test all went through the loopback guard. */
-    assert(atomic_load(&guarded_connects) >= 5L * SCAN_TOTAL_PORTS + 2);
+    /* Five full scans plus the pair must attempt every socket. Local socket
+     * exhaustion is recorded UNKNOWN before connect(), so connect counts alone
+     * cannot prove coverage. Every actual connect still uses the loopback guard;
+     * each full scan also independently verifies a live listener above. */
+    assert(atomic_load(&socket_attempts) >= 5L * SCAN_TOTAL_PORTS + 2);
+    assert(atomic_load(&guarded_connects) >= 7);
     puts("PASS scanner runtime: loopback only, no external targets, descriptor baseline restored");
     return 0;
 }
