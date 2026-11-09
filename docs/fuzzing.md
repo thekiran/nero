@@ -27,13 +27,16 @@ seeds into temporary storage so mutations never dirty the source tree.
 Missing Clang/runtime support is an error, never a successful skip. Apple Clang
 may omit libFuzzer. For deterministic sanitizer replay there, replace
 `-DNERO_FUZZING=ON` with `-DNERO_CORPUS_REPLAY=ON` and run the first run.py command.
-Standalone replay is explicitly not a coverage-guided campaign. Windows harness
+Standalone replay is explicitly not a coverage-guided campaign. Default POSIX
+CTest builds replay with Clang or GCC, so the existing required Release checks
+job gates the curated corpus on every native POSIX package build. Windows harness
 execution is unsupported; Windows production parser/history/log regression tests
 remain in native CI.
 
-CI runs reviewed seeds and bounded campaigns on every PR. This job must be added
-to server-required checks by the administrator before it can be called a mandatory
-merge gate; a workflow definition alone does not enforce branch protection.
+CI runs reviewed seeds and bounded campaigns on every PR. The standalone
+`fuzz-corpus` CTest is included in the already-required Release checks dependency
+graph. The separate coverage campaign job can additionally become required
+through administrator settings; a workflow definition alone does not enforce it.
 
 For a crash, the runner preserves emitted inputs under the build directory
 `failures/<target>` and CI uploads them for seven days. Only synthetic reviewed
