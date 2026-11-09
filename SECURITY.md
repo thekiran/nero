@@ -36,3 +36,11 @@ or disclosure schedule is promised.
   [platform compatibility](docs/platform-compatibility.md).
 
 For non-sensitive reproducible bugs, use the normal GitHub issue template.
+
+## Code scanning findings
+
+A new high or critical code-scanning (CodeQL) finding blocks release until it is
+fixed with a regression test, or until the owner explicitly accepts it in writing
+with a rationale, mitigation, affected scope and an expiry or review date. Do not
+suppress findings merely to make CI green. See the
+[security controls audit](docs/security-controls-2026-11-09.md).

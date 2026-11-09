@@ -5,9 +5,15 @@ configuration. Committing this file does not activate protection. It requires a
 repository administrator to apply it through Settings or an authenticated GitHub
 CLI with repository administration permission.
 
-It requires a pull request, an up-to-date branch, resolved conversations and
-successful `Release checks`, `clang (ubuntu-latest)`, `clang (macos-latest)`
-and `msvc` checks. Force pushes and deletion
+The JSON is the proposed eight-check configuration: a pull request, an up-to-date
+branch, resolved conversations and successful `Release checks`,
+`clang (ubuntu-latest)`, `clang (macos-latest)`, `msvc`, `CodeQL (c-cpp)`,
+`CodeQL (actions)`, the Advanced Security `CodeQL` result and
+`Offline fuzz corpus and bounded campaign` checks. The live server currently
+enforces only the original four (`Release checks`, `clang (ubuntu-latest)`,
+`clang (macos-latest)` and `msvc`) until the owner saves the proposal.
+`tests/test_workflow_security.py` asserts every proposed context names a real
+workflow job. Force pushes and deletion
 are blocked; administrators are also subject to the rules. The aggregate Release
 checks job runs for every pull request and fails when any supported platform fails.
 
