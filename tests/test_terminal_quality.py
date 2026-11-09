@@ -23,6 +23,32 @@ def run(data, **extra):
 
 
 class TerminalQuality(unittest.TestCase):
+    def test_grouped_commands_and_legacy_aliases(self):
+        output = self.output(b"help\nnetwork disable\nnetwork status\n"
+                             b"syn 192.0.2.1\n192.0.2.1 -Syn\n-Syn 192.0.2.1\n"
+                             b"network enable\nscan 192.0.2.1\n192.0.2.1 -Sc\n"
+                             b"logs errors\nlogs clear\nversion\nexit\n")
+        for group in (b"GENERAL", b"HISTORY", b"LOGGING", b"DIAGNOSTICS", b"NETWORK", b"LABORATORY"):
+            self.assertIn(group, output)
+        self.assertEqual(output.count(b"Network diagnostics are disabled."), 3)
+        self.assertEqual(output.count(b"-Sc: simulation for 192.0.2.1; packets sent: 0"), 2)
+        self.assertNotIn(b"Unknown command", output)
+        self.assertNotIn(b"Invalid command parameters", output)
+        self.assertIn(b"Logs cleared.", output)
+
+    def test_readable_aliases_reject_extra_arguments(self):
+        output = self.output(b"scan\nscan 192.0.2.1 extra\nsyn\nsyn preflight extra\n"
+                             b"network\nnetwork enable extra\nlogs wrong\nlogs path extra\nexit\n")
+        self.assertEqual(output.count(b"Invalid command parameters"), 8)
+        self.assertNotIn(b"MOCK_SYN", output)
+        self.assertNotIn(b"packets sent", output)
+
+    def test_syn_preflight_alias_is_the_same_offline_screen(self):
+        output = self.output(b"syn preflight\n0\nexit\n")
+        self.assertIn(b"-Syn Preflight (READ-ONLY)", output)
+        self.assertNotIn(b"Unknown command", output)
+        self.assertNotIn(b"MOCK_SYN", output)
+
     def test_exact_token_limit(self):
         accepted = self.output(b" ".join([b"x"] * 64) + b"\nexit\n")
         self.assertIn(b"Unknown command", accepted)
@@ -31,7 +57,7 @@ class TerminalQuality(unittest.TestCase):
         self.assertIn(b"Invalid command parameters", rejected)
 
     def test_catalog_completion_and_help(self):
-        output = self.output(b"vers\t\nhistory -c\t\nhelp\nexit\n")
+        output = self.output(b"vers\t\nhistory -c\t\nhelp --all\nexit\n")
         self.assertIn(b"version development", output)
         self.assertIn(b"History cleared.", output)
         self.assertNotIn(b"Unknown command", output)
@@ -48,7 +74,7 @@ class TerminalQuality(unittest.TestCase):
     def test_blank_and_exact_commands(self):
         output = self.output(b"\n \t \nhelper\npreexit\nversionSuffix\nhelp\nhelp -All\nversion\nexit\n")
         self.assertEqual(output.count(b"Unknown command"), 3)
-        self.assertEqual(output.count(b"Available Commands:"), 2)
+        self.assertEqual(output.count(b"NERO COMMANDS"), 2)
         self.assertEqual(output.count(b"version development"), 1)
         self.assertEqual(output.count(b"Exiting..."), 1)
 
