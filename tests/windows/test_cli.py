@@ -21,7 +21,7 @@ class NativeWindowsCLI(unittest.TestCase):
         result = run(b'version\nhelp\nhistory\nexit\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(EXPECTED_VERSION, result.stdout)
-        self.assertIn(b'Available Commands:', result.stdout)
+        self.assertIn(b'NERO COMMANDS', result.stdout)
         self.assertIn(b'version\nhelp', result.stdout.replace(b'\r\n', b'\n'))
         self.assertIn(b'Exiting...', result.stdout)
 

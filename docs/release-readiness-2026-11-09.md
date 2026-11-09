@@ -91,3 +91,49 @@ pass/fail rationale, tester/date and controlled service/firewall setup. Never
 label mock sockets, loopback fixtures or CI runners as independent LAN validation.
 Keep #11 open until signing and independent observations satisfy its acceptance
 criteria; optional repository hosting may remain separately deferred.
+
+## Final source validation evidence
+
+The latest completed code rollout is PR #68, main
+`1438243803afa6d853838ea156ec029fe9501706`, including the separately reviewed
+readable-menu PR #70. Its [Release run 42652892574](https://github.com/thekiran/nero/actions/runs/42652892574)
+passed all five native installer/archive targets and aggregate verification;
+[Distribution run 42652892728](https://github.com/thekiran/nero/actions/runs/42652892728)
+passed both Debian upgrade/removal and both Homebrew install/reinstall/removal
+legs. The initial ARM64 fixture timeout described above is retained as historical
+risk evidence; later green runs do not establish its root cause or certify LAN
+behavior. No scanner or raw-engine code was changed to obtain green checks.
+
+Local combined-source evidence (macOS ARM64, AppleClang 21):
+
+```sh
+cmake --preset macos
+cmake --build --preset macos -j 8
+ctest --preset macos -E '^scanner-runtime$' --output-on-failure
+cmake --preset macos-sanitize
+cmake --build --preset macos-sanitize -j 8
+ctest --preset macos-sanitize -E '^scanner-runtime$' --output-on-failure
+python3 -m unittest tests/test_wiki_sync.py tests/test_workflow_security.py
+make -j 8 BUILD_DIR=.build-command-groups TARGET=.build-command-groups/nero
+make analyze BUILD_DIR=.build-command-groups
+```
+
+Results: 16/16 native CTests, 16/16 ASan/UBSan CTests and 12/12 Wiki/workflow
+Python tests passed. The excluded local scanner-runtime fixture attempted a real
+loopback bind denied by the execution sandbox; it remained enabled and passed in
+native CI. Existing .build/obj writes were restricted locally, so an isolated
+Make output directory was used successfully instead of weakening permissions.
+
+Ubuntu coverage campaigns used the documented `NERO_FUZZING=ON` build and
+`python3 tests/fuzz/run.py .build/fuzz --campaign`, with all three targets passing
+at the integrated PR head. Native CI also executed Make tests, ASan/UBSan suites,
+macOS TSan fixtures and terminal/storage/scanner regressions. These are
+mock/loopback observations; no live packet-flood operation or independent physical
+LAN-device test was run. TCP scanner, scan session, packet engine, hardware prompt
+and worker-limit header Git blob hashes remained identical to baseline `1dceac5`.
+
+The [security rollout audit](security-controls-2026-11-09.md) records actual
+CodeQL/Scorecard evidence and the GitHub reauthentication blocker for adding four
+new required checks. Signing identities, a private physical LAN matrix and actual
+Wiki credential scope/expiry remain owner verification steps. No public release,
+new version tag, signing certificate or notarization ticket was created here.

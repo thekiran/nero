@@ -21,6 +21,7 @@ include(cmake/NeroTargets.cmake)
 
 set(NERO_CLI_SUPPORT_SOURCES
     src/core/log.c
+    src/core/doctor.c
     src/core/platform.c
     src/core/hardware.c
     src/cli/parser/parser.c
@@ -38,6 +39,13 @@ nero_target(nero-platform-info)
 
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(doctor-render tests/doctor_render.c src/core/doctor.c)
+    nero_target(doctor-render)
+    target_compile_definitions(doctor-render PRIVATE NERO_NETWORK_UNAVAILABLE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(doctor-render PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+    endif()
+    add_test(NAME doctor-render COMMAND doctor-render)
     add_executable(parser-boundaries tests/parser_boundaries.c src/cli/parser/parser.c)
     nero_target(parser-boundaries)
     add_test(NAME parser-boundaries COMMAND parser-boundaries)
@@ -263,8 +271,61 @@ if(BUILD_TESTING AND NOT MSVC)
     set_tests_properties(logging PROPERTIES TIMEOUT 120)
 endif()
 
+if(BUILD_TESTING AND TARGET nero-safe)
+    add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero-safe>)
+elseif(BUILD_TESTING AND TARGET nero)
+    add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero>)
+endif()
+
 if(BUILD_TESTING)
     get_property(nero_test_names DIRECTORY PROPERTY TESTS)
     # Append rather than overwrite per-test release-version expectations.
     set_property(TEST ${nero_test_names} APPEND PROPERTY ENVIRONMENT "NERO_LOG_FILE=:memory:")
+endif()
+
+# Fuzz harnesses never link command dispatch, scanner or raw-packet sources.
+option(NERO_FUZZING "Build coverage-guided offline libFuzzer targets" OFF)
+set(nero_replay_default OFF)
+if(BUILD_TESTING AND UNIX AND NOT NERO_FUZZING)
+    set(nero_replay_default ON)
+endif()
+option(NERO_CORPUS_REPLAY "Build standalone offline seed replay targets" ${nero_replay_default})
+if(NERO_FUZZING OR NERO_CORPUS_REPLAY)
+    if(NOT UNIX OR NOT CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+        message(FATAL_ERROR "Corpus replay requires POSIX Clang/GCC; use the Ubuntu fuzz CI runner")
+    endif()
+    if(NERO_FUZZING AND NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Coverage-guided libFuzzer requires Clang")
+    endif()
+    if(NERO_FUZZING AND NERO_CORPUS_REPLAY)
+        message(FATAL_ERROR "Select libFuzzer OR standalone replay")
+    endif()
+    find_package(Threads REQUIRED)
+    foreach(name parser history log)
+        add_executable(fuzz-${name} tests/fuzz/${name}.c)
+        nero_target(fuzz-${name})
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_compile_definitions(fuzz-${name} PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+        endif()
+        target_compile_options(fuzz-${name} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(fuzz-${name} PRIVATE -fsanitize=address,undefined)
+        target_link_libraries(fuzz-${name} PRIVATE Threads::Threads)
+        if(name STREQUAL "parser")
+            target_sources(fuzz-${name} PRIVATE src/cli/parser/parser.c)
+        endif()
+        if(NERO_FUZZING)
+            target_compile_options(fuzz-${name} PRIVATE -fsanitize=fuzzer)
+            target_link_options(fuzz-${name} PRIVATE -fsanitize=fuzzer)
+        else()
+            target_sources(fuzz-${name} PRIVATE tests/fuzz/replay.c)
+        endif()
+    endforeach()
+endif()
+
+if(BUILD_TESTING AND NERO_CORPUS_REPLAY)
+    add_test(NAME fuzz-corpus COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/fuzz/run.py" $<TARGET_FILE_DIR:fuzz-parser>)
+    set_tests_properties(fuzz-corpus PROPERTIES TIMEOUT 180)
 endif()

@@ -39,7 +39,9 @@ static void storage_warning(void)
 static int persistable(const char *line)
 {
     static const char *const safe[] = {
-        "help", "help -All", "version", "clear", "history",
+        "help", "help -All", "help --all", "version", "clear", "history",
+        "logs", "logs errors", "logs path",
+        "network status", "network enable", "network disable",
         "-mode", "-mode on", "-mode off", "log", "log -errors", "log -path"
     };
     for (size_t i = 0; i < sizeof(safe) / sizeof(safe[0]); ++i)
@@ -49,14 +51,17 @@ static int persistable(const char *line)
      * are nevertheless personal history; :memory: disables persistence. */
     unsigned octet[4];
     int end = 0;
-    if (sscanf(line, "%3u.%3u.%3u.%3u -Sc%n", &octet[0], &octet[1],
-               &octet[2], &octet[3], &end) == 4 && end > 0 && line[end] == '\0') {
+    int alias = strncmp(line, "scan ", 5) == 0;
+    const char *target = alias ? line + 5 : line;
+    const char *format = alias ? "%3u.%3u.%3u.%3u%n" : "%3u.%3u.%3u.%3u -Sc%n";
+    if (sscanf(target, format, &octet[0], &octet[1],
+               &octet[2], &octet[3], &end) == 4 && end > 0 && target[end] == '\0') {
         for (size_t i = 0; i < 4; ++i)
             if (octet[i] > 255) return 0;
         /* Require canonical IPv4 and exactly one separator; scanf alone also
          * accepts signs, leading zeroes and a missing whitespace separator. */
         char canonical[32];
-        int n = snprintf(canonical, sizeof(canonical), "%u.%u.%u.%u -Sc",
+        int n = snprintf(canonical, sizeof(canonical), alias ? "scan %u.%u.%u.%u" : "%u.%u.%u.%u -Sc",
                          octet[0], octet[1], octet[2], octet[3]);
         return n > 0 && (size_t)n < sizeof(canonical) && strcmp(line, canonical) == 0;
     }
