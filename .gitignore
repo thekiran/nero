@@ -1,10 +1,11 @@
 *.o
 *.d
 /nero
-/.build/
 __pycache__/
 
-# Build directories
+# Build directories (covers .build, .build-dev, .build-ci, .build-p6,
+# .build.rootbak*, and any other local .build* variant)
+/.build*/
 /build/
 
 # C/C++ generated files
