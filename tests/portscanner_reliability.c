@@ -560,7 +560,7 @@ static void test_initialization_error_logs(void)
 
 static void test_connect_resource_exhaustion(void)
 {
-    /* A nonblocking connect() that fails with EWOULDBLOCK/EAGAIN is LOCAL
+    /* On POSIX, connect() failing with EWOULDBLOCK/EAGAIN is LOCAL
      * exhaustion (no free ephemeral port, routing-cache or buffer shortage),
      * not a pending probe and not evidence about the target. It must be recorded
      * unknown and flagged as a resource failure so the adaptive back-off engages
@@ -569,13 +569,23 @@ static void test_connect_resource_exhaustion(void)
     setup(CONNECT_LIMIT);
     const int ports[] = {1, 65535};
     scan_ports_batch(session, session->target_ip_global, ports, 2, 250);
+#ifdef _WIN32
+    /* Winsock uses WSAEWOULDBLOCK for a pending connect. The mock SO_ERROR
+     * resolves it as refused; it must not trigger POSIX resource backoff. */
+    CHECK(session->results_list[1].state == PORT_CLOSED);
+    CHECK(session->results_list[65535].state == PORT_CLOSED);
+    CHECK(session->results_list[1].error == ECONNREFUSED);
+    CHECK(atomic_load(&session->resource_failures) == 0);
+    puts("PASS Winsock EWOULDBLOCK remains pending until SO_ERROR resolves it");
+#else
     CHECK(session->results_list[1].state == PORT_UNKNOWN);
     CHECK(session->results_list[65535].state == PORT_UNKNOWN);
     CHECK(session->results_list[1].error == EWOULDBLOCK);
     CHECK(atomic_load(&session->resource_failures) == 1);
+    puts("PASS POSIX EWOULDBLOCK connect is local exhaustion, never target evidence");
+#endif
     CHECK(atomic_load(&session->ports_scanned) == 2);
     teardown();
-    puts("PASS EWOULDBLOCK connect is local exhaustion: unknown + resource back-off, never target evidence");
 }
 static void test_port_bounds(void)
 {
