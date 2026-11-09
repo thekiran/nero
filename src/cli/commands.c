@@ -37,6 +37,7 @@
 #include "nero/network_diagnostics.h"
 #include "nero/operation_ui.h"
 #include "nero/log.h"
+#include "nero/doctor.h"
 #include "nero/socket_handle.h"
 #ifndef NERO_NETWORK_UNAVAILABLE
 #include "nero/portscanner.h"
@@ -500,6 +501,13 @@ static cli_cmd_result cmd_clear(char **tokens, size_t count)
 /* ============================================================
  * VERSION
  * ============================================================ */
+
+static cli_cmd_result cmd_doctor(char **tokens, size_t count)
+{
+    (void)tokens;
+    if (count != 1) return CLI_CMD_INVALID;
+    return nero_doctor(stdout) ? CLI_CMD_FAILURE : CLI_CMD_CONTINUE;
+}
 
 static cli_cmd_result cmd_version(char **tokens, size_t count)
 {

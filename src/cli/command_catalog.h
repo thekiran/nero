@@ -8,6 +8,7 @@
     X(history, cmd_history) \
     X(exit, cmd_exit) \
     X(clear, cmd_clear) \
+    X(doctor, cmd_doctor) \
     X(version, cmd_version) \
     X(log, cmd_log) \
     X(preflight, cmd_preflight)
@@ -20,6 +21,7 @@
     X("exit", ": Quit the shell") \
     X("clear", ": Clear the screen") \
     X("history", ": Show command history") \
+    X("doctor", ": Read-only offline diagnostics (private data redacted)") \
     X("version", ": Show program version") \
     X("preflight", ": Read-only -Syn preflight: expected resource use, no network I/O") \
     X("log", ": Show recent application logs") \

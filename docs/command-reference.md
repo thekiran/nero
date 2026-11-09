@@ -259,3 +259,21 @@ Log recovery and clearing behavior:
   reports failure and retains recent memory records if the persistent clear is
   unsuccessful. A successful clear also restores disk logging when possible.
 - Session end records contain the actual exit status and stdout error flag.
+
+### Offline environment diagnostics
+
+Run `doctor` in the shell, or `nero --doctor` for a standalone report that bypasses
+session logging/history and Windows socket initialization. Both paths are read-only
+and never transmit packets, escalate privileges, fix files or read log/history
+contents. Personal paths, addresses and environment values are omitted by default.
+The report shows build/OS/architecture, redacted installation location, PATH
+resolution, terminal support, user storage-root availability and compiled network
+features. Capabilities and privileges are observations, not successful socket tests.
+Build tools are not runtime dependencies. Missing loader libraries can prevent the
+program itself from starting, so doctor cannot diagnose them from inside the program.
+
+Plain output is used for redirects, `NO_COLOR`, `TERM=dumb` and missing terminal
+capabilities. Consult [installation](installation.md) for a missing/global command,
+and [troubleshooting](troubleshooting.md) for terminal or storage diagnoses. The
+existing interactive shell still owns its usual session history/log lifecycle;
+use `--doctor` when collecting a report without any session storage changes.
