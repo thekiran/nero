@@ -1,3 +1,5 @@
+> Historical record: this describes an earlier source revision, not current certification. See [current quality validation](quality-validation.md).
+
 # NERO reliability workplan
 
 Status date: 2026-11-08. Branch: `fix/scanner-reliability`.

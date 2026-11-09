@@ -6,7 +6,7 @@ The native package workflow covers the following combinations:
 | Capability | macOS ARM64 / Intel | Linux x86-64 / ARM64 | Windows x86-64 |
 | --- | --- | --- | --- |
 | Native CLI / history / rendering | Make | Make | CMake + MinGW UCRT64 |
-| Interface enumeration | getifaddrs + fixtures | sysfs + offline tests | GetAdaptersAddresses + selection tests |
+| Interface enumeration | getifaddrs + fixtures | sysfs / getifaddrs + fixtures | GetAdaptersAddresses + selection tests |
 | Offline CLI tests | Make + CMake | Make + CMake | Native pipe/EOF/input tests |
 | Terminal tests | POSIX PTY | POSIX PTY | Synthetic and real Win32 console mode restoration |
 | ASan / UBSan | Offline targets | Offline targets | Not claimed for MinGW |
@@ -39,3 +39,6 @@ Windows loopback fixture opens one ephemeral TCP listener bound to 127.0.0.1,
 exchanges one byte locally, and closes its sockets. Synthetic tests exercise
 handle values above INT_MAX without opening sockets. Full scanner and network
 engine runtime behavior remains outside this validation claim.
+
+Current scanner session work and its explicit native-validation limits are tracked
+in the [quality validation record](engineering/quality-validation.md).

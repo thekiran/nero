@@ -45,3 +45,11 @@ Source builds after v0.1.3 add private command-history persistence, exact
 [Distribution paths](docs/distribution.md) documents the macOS Homebrew formula
 and test-only Ubuntu `.deb` artifacts. Signing/notarization still requires
 owner-controlled credentials and is not claimed by these checks.
+
+## Reliability acceptance
+
+The [quality plan](docs/engineering/quality-plan.md) defines measurable gates for
+scanner correctness, session ownership, cleanup and native distribution evidence.
+Implementation progress and environment limits are recorded separately in
+[quality validation](docs/engineering/quality-validation.md). A planned stage is
+not a claim of native verification.
