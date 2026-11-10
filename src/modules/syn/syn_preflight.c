@@ -2,6 +2,9 @@
  *
  * These checks decide whether the run may start; they never spawn workers,
  * open the flooding sockets or touch engine state. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE /* nero_ping_ipv4 -> diagnostic_process.h needs the glibc _np spawn helper */
+#endif
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
