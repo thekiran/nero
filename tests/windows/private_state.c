@@ -41,6 +41,14 @@ int main(void) {
     if (n < 0 || (size_t)n >= sizeof(parent)) return 2;
     n = snprintf(path, sizeof(path), "%s\\history", parent);
     if (n < 0 || (size_t)n >= sizeof(path)) return 2;
+    PSECURITY_DESCRIPTOR descriptor = NULL;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorA(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)",
+        SDDL_REVISION_1, &descriptor, NULL)) return 2;
+    SECURITY_ATTRIBUTES attributes = {sizeof(attributes), descriptor, FALSE};
+    BOOL created = CreateDirectoryA(parent, &attributes);
+    LocalFree(descriptor);
+    if (!created) return 2;
     nero_state_dir directory = NERO_STATE_DIR_INIT;
     int result = nero_state_parent(&directory, path, 1);
     printf("parent result=%d errno=%d windows_error=%lu\n", result, errno, (unsigned long)GetLastError());

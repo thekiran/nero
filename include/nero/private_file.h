@@ -68,13 +68,15 @@ static inline int nero_state_acl(HANDLE h, int private_parent, int file) {
     PSECURITY_DESCRIPTOR descriptor = NULL;
     PSID owner = NULL;
     PACL acl = NULL;
-    union { SID alignment; BYTE bytes[SECURITY_MAX_SID_SIZE]; } system_buffer, admin_buffer;
+    union { SID alignment; BYTE bytes[SECURITY_MAX_SID_SIZE]; } system_buffer, admin_buffer, owner_rights;
     DWORD system_size = sizeof(system_buffer.bytes), admin_size = sizeof(admin_buffer.bytes);
+    DWORD owner_size = sizeof(owner_rights.bytes);
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return -1;
     int ok = GetTokenInformation(token, TokenUser, user_buffer.bytes, sizeof(user_buffer.bytes), &needed) != 0;
     CloseHandle(token);
     if (!ok || !CreateWellKnownSid(WinLocalSystemSid, NULL, system_buffer.bytes, &system_size) ||
-        !CreateWellKnownSid(WinBuiltinAdministratorsSid, NULL, admin_buffer.bytes, &admin_size)) return -1;
+        !CreateWellKnownSid(WinBuiltinAdministratorsSid, NULL, admin_buffer.bytes, &admin_size) ||
+        !CreateWellKnownSid(WinCreatorOwnerRightsSid, NULL, owner_rights.bytes, &owner_size)) return -1;
     PSID user = ((TOKEN_USER *)(void *)user_buffer.bytes)->User.Sid;
     BOOL administrator = FALSE;
     (void)CheckTokenMembership(NULL, admin_buffer.bytes, &administrator);
@@ -99,8 +101,11 @@ static inline int nero_state_acl(HANDLE h, int private_parent, int file) {
             DWORD mutation = DELETE | WRITE_DAC | WRITE_OWNER | FILE_DELETE_CHILD |
                              GENERIC_ALL | GENERIC_WRITE;
             if (private_parent || file) mutation |= FILE_WRITE_DATA | FILE_APPEND_DATA;
+            /* OWNER RIGHTS names this object's already-validated owner.
+             * Python/Windows private directories legitimately use this ACE. */
             if ((ace->Mask & mutation) && !EqualSid(sid, user) &&
-                !EqualSid(sid, system_buffer.bytes) && !EqualSid(sid, admin_buffer.bytes)) { ok = 0; break; }
+                !EqualSid(sid, system_buffer.bytes) && !EqualSid(sid, admin_buffer.bytes) &&
+                !EqualSid(sid, owner_rights.bytes)) { ok = 0; break; }
         }
     }
     LocalFree(descriptor);

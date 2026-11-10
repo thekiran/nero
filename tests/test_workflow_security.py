@@ -4,6 +4,9 @@ import itertools
 import json
 import os
 import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / '.github/workflows'
@@ -118,6 +121,60 @@ def container_files(root):
                 yield Path(directory) / name
 
 class WorkflowSecurity(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'posix', 'The release preparation script runs in POSIX Bash')
+    def test_release_preparation_uses_only_the_event_revision(self):
+        job = split_jobs((WORKFLOWS / 'release.yml').read_text())[1]['prepare']
+        script = textwrap.dedent(job.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory(prefix='nero-release-trust-') as temp:
+            root = Path(temp)
+            env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, env=env, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+            git('init', '-b', 'main')
+            git('config', 'user.name', 'Offline security fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            (root / '.github').mkdir()
+            (root / '.github/release-intent.json').write_text('{"version":"v1.0.0","publish":false}')
+            notes = root / 'scripts/release/release_notes.py'
+            notes.parent.mkdir(parents=True)
+            notes.write_text("from pathlib import Path\nPath('preview-executed').write_text('trusted')\n")
+            git('add', '.'); git('commit', '-m', 'trusted revision')
+            trusted = git('rev-parse', 'HEAD')
+            git('update-ref', 'refs/remotes/origin/main', trusted)
+            git('tag', 'v1.0.0')
+            notes.write_text("from pathlib import Path\nPath('preview-executed').write_text('untrusted')\n")
+            git('add', '.'); git('commit', '-m', 'unmerged revision')
+            untrusted = git('rev-parse', 'HEAD')
+            git('tag', 'v9.9.9')
+            git('checkout', '--detach', trusted)
+            output = root / 'outputs'
+            marker = root / 'preview-executed'
+            def prepare(event, ref, version, sha):
+                output.write_text(''); marker.unlink(missing_ok=True)
+                return subprocess.run(['bash', '-euo', 'pipefail', '-c', script], cwd=root,
+                    env=dict(env, EVENT=event, GITHUB_REF=ref, GITHUB_REF_NAME=ref.rsplit('/', 1)[-1],
+                             GITHUB_SHA=sha, REQUESTED_VERSION=version, REQUESTED_PUBLISH='false',
+                             GITHUB_OUTPUT=str(output)), capture_output=True, text=True, timeout=10)
+            for version in ('v9.9.9', 'v1.0.0;touch inert-marker', '../../other'):
+                result = prepare('workflow_dispatch', 'refs/heads/main', version, trusted)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(marker.exists(), 'Rejected sources must not execute release scripts')
+                self.assertEqual(output.read_text(), '')
+            for version in ('v1.0.0', 'v2.0.0'):
+                result = prepare('workflow_dispatch', 'refs/heads/main', version, trusted)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('commit=' + trusted, output.read_text())
+                self.assertEqual(marker.read_text(), 'trusted')
+            result = prepare('pull_request', 'refs/pull/12/merge', 'v9.9.9', trusted)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('version=v0.0.0-ci', output.read_text())
+            self.assertIn('publish=false', output.read_text())
+            git('checkout', '--detach', untrusted)
+            result = prepare('push', 'refs/tags/v9.9.9', '', untrusted)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(marker.exists(), 'An unmerged tagged source must not execute release scripts')
+
     def test_release_source_and_cache_boundaries(self):
         text = (WORKFLOWS / 'release.yml').read_text()
         top, jobs = split_jobs(text)
