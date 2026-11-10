@@ -1,9 +1,13 @@
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
 /* Private, bounded history storage. Only explicitly recognized command shapes
  * are persisted: arbitrary input, credentials and unknown arguments stay out.
  * Every update reloads under a nonblocking exclusive lock, so concurrent shells
  * append to current disk state instead of resurrecting a cleared snapshot. */
 #include "cli_internal.h"
 #include "nero/log.h"
+#include "nero/private_file.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -23,6 +27,7 @@
 #define HISTORY_FILE_LIMIT (CLI_HISTORY_CAPACITY * CLI_LINE_CAPACITY)
 static char history_path[HISTORY_PATH_CAPACITY];
 static int storage_enabled;
+static nero_state_dir history_directory = NERO_STATE_DIR_INIT;
 static int warned;
 
 static void storage_warning(void)
@@ -72,24 +77,12 @@ static int persistable(const char *line)
  * POSIX permissions before any truncation or reading of command contents. */
 static FILE *open_history(void)
 {
+    int fd = nero_state_open(&history_directory, nero_state_basename(history_path), O_RDWR | O_CREAT, 1);
+    if (fd < 0) return NULL;
 #ifdef _WIN32
-    HANDLE handle = CreateFileA(history_path, GENERIC_READ | GENERIC_WRITE, 0,
-        NULL, OPEN_ALWAYS, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-    if (handle == INVALID_HANDLE_VALUE) { errno = EACCES; return NULL; }
-    BY_HANDLE_FILE_INFORMATION info;
-    if (GetFileType(handle) != FILE_TYPE_DISK ||
-        !GetFileInformationByHandle(handle, &info) ||
-        (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) ||
-        info.nNumberOfLinks != 1) {
-        CloseHandle(handle); errno = EACCES; return NULL;
-    }
-    int fd = _open_osfhandle((intptr_t)handle, _O_RDWR | _O_BINARY | _O_NOINHERIT);
-    if (fd < 0) { CloseHandle(handle); return NULL; }
     FILE *file = _fdopen(fd, "r+b");
     if (!file) _close(fd);
 #else
-    int fd = open(history_path, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
-    if (fd < 0) return NULL;
     struct stat info;
     if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) ||
         info.st_uid != geteuid() || info.st_nlink != 1 ||
@@ -157,10 +150,11 @@ static int write_entries(FILE *file, char entries[][CLI_LINE_CAPACITY], int coun
 
 void cli_history_load(void)
 {
+    nero_state_close(&history_directory);
     storage_enabled = 0;
     warned = 0;
     const char *override = getenv("NERO_HISTORY_FILE");
-    if (override && strcmp(override, ":memory:") == 0) return;
+    if (nero_state_elevated() || (override && strcmp(override, ":memory:") == 0)) return;
     const char *home;
 #ifdef _WIN32
     home = getenv("USERPROFILE");
@@ -177,6 +171,7 @@ void cli_history_load(void)
     else if (home && home[0]) n = snprintf(history_path, sizeof(history_path), "%s%s.nero_history", home, separator);
     else return;
     if (n <= 0 || (size_t)n >= sizeof(history_path)) { errno = ENAMETOOLONG; storage_warning(); return; }
+    if (nero_state_parent(&history_directory, history_path, 0) != 0) { storage_warning(); return; }
     storage_enabled = 1;
     FILE *file = open_history();
     if (!file) { storage_warning(); return; }

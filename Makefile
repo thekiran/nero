@@ -140,7 +140,7 @@ $(TEST_DIR)/scanner-runtime: tests/linux/scanner_runtime.c $(SCANNER_SOURCES) sr
 $(TEST_DIR)/scan-session: tests/scan_session.c src/modules/scan_session.c src/core/log.c $(CLI_HEADERS) Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/scan_session.c src/modules/scan_session.c src/core/log.c -o $@ -pthread
 
-$(TEST_DIR)/logging-fixture: tests/logging_fixture.c src/core/log.c include/nero/log.h Makefile | $(TEST_DIR)
+$(TEST_DIR)/logging-fixture: tests/logging_fixture.c src/core/log.c include/nero/log.h include/nero/private_file.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/logging_fixture.c src/core/log.c -o $@ -pthread
 
 $(TEST_DIR)/parser-boundaries: tests/parser_boundaries.c src/cli/parser/parser.c include/nero/cli/parser.h Makefile | $(TEST_DIR)
@@ -187,6 +187,8 @@ endif
 	python3 tests/test_installation.py
 	$(TEST_DIR)/parser-boundaries
 	$(TEST_DIR)/workload-profile
+	python3 tests/test_private_state.py $(TEST_DIR)/nero-safe
+	python3 tests/test_workflow_security.py
 	python3 tests/test_history.py $(TEST_DIR)/nero-safe
 	python3 tests/test_logging.py $(TEST_DIR)/nero-safe $(TEST_DIR)/logging-fixture
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/portscanner-reliability

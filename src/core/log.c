@@ -1,6 +1,10 @@
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
 /* Bounded local application logs. No stdout/stderr interception and no raw
  * command-line capture: callers publish explicit operational events. */
 #include "nero/log.h"
+#include "nero/private_file.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -35,6 +39,7 @@ static log_entry entries[LOG_CAPACITY];
 static size_t head, used;
 static int persistent, storage_error;
 static char path[LOG_PATH], backup[LOG_PATH + 3];
+static nero_state_dir log_directory = NERO_STATE_DIR_INIT;
 
 /* Canonical level labels. The persisted record stores the name, not the enum
  * value, so these are the single source of truth for both writing and import. */
@@ -145,40 +150,16 @@ static int redact_secrets(char *msg) {
 /* Validate the opened descriptor before truncation or stdio buffering. A
  * special file must fall back to memory rather than blocking shell startup. */
 static FILE *open_log(const char *name, int truncate, int reading) {
-#ifdef _WIN32
-    if (_strnicmp(name, "\\\\.\\pipe\\", 9) == 0) { errno = EINVAL; return NULL; }
-    int flags = reading ? _O_RDONLY : (_O_RDWR | _O_CREAT | _O_APPEND);
-    int fd = _open(name, flags | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
+    int flags = reading ? O_RDONLY : (O_RDWR | O_CREAT | O_APPEND);
+    int fd = nero_state_open(&log_directory, nero_state_basename(name), flags, 0);
     if (fd < 0) return NULL;
-    struct _stat64 info;
-    if (_fstat64(fd, &info) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
-    if ((info.st_mode & _S_IFMT) != _S_IFREG) { log_close(fd); errno = EINVAL; return NULL; }
+#ifdef _WIN32
     if (truncate) {
         int error = (int)_chsize_s(fd, 0);
         if (error) { log_close(fd); errno = error; return NULL; }
     }
     FILE *file = _fdopen(fd, reading ? "rb" : "a+b");
 #else
-    int flags = (reading ? O_RDONLY : (O_RDWR | O_CREAT | O_APPEND)) | O_NONBLOCK;
-#ifdef O_NOFOLLOW
-    flags |= O_NOFOLLOW;
-#endif
-#ifdef O_CLOEXEC
-    flags |= O_CLOEXEC;
-#endif
-    int fd = open(name, flags, 0600);
-    if (fd < 0) return NULL;
-    struct stat info;
-    if (fstat(fd, &info) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
-    if (!S_ISREG(info.st_mode)) { log_close(fd); errno = EINVAL; return NULL; }
-    /* Refuse a log file owned by another user or carrying extra hard links:
-     * that is the case where a different local user controls or shares the
-     * target, so fall back to in-memory logging rather than appending into it
-     * (O_NOFOLLOW above already blocks symlink swaps). The permission bits are
-     * deliberately not dictated here: unlike the always-0600 history file, the
-     * log path is user-selectable via NERO_LOG_FILE, so the owner's own choice
-     * of mode on a file they own is respected. */
-    if (info.st_uid != geteuid() || info.st_nlink != 1) { log_close(fd); errno = EPERM; return NULL; }
     if (truncate && ftruncate(fd, 0) != 0) { int error = errno; log_close(fd); errno = error; return NULL; }
     FILE *file = fdopen(fd, reading ? "r" : "a+");
 #endif
@@ -207,38 +188,35 @@ static int bound_existing_file(const char *name) {
     size_t start = 0;
     while (start < (size_t)LOG_LIMIT && tail[start++] != '\n') {}
     size_t length = (size_t)LOG_LIMIT - start;
-    char temporary[LOG_PATH + 16];
-    snprintf(temporary, sizeof(temporary), "%s.tmp.XXXXXX", name);
+    char temporary[96];
+    static atomic_uint sequence;
+    int fd = -1;
+    for (unsigned attempt = 0; attempt < 100; ++attempt) {
+        unsigned id = atomic_fetch_add_explicit(&sequence, 1, memory_order_relaxed);
 #ifdef _WIN32
-    if (_mktemp_s(temporary, sizeof(temporary)) != 0) { free(tail); return -1; }
-    int fd = _open(temporary, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
+        unsigned long pid = GetCurrentProcessId();
 #else
-    int fd = mkstemp(temporary);
+        unsigned long pid = (unsigned long)getpid();
 #endif
+        snprintf(temporary, sizeof(temporary), ".nero-tmp-%lu-%u", pid, id);
+        fd = nero_state_open(&log_directory, temporary, O_RDWR | O_CREAT | O_EXCL, 1);
+        if (fd >= 0 || errno != EEXIST) break;
+    }
     if (fd < 0) { error = errno; free(tail); errno = error; return -1; }
 #ifdef _WIN32
     FILE *dest = _fdopen(fd, "wb");
 #else
     FILE *dest = fdopen(fd, "w");
 #endif
-    if (!dest) { error = errno; log_close(fd); remove(temporary); free(tail); errno = error; return -1; }
+    if (!dest) { error = errno; log_close(fd); nero_state_remove(&log_directory, temporary); free(tail); errno = error; return -1; }
     failed = length && fwrite(tail + start, 1, length, dest) != length;
     error = failed ? (errno ? errno : EIO) : 0;
     if (fclose(dest) != 0) { failed = 1; error = errno; }
     free(tail);
-    if (!failed) {
-#ifdef _WIN32
-        if (!MoveFileExA(temporary, name, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            DWORD cause = GetLastError();
-            failed = 1;
-            error = cause == ERROR_DISK_FULL ? ENOSPC :
-                (cause == ERROR_ACCESS_DENIED || cause == ERROR_SHARING_VIOLATION ? EACCES : EIO);
-        }
-#else
-        if (rename(temporary, name) != 0) { failed = 1; error = errno; }
-#endif
+    if (!failed && nero_state_rename(&log_directory, temporary, nero_state_basename(name)) != 0) {
+        failed = 1; error = errno;
     }
-    if (failed) { remove(temporary); errno = error; return -1; }
+    if (failed) { nero_state_remove(&log_directory, temporary); errno = error; return -1; }
     return 0;
 }
 /* Recover the severity of a persisted record of the form
@@ -293,22 +271,6 @@ static void load_recent(const char *name) {
     fclose(file);
 }
 
-static int create_parent(void) {
-    char parent[LOG_PATH];
-    memcpy(parent, path, strlen(path) + 1);
-    for (size_t i = 1; parent[i]; ++i) {
-        if (parent[i] != '/' && parent[i] != '\\') continue;
-#ifdef _WIN32
-        if (i == 2 && parent[1] == ':') continue;
-#else
-        if (parent[i] == '\\') continue;
-#endif
-        char saved = parent[i]; parent[i] = '\0';
-        if (mkdir_private(parent) != 0 && errno != EEXIST) return -1;
-        parent[i] = saved;
-    }
-    return 0;
-}
 /* Derive a short, stable correlation id. Not security-sensitive: it only ties
  * one process's records together, so a mix of pid, wall clock and a monotonic
  * reading is sufficient and needs no PRNG seeding. */
@@ -336,7 +298,7 @@ static void initialize(void) {
     if (level_name && nero_log_level_from_name(level_name, &env_level) == 0)
         atomic_store_explicit(&runtime_level, (int)env_level, memory_order_relaxed);
     const char *override = getenv("NERO_LOG_FILE");
-    if (override && strcmp(override, ":memory:") == 0) return;
+    if (nero_state_elevated() || (override && strcmp(override, ":memory:") == 0)) return;
     int length;
     if (override && *override) length = snprintf(path, sizeof(path), "%s", override);
     else {
@@ -360,7 +322,7 @@ static void initialize(void) {
     } else {
         snprintf(backup, sizeof(backup), "%s.1", path);
         errno = 0;
-        if (create_parent() != 0) storage_error = errno ? errno : EIO;
+        if (nero_state_parent(&log_directory, path, 1) != 0) storage_error = errno ? errno : EIO;
         else {
             errno = 0;
             FILE *file = open_log(path, 0, 0);
@@ -405,7 +367,7 @@ static void persist_line(const char *line) {
     if (size + separator + (long)strlen(line) + 1 > LOG_LIMIT) {
         fclose(file);
         if (bound_existing_file(backup) != 0 || bound_existing_file(path) != 0 ||
-            (remove(backup) != 0 && errno != ENOENT) || rename(path, backup) != 0) {
+            (nero_state_remove(&log_directory, nero_state_basename(backup)) != 0 && errno != ENOENT) || nero_state_rename(&log_directory, nero_state_basename(path), nero_state_basename(backup)) != 0) {
             storage_error = errno ? errno : EIO; counters.failures++; counters.last_error = storage_error; persistent = 0; return;
         }
         counters.rotations++;
@@ -491,7 +453,6 @@ int nero_log_clear(void) {
      * until both configured persistent files have actually been cleared. */
     if (path[0]) {
         errno = 0;
-        if (create_parent() != 0) { result = -1; error = errno; }
         FILE *check = result ? NULL : open_log(path, 0, 0);
         if (!result && !check) { result = -1; error = errno; }
         if (check && fclose(check) != 0) { result = -1; error = errno; }
@@ -500,7 +461,7 @@ int nero_log_clear(void) {
             if (previous) fclose(previous);
             else if (errno != ENOENT) { result = -1; error = errno; }
         }
-        if (!result && remove(backup) != 0 && errno != ENOENT) { result = -1; error = errno; }
+        if (!result && nero_state_remove(&log_directory, nero_state_basename(backup)) != 0 && errno != ENOENT) { result = -1; error = errno; }
         if (!result) {
             FILE *file = open_log(path, 1, 0);
             if (!file) { result = -1; error = errno; }
