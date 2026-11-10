@@ -12,7 +12,8 @@ BINARY = Path(sys.argv.pop(1)).resolve()
 
 class PrivateStateTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='nero-state-')
+        self.temp = tempfile.TemporaryDirectory(prefix='nero-state-',
+            dir=os.environ.get('LOCALAPPDATA') if os.name == 'nt' else None)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 

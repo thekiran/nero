@@ -187,7 +187,7 @@ static inline int nero_state_parent(nero_state_dir *dir, const char *path, int c
     else copy[0] = '\0';
     int fd = open(path[0] == '/' ? "/" : ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) return -1;
-    if (nero_state_directory(fd, 0) != 0) { close(fd); return -1; }
+    if (nero_state_directory(fd, 0) != 0) { int error = errno; close(fd); errno = error; return -1; }
     char *part = copy;
     unsigned links = 0;
     while (*part) {
@@ -207,7 +207,8 @@ static inline int nero_state_parent(nero_state_dir *dir, const char *path, int c
             if (++links > 8 || entry.st_uid != 0 || fstat(fd, &parent) != 0 ||
                 parent.st_uid != 0 || (parent.st_mode & 022)) { errno = EACCES; goto fail; }
             ssize_t n = readlinkat(fd, part, target, sizeof(target) - 1);
-            if (n <= 0) goto fail;
+            if (n < 0) goto fail;
+            if (n == 0 || (size_t)n >= sizeof(target) - 1) { errno = ENAMETOOLONG; goto fail; }
             target[n] = '\0';
             int length = snprintf(remaining, sizeof(remaining), "%s%s%s", target,
                                   end && end[1] ? "/" : "", end ? end + 1 : "");
@@ -222,7 +223,7 @@ static inline int nero_state_parent(nero_state_dir *dir, const char *path, int c
         if (create && mkdirat(fd, part, 0700) != 0 && errno != EEXIST) goto fail;
         int next = openat(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         if (next < 0) goto fail;
-        if (nero_state_directory(next, 0) != 0) { close(next); goto fail; }
+        if (nero_state_directory(next, 0) != 0) { int error = errno; close(next); errno = error; goto fail; }
         close(fd); fd = next;
         if (!end) break;
         part = end + 1;
