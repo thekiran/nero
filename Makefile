@@ -179,6 +179,11 @@ $(TEST_DIR)/interface-fallback: tests/linux/interface_fallback.c src/platform/li
 TEST_BINS += $(TEST_DIR)/interface-fallback
 endif
 
+$(TEST_DIR)/diagnostic-process: tests/diagnostic_process.c include/nero/diagnostic_process.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/diagnostic_process.c -o $@
+
+TEST_BINS += $(TEST_DIR)/diagnostic-process
+
 test: $(TEST_BINS)
 ifeq ($(UNAME_S),Linux)
 	$(TEST_DIR)/interface-fallback
@@ -187,6 +192,7 @@ endif
 	python3 tests/test_installation.py
 	$(TEST_DIR)/parser-boundaries
 	$(TEST_DIR)/workload-profile
+	$(TEST_DIR)/diagnostic-process
 	python3 tests/test_private_state.py $(TEST_DIR)/nero-safe
 	python3 tests/test_workflow_security.py
 	python3 tests/test_history.py $(TEST_DIR)/nero-safe
