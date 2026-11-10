@@ -18,7 +18,7 @@
 | Private CLI types and contracts | [cli_internal.h](../src/cli/cli_internal.h) | `cli_line`, `CLI_*` |
 | Active presentation constants | [printing.h](../include/nero/printing.h) | Message and table macros |
 | Operating system / architecture information | [platform.c](../src/core/platform.c) | `nero/platform.h` API implementation |
-| Standalone platform report | [platform_info.c](../src/modules/platform_info.c) | `main` |
+| Standalone platform report | [platform_info.c](../tools/platform_info.c) | `main` |
 | Local macOS interface listing | [select_interface_macos.c](../src/platform/macos/select_interface_macos.c) | `list_and_select_interface` |
 | Local Linux interface listing | [select_interface.c](../src/platform/linux/select_interface.c) | `list_and_select_interface` |
 | Disabled-network command | [commands.c](../src/cli/commands.c) | `NERO_NETWORK_UNAVAILABLE` |
@@ -70,11 +70,18 @@ for compatibility. Document ownership when introducing shared state.
 
 ## Legacy and special-purpose files
 
-- `src/cli/printing.c` is an unused legacy macro copy; it is not compiled.
-  Make presentation changes in `include/nero/printing.h` or `render.c`.
+- Presentation macros are header-only in `include/nero/printing.h`; there is no
+  `printing.c`. Make presentation changes in `printing.h` or `render.c`.
 - `src/modules/syn_flood_powered.c` and `portscanner.c` are existing Linux modules;
   they are not linked into CLI development tests.
+- `src/modules/syn/` holds the engine's private support modules: settings,
+  animation, preflight and report wording. The packet engine and run state stay
+  in `syn_flood_powered.c`; support modules receive borrowed state through
+  `syn_internal.h` and introduce no globals.
 - Offline CLI builds report network unavailability directly in `commands.c`.
-- `src/platform/windows/` is reserved; no Windows terminal implementation exists.
+- `src/platform/windows/` holds the Win32/Winsock compatibility header
+  (`nero_win_compat.h`) and interface enumeration (`select_interface_windows.c`).
+  The native MinGW CLI (CMake `WIN32` leg) reuses the shared `src/cli/terminal.c`
+  through those shims; the raw packet engine is excluded (`NERO_SYN_UNAVAILABLE`).
 - `tests/baseline.json` and related manifests record historical and intentional
   changes; they are not runtime data.

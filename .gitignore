@@ -27,3 +27,6 @@ CMakeUserPresets.json
 # IDE
 .vscode/
 .idea/
+
+# Local git worktrees created by tooling (never part of the tracked tree)
+.claude/worktrees/

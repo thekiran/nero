@@ -5,8 +5,8 @@
 The directory migration groups project headers under `include/nero/` and sources
 under `src/`. Includes use the `nero/` prefix with `include/` on the search path.
 The CLI entry point is `src/main.c`; terminal and ASCII code live in `src/cli/`.
-`src/cli/printing.c` is the retained legacy macro duplicate, not a build input.
-Public signatures and runtime behavior are preserved.
+Presentation macros live header-only in `include/nero/printing.h`; there is no
+`printing.c`. Public signatures and runtime behavior are preserved.
 
 ## CLI responsibilities
 

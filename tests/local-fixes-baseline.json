@@ -41,11 +41,6 @@
             "after": "7802e171409045ebade107142a469e92349d070ee2a24b161b62680c20a4385e",
             "reason": "Reviewed Apple-only framework discovery and linkage for interfaces and interfaces-mock; other targets and Linux selection are unchanged."
         },
-        "src/platform/macos/network_unavailable.c": {
-            "before": "932663ef68a8f31e0463b5334b97eb6d90fb9264a90aef6fe1cc5c55c9be4bc2",
-            "after": "32cefcd3d58ac8ff579db3854223d500ad02591b54dd631cc1ca3763613dc726",
-            "reason": "fix(macos): restore no-network adapter stub printing 'unsupported in this build' (commit 97438f0)"
-        },
         "src/cli/commands.c": {
             "before": "f96218b475633ab5983c94d170cb05fa61155c59389aa3718fb5f66bc115dacb",
             "after": "e141ca6c606b56e41816eeecbc5c21e897c672a664518a7066827102981b4219",
@@ -63,9 +58,11 @@
         }
     },
     "removed": [
-        "src/cli/printing.c"
+        "src/cli/printing.c",
+        "src/platform/macos/network_unavailable.c"
     ],
     "removed-reasons": {
-        "src/cli/printing.c": "chore(cli): remove dead duplicate of include/nero/printing.h; the .c held only macro redefinitions, was compiled by no target, and included by no source"
+        "src/cli/printing.c": "chore(cli): remove dead duplicate of include/nero/printing.h; the .c held only macro redefinitions, was compiled by no target, and included by no source",
+        "src/platform/macos/network_unavailable.c": "refactor(macos): remove unused network_unavailable.c (commit 9da8956); macOS now links the real raw packet engine and the no-network stub is gone"
     }
 }
