@@ -118,6 +118,23 @@ def container_files(root):
                 yield Path(directory) / name
 
 class WorkflowSecurity(unittest.TestCase):
+    def test_release_source_and_cache_boundaries(self):
+        text = (WORKFLOWS / 'release.yml').read_text()
+        top, jobs = split_jobs(text)
+        self.assertRegex(top, r'(?m)^cache-mode: none$')
+        self.assertNotRegex(text, r'(?m)^ +cache-mode:')
+        self.assertNotIn('ref: ${{ needs.prepare.outputs.commit }}', text)
+        for job in ('prepare', 'package', 'windows', 'draft', 'publish'):
+            self.assertIn('ref: ${{ github.sha }}', jobs[job])
+            self.assertIn('persist-credentials: false', jobs[job])
+        self.assertIn('Requested tag must match the triggering revision', jobs['prepare'])
+        self.assertIn('git merge-base --is-ancestor "$commit" refs/remotes/origin/main', jobs['prepare'])
+        self.assertIn("github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'", jobs['prepare'])
+        for job, body in jobs.items():
+            if job != 'publish':
+                self.assertNotIn('secrets.', body)
+                self.assertNotIn('contents: write', body)
+
     def test_external_actions_are_immutable_and_defaults_read_only(self):
         for path in (ROOT / '.github/workflows').glob('*.yml'):
             text = path.read_text()
