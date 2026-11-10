@@ -13,7 +13,8 @@ BINARY = Path(sys.argv.pop(1)).resolve()
 
 class HistoryTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="nero-history-")
+        self.temp = tempfile.TemporaryDirectory(prefix="nero-history-",
+            dir=os.environ.get("LOCALAPPDATA") if os.name == "nt" else None)
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "history"
         self.env = dict(os.environ, NERO_HISTORY_FILE=str(self.path),

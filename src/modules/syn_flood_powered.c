@@ -1,3 +1,6 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
 /* Legacy Linux traffic engine. Its worker and signal lifecycle is separate
  * from the shell; macOS production diagnostics are handled in commands.c.
  * Platform build rules decide whether this implementation is linked. */
@@ -24,6 +27,7 @@
 #include "nero/ascii.h"
 #include "nero/hardware.h"
 #include "nero/log.h"
+#include "nero/diagnostic_process.h"
 #include "nero/terminal.h"
 #include "nero/portscanner.h"
 #include "nero/syn_flood_powered.h"
@@ -39,6 +43,7 @@ volatile sig_atomic_t row;
 int port_select;
 
 extern pthread_mutex_t ekran_mutex;
+extern volatile sig_atomic_t cli_termination_signal;
 
 volatile sig_atomic_t stop_flag = 0;
 
@@ -191,29 +196,7 @@ static unsigned short ip_checksum(struct nero_iphdr *iph) {
 }
 
 int is_target_online(const char *ip) {
-    // Reject anything that is not a dotted-quad IPv4 before shelling out:
-    // the ping command below is passed to /bin/sh, so unvalidated input
-    // would allow shell metacharacters in `ip` to execute arbitrary commands.
-    struct in_addr addr;
-    if (inet_pton(AF_INET, ip, &addr) != 1)
-        return 0;
-
-    char command[128];
-#if defined(__APPLE__)
-    /* Darwin interprets -W as milliseconds; Linux interprets it as seconds. */
-    int written = snprintf(command, sizeof(command),
-                           "ping -c 1 -W 1000 %s > /dev/null 2>&1", ip);
-#else
-    int written = snprintf(command, sizeof(command),
-                           "ping -c 1 -W 1 %s > /dev/null 2>&1", ip);
-#endif
-    if (written < 0 || (size_t)written >= sizeof(command))
-        return 0;
-
-    int status = system(command);
-
-    // A zero system() result indicates a successful ping
-    return (status == 0);
+    return nero_ping_ipv4(ip, &cli_termination_signal);
 }
 
 /* Runs when a worker exits, whether normally or through pthread_exit(). */
@@ -772,6 +755,7 @@ int SYN_Flood(const char *target_ip) {
                 "ping; continuing anyway.\033[0m\n",
                 target_ip);
     }
+    if (cli_termination_signal) return 1;
 
     struct sigaction previous_sa;
     if (sigaction(SIGINT, &sa, &previous_sa) == -1) {

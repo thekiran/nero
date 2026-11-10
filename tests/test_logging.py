@@ -11,7 +11,8 @@ FIXTURE=Path(sys.argv.pop(1)).resolve()
 
 class LoggingTests(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory(prefix='nero_log_')
+        self.temp=tempfile.TemporaryDirectory(prefix='nero_log_',
+            dir=os.environ.get('LOCALAPPDATA') if os.name == 'nt' else None)
         self.addCleanup(self.temp.cleanup)
         self.path=Path(self.temp.name)/'nested'/'nero.log'
     def run_cli(self,commands,path=None):
