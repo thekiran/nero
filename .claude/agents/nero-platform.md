@@ -11,7 +11,7 @@ Improve cross-platform portability without pretending that Linux-specific APIs e
 FILE OWNERSHIP
 - src/platform/
 - src/core/platform.c
-- src/modules/platform_info.c
+- tools/platform_info.c
 - include/nero/platform.h
 - include/nero/select_interface.h
 

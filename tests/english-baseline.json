@@ -41,7 +41,7 @@
       "after": "8847df4a96caf14455fa8485948614eabbe8c9f723b7c05ab88b32109cedc4e6",
       "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."
     },
-    "src/modules/platform_info.c": {
+    "tools/platform_info.c": {
       "before": "5f054420dd2ac6f8ab8db157b6c3d9918ce40d098de919530a228ce13dc11c09",
       "after": "c08a1bdec4ee35dab7445e40a1e533251e950fc9af2d7491505d04f486316d19",
       "reason": "Translate Turkish messages/comments into English; preserve C tokens, string count, escape sequences and format placeholders."

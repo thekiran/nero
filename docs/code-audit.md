@@ -1,5 +1,14 @@
 # Nero Code Audit — 2026-11-03
 
+> **Historical snapshot (HEAD `97438f0`).** This records the repository state on
+> the audit date and is kept as-is. Several observations have since been
+> superseded: `src/cli/printing.c` and `src/platform/macos/network_unavailable.c`
+> were later removed, the macOS Make build now links the real raw packet engine
+> (`-Syn`, root-only), and `src/platform/windows/` holds a Win32 adapter plus
+> interface source that the MinGW CLI builds. For current state see
+> [architecture.md](architecture.md), [code-map.md](code-map.md) and
+> [platform-compatibility.md](platform-compatibility.md).
+
 ## 1. Scope and repository state
 
 - Branch: `main`, HEAD `97438f0` ("fix(macos): remove unnecessary comment and

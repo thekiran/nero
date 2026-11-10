@@ -34,7 +34,7 @@ set(NERO_CLI_SUPPORT_SOURCES
     src/cli/ascii.c
 )
 
-add_executable(nero-platform-info src/modules/platform_info.c src/core/platform.c)
+add_executable(nero-platform-info tools/platform_info.c src/core/platform.c)
 nero_target(nero-platform-info)
 
 if(BUILD_TESTING)
@@ -144,6 +144,18 @@ elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(simulation tests/simulation.c tests/mocks/network_handler.c)
         nero_target(simulation)
         add_test(NAME simulation COMMAND simulation)
+        # Offline settings-prompt fixture: piped stdin, discarded stdout.
+        add_executable(syn-settings tests/syn_settings.c
+            src/modules/syn/syn_settings.c src/core/hardware.c
+            src/core/platform.c src/core/log.c)
+        nero_target(syn-settings)
+        target_compile_definitions(syn-settings PRIVATE NERO_HARDWARE_TEST_HOOKS)
+        target_link_libraries(syn-settings PRIVATE Threads::Threads)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_compile_definitions(syn-settings PRIVATE _POSIX_C_SOURCE=200809L)
+        endif()
+        add_test(NAME syn-settings COMMAND syn-settings)
+        set_tests_properties(syn-settings PROPERTIES TIMEOUT 30)
         add_executable(interfaces tests/interfaces.c ${interface_source})
         nero_target(interfaces)
         if(APPLE)

@@ -15,16 +15,19 @@ No existing project-specific AGENTS.md was found.
 | `src/main.c`, `include/nero/terminal.h` | Portable entry point: main → terminal_code. |
 | `src/cli/terminal.c` | POSIX termios/read/write; ANSI terminal UI, history, ascii_function and SYN_Flood. Needed bounded input, EOF handling and nonrecursive clear. |
 | `src/cli/ascii.c`, `include/nero/ascii.h` | POSIX pthread mutex, ANSI/UTF-8 display, system("clear"); no Linux-only API. Graphics retained. |
-| `include/nero/printing.h`, `src/cli/printing.c` | Portable string macros; printing.c is a legacy duplicate not compiled by Makefile. |
+| `include/nero/printing.h` | Portable string macros; header-only (no `printing.c`). |
 | `src/platform/linux/select_interface.c`, `include/nero/select_interface.h` | Linux sysfs enumeration and numeric type mapping. Implementation retained byte-for-byte; standalone function is not called by the current CLI. |
-| `src/modules/syn_flood_powered.c`, `include/nero/syn_flood_powered.h` | Linux TCP/IP layouts (`linux/tcp.h`, `struct iphdr`), raw sockets, IP_HDRINCL, Linux ping options, pthreads/signals. Engine behavior retained; project include paths now use the nero/ prefix. Deliberately excluded on macOS. |
+| `src/modules/syn_flood_powered.c`, `include/nero/syn_flood_powered.h` | Linux TCP/IP layouts (`linux/tcp.h`, `struct iphdr`), raw sockets, IP_HDRINCL, Linux ping options, pthreads/signals. Packet construction, transmission and run state stay here; UI, settings, preflight and report wording live in `src/modules/syn/`. Deliberately excluded on macOS. |
+| `src/modules/syn/syn_*.c`, `src/modules/syn/syn_internal.h` | Private -Syn support modules: settings prompt, animation, privilege/target preflight and user-facing messages. No network engine or packet logic; no new globals. |
 | `src/modules/portscanner.c`, `include/nero/portscanner.h` | POSIX socket/connect/select/fcntl/pthreads; active network scanning. Excluded on macOS and in tests; both files retained unchanged. |
 | `third_party/cjson/cJSON.c`, `third_party/cjson/cJSON.h` | Bundled portable cJSON 1.7.18; only standard C dependencies; no current CLI callers. Retained unchanged. |
 
 Linux call graph: main → terminal_code → ascii_function / SYN_Flood;
-SYN_Flood → port_get → portscanner → scan_ports_thread / select_port_menu;
-SYN_Flood also calls is_target_online, flood_animation and flood workers.
-The animation uses row_location_function, windows and ekran_mutex.
+SYN_Flood → nero_syn_preflight_privileges, nero_syn_prompt_settings,
+port_get → portscanner → scan_ports_thread / select_port_menu,
+nero_syn_target_is_online, nero_syn_animation_main and flood workers.
+The animation borrows the engine-owned stop flag and cursor row through
+nero_syn_animation_view and uses row_location_function, windows and ekran_mutex.
 Interface selection and cJSON have no incoming calls from the current CLI.
 
 macOS replaces only the SYN_Flood implementation with a diagnostic adapter and

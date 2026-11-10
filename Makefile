@@ -30,16 +30,21 @@ CLI_SUPPORT_SOURCES := \
     src/cli/ascii.c
 
 CLI_SOURCES := src/cli/terminal.c $(CLI_SUPPORT_SOURCES)
-CLI_HEADERS := $(wildcard include/nero/*.h src/cli/*.h src/modules/*internal.h)
+CLI_HEADERS := $(wildcard include/nero/*.h src/cli/*.h src/modules/*internal.h src/modules/syn/*.h)
 SCANNER_SOURCES := src/modules/portscanner.c src/modules/scan_session.c
+SYN_SOURCES := \
+    src/modules/syn_flood_powered.c \
+    src/modules/syn/syn_settings.c \
+    src/modules/syn/syn_ui.c \
+    src/modules/syn/syn_preflight.c \
+    src/modules/syn/syn_report.c
 
 COMMON_SOURCES := \
     src/main.c \
     third_party/cjson/cJSON.c \
     $(CLI_SOURCES) \
-    src/modules/portscanner.c \
-    src/modules/scan_session.c \
-    src/modules/syn_flood_powered.c
+    $(SCANNER_SOURCES) \
+    $(SYN_SOURCES)
 
 ifeq ($(UNAME_S),Darwin)
     INTERFACE_SOURCE := src/platform/macos/select_interface_macos.c
@@ -151,6 +156,11 @@ $(TEST_DIR)/parser-boundaries: tests/parser_boundaries.c src/cli/parser/parser.c
 $(TEST_DIR)/workload-profile: tests/workload_profile.c src/core/hardware.c src/core/platform.c include/nero/hardware.h include/nero/platform.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) -DNERO_HARDWARE_TEST_HOOKS tests/workload_profile.c src/core/hardware.c src/core/platform.c -o $@
 
+# Deterministic offline test for the extracted -Syn settings prompt. stdin is a
+# pipe and stdout is /dev/null, so no terminal device or network is involved.
+$(TEST_DIR)/syn-settings: tests/syn_settings.c src/modules/syn/syn_settings.c src/modules/syn/syn_internal.h src/core/hardware.c src/core/platform.c src/core/log.c include/nero/hardware.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) -DNERO_HARDWARE_TEST_HOOKS tests/syn_settings.c src/modules/syn/syn_settings.c src/core/hardware.c src/core/platform.c src/core/log.c -o $@ -pthread
+
 # Deterministic PTY smoke test for live early port selection (macOS/Linux). Mock
 # sockets only, no real traffic; defines NERO_SCAN_TEST_HOOKS itself for the
 # scanner's test-only, timing-free synchronization signals.
@@ -161,7 +171,7 @@ TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
              $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults \
              $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability $(TEST_DIR)/logging-fixture \
              $(TEST_DIR)/scanner-runtime $(TEST_DIR)/live-select-pty $(TEST_DIR)/parser-boundaries $(TEST_DIR)/scan-session \
-             $(TEST_DIR)/workload-profile
+             $(TEST_DIR)/workload-profile $(TEST_DIR)/syn-settings
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
@@ -192,6 +202,7 @@ endif
 	python3 tests/test_installation.py
 	$(TEST_DIR)/parser-boundaries
 	$(TEST_DIR)/workload-profile
+	NERO_LOG_FILE=:memory: $(TEST_DIR)/syn-settings
 	$(TEST_DIR)/diagnostic-process
 	python3 tests/test_private_state.py $(TEST_DIR)/nero-safe
 	python3 tests/test_workflow_security.py
@@ -221,7 +232,7 @@ test-tsan:
 
 analyze:
 	@mkdir -p $(BUILD_DIR)/analysis
-	@set -e; for source in $(SAFE_SOURCES) $(SCANNER_SOURCES) $(INTERFACE_SOURCE); do \
+	@set -e; for source in $(SAFE_SOURCES) $(SCANNER_SOURCES) $(SYN_SOURCES) $(INTERFACE_SOURCE); do \
 		clang --analyze $(SAFE_FLAGS) -DNERO_NETWORK_UNAVAILABLE -Xanalyzer -analyzer-werror $$source -o $(BUILD_DIR)/analysis/$$(basename $$source).plist; \
 	done
 
