@@ -22,6 +22,13 @@
 | Local macOS interface listing | [select_interface_macos.c](../src/platform/macos/select_interface_macos.c) | `list_and_select_interface` |
 | Local Linux interface listing | [select_interface.c](../src/platform/linux/select_interface.c) | `list_and_select_interface` |
 | Disabled-network command | [commands.c](../src/cli/commands.c) | `NERO_NETWORK_UNAVAILABLE` |
+| Wi-Fi command surface and dashboards | [wifi_command.c](../src/cli/wifi_command.c) | `cmd_wifi`, `cmd_wifi_export` |
+| IEEE 802.11/radiotap/IE parser | [wifi_ieee80211.c](../src/modules/wifi/wifi_ieee80211.c) | `nero_wifi_parse_radiotap`, `nero_wifi_parse_frame` |
+| AP/client tracker and RSSI history | [wifi_tracker.c](../src/modules/wifi/wifi_tracker.c) | `nero_wifi_tracker_ingest_l2` |
+| Offline pcap/pcapng analysis | [wifi_pcap.c](../src/modules/wifi/wifi_pcap.c) | `nero_wifi_analyze_pcap` |
+| Passive capture session | [wifi_session.c](../src/modules/wifi/wifi_session.c) | `nero_wifi_session_start` |
+| Dynamic libpcap/Npcap backend | [wifi_capture.c](../src/platform/wifi_capture.c) | `nero_wifi_capture_open` |
+| CoreWLAN/Linux/Windows platform layer | [wifi_platform.c](../src/platform/wifi_platform.c) | `nero_wifi_platform_scan` |
 | Make targets and source selection | [Makefile](../Makefile) | `CLI_SOURCES`, `SAFE_SOURCES`, `test` |
 | CMake targets and compiler settings | [CMakeLists.txt](../CMakeLists.txt), [NeroTargets.cmake](../cmake/NeroTargets.cmake) | `nero_target` |
 
@@ -63,6 +70,7 @@ for compatibility. Document ownership when introducing shared state.
 | Area | File / directory |
 | --- | --- |
 | Core CLI and interface regression tests | [test_safe.py](../tests/test_safe.py) |
+| Wi-Fi parser/tracker/pcap fixtures | [wifi_core.c](../tests/wifi_core.c) |
 | Line editing, signals, PTY and boundary cases | [test_terminal_quality.py](../tests/test_terminal_quality.py) |
 | Terminal fault injection | [terminal_faults.c](../tests/mocks/terminal_faults.c) |
 | Logging mock for network calls | [network_handler.c](../tests/mocks/network_handler.c) |

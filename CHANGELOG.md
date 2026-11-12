@@ -6,6 +6,16 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+- Add the `wifi` command family: adapter/interface status, macOS CoreWLAN
+  active survey, passive AP/client tracking, live monitor dashboard, offline
+  pcap/pcapng analysis, CSV export with optional pseudonymization, and bounded
+  in-memory clearing. Passive capture is read-only; live capture dynamically
+  loads libpcap/Npcap and is unavailable in offline-safe builds. No monitor-mode
+  delivery is assumed: zero-frame capture is reported explicitly, and macOS
+  SSID/BSSID redaction is preserved rather than invented.
+- Add deterministic Wi-Fi parser/tracker/pcap fixtures to Make and CTest,
+  including modern classic-pcap timestamps, little- and big-endian pcapng,
+  radiotap fields, association confidence and history privacy coverage.
 - Add a run-time settings prompt to the live `-Syn` engine: before any worker
   is spawned it probes local CPU/RAM (read-only), shows the measured hardware
   and a suggested maximum worker count, then asks for the worker thread count

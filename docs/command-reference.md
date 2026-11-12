@@ -120,6 +120,77 @@ resource limits, result meanings and cancellation behavior.
 
 ---
 
+## Wireless Monitoring Commands
+
+Wireless capture is read-only. NERO never joins a network, injects custom
+802.11 frames, deauthenticates clients, changes the adapter's channel, or
+decrypts payloads. The optional macOS active survey asks CoreWLAN to scan;
+macOS may transmit normal probe requests, but NERO does not construct or inject
+frames. Passive capture requires an interface and driver that actually deliver
+IEEE 802.11/radiotap frames; a successful monitor-mode request alone does not
+prove delivery.
+
+### `wifi status` / `wifi interfaces`
+* **Syntax:** `wifi status` | `wifi interfaces`
+* **Description:** Reports adapter metadata, capture backend availability,
+  monitor-mode support, and session state; `interfaces` lists visible Wi-Fi
+  interfaces without scanning or transmitting.
+* **Platforms:** macOS (CoreWLAN metadata), Linux (read-only interface
+  discovery), Windows (`GetAdaptersAddresses`). Offline builds report that live
+  capture is unavailable.
+
+### `wifi scan [INTERFACE]`
+* **Syntax:** `wifi scan [INTERFACE]`
+* **Description:** Performs an active CoreWLAN survey without joining a
+  network. macOS may redact SSID/BSSID unless Location Services is granted to
+  the terminal; redacted values are displayed as `<redacted>`, never invented.
+  Active survey results are separate from passive-session data. An active scan
+  may interrupt an in-progress passive capture.
+* **Platforms:** macOS only; Linux and Windows report that active scanning is
+  unavailable.
+
+### `wifi aps [--channel N]` / `wifi clients [--channel N] [--anonymize]`
+* **Description:** Shows access points or client devices observed by the current
+  passive session or imported capture. Client observations are not proof of a
+  live association. `--anonymize` applies a process-local pseudonym to client
+  and BSSID addresses in terminal output.
+
+### `wifi inspect <MAC|BSSID>`
+* **Description:** Prints the observed AP or client record, including channel,
+  band, RSSI, security, first/last seen, association confidence, and per-client
+  RSSI history.
+
+### `wifi monitor [INTERFACE]` / `wifi monitor start|stop|status`
+* **Description:** `wifi monitor` runs a foreground passive dashboard and stops
+  on `Ctrl+C`; `--duration N` bounds it. `start`, `stop`, and `status` manage a
+  background session. Capture is read-only and uses dynamic libpcap on POSIX or
+  Npcap on Windows. A warning is shown after three seconds without frames.
+* **Platforms:** Live macOS/Linux/Windows builds. Permission errors, missing
+  libpcap/Npcap, non-monitor-capable drivers, and zero-frame delivery are
+  reported explicitly; no data is fabricated.
+* **Apple Silicon note:** some adapters accept the monitor-mode request and
+  report radiotap link type but still deliver zero frames. Use
+  `wifi analyze` with a genuine capture in that case.
+
+### `wifi analyze <PCAP_FILE>`
+* **Description:** Analyzes classic pcap or pcapng files offline. Supported
+  link types are `105` (IEEE802_11) and `127` (radiotap); Ethernet captures are
+  rejected because they do not contain 802.11 headers. Every length is
+  bounds-checked, malformed frames are skipped and counted, and no live capture
+  API is used.
+* **Platforms:** macOS, Linux, Windows.
+
+### `wifi export [--anonymize] [--channel N] [FILE]`
+* **Description:** Exports the current passive data set to CSV. MAC addresses
+  are written only because the user explicitly requested an export;
+  `--anonymize` stores deterministic process-local pseudonyms instead.
+
+### `wifi clear`
+* **Description:** Stops any active capture, then discards captured AP/client
+  data and counters from memory.
+
+---
+
 ## Experimental Packet Engine
 
 > [!WARNING]
@@ -206,7 +277,15 @@ transactions; a crash during rewriting may lose recent history.
 | `exit`, `exit -All` | Supported | Supported | Supported | Supported |
 | `-mode`, `-mode on/off` | Supported | Supported | Supported | Supported |
 | `<target> -Sc` (TCP Diagnostics) | Supported | Supported | Supported | Simulated |
+| `wifi status` / `wifi interfaces` | Supported | Supported | Supported | Metadata only |
+| `wifi scan` (Active CoreWLAN) | Supported | **Unavailable** | **Unavailable** | **Unavailable** |
+| `wifi analyze` / `export` / `aps` / `clients` | Supported | Supported | Supported | Supported |
+| `wifi monitor` (Passive capture) | Supported* | Supported* | Supported* | **Unavailable** |
 | `<target> -Syn` (Raw Flood Engine) | Supported (`sudo`) | Supported (`sudo`) | **Unavailable** | Simulated |
+
+\* Requires permission to open the capture device, a monitor-capable driver and
+libpcap/Npcap. Delivery must be verified with `wifi monitor`; see the Apple
+Silicon zero-frame limitation above. Offline tests never open an interface.
 
 
 ## Application logs
@@ -280,9 +359,9 @@ use `--doctor` when collecting a report without any session storage changes.
 
 ### Readable command names
 
-`help` groups commands under GENERAL, HISTORY, LOGGING, DIAGNOSTICS, NETWORK and
-LABORATORY. `help --all` adds the detailed scope notice and legacy syntax table.
-Existing commands remain valid:
+`help` groups commands under GENERAL, HISTORY, LOGGING, DIAGNOSTICS, NETWORK,
+WIRELESS and LABORATORY. `help --all` adds the detailed scope notice and legacy
+syntax table. Existing commands remain valid:
 
 | Readable command | Existing equivalent |
 | --- | --- |
