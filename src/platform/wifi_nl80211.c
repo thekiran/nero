@@ -119,7 +119,23 @@ _Static_assert(sizeof(struct nero_sockaddr_nl) == 12, "netlink socket address la
 #if defined(NERO_NL80211_TEST)
 static void *test_context;
 static nero_nl80211_exchange_fn test_exchange;
+static nero_nl80211_ifindex_fn test_ifindex;
 #endif
+/* Keep protocol fixtures independent of the host's network adapters. */
+static unsigned lookup_interface(const char *name)
+{
+#if defined(NERO_NL80211_TEST)
+    if (test_ifindex != NULL)
+        return test_ifindex(name);
+#endif
+#if defined(_WIN32)
+    (void)name;
+    return 0;
+#else
+    return if_nametoindex(name);
+#endif
+}
+
 static int cached_family_id = -1;
 static uint32_t next_sequence = 0;
 
@@ -619,9 +635,15 @@ void nero_nl80211_test_set_exchange(void *context, nero_nl80211_exchange_fn exch
     next_sequence = 0;
 }
 
+void nero_nl80211_test_set_ifindex(nero_nl80211_ifindex_fn lookup)
+{
+    test_ifindex = lookup;
+}
+
 void nero_nl80211_test_reset(void)
 {
     nero_nl80211_test_set_exchange(NULL, NULL);
+    test_ifindex = NULL;
 }
 #endif
 
@@ -754,11 +776,7 @@ int nero_nl80211_get_info(const char *interface, nero_nl80211_info *out, char *e
         return -1;
     }
 
-#if defined(_WIN32)
-    unsigned ifindex = mocked ? 1u : 0u;
-#else
-    unsigned ifindex = if_nametoindex(interface);
-#endif
+    unsigned ifindex = lookup_interface(interface);
     if (ifindex == 0) {
         char message[192];
         snprintf(message, sizeof(message), "interface '%s' does not exist", interface);
@@ -922,11 +940,7 @@ int nero_nl80211_set_frequency(const char *interface, int freq_mhz, char *error,
         return -1;
     }
 
-#if defined(_WIN32)
-    unsigned ifindex = mocked ? 1u : 0u;
-#else
-    unsigned ifindex = if_nametoindex(interface);
-#endif
+    unsigned ifindex = lookup_interface(interface);
     if (ifindex == 0) {
         char message[192];
         snprintf(message, sizeof(message), "interface '%s' does not exist", interface);

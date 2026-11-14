@@ -372,11 +372,12 @@ static int mock_exchange(void *context, const void *request, size_t request_len,
 
 static const char *test_interface(void)
 {
-#if defined(__APPLE__)
-    return "lo0";
-#else
-    return "lo";
-#endif
+    return "test-wifi0";
+}
+
+static unsigned mock_ifindex(const char *name)
+{
+    return strcmp(name, test_interface()) == 0 ? 7u : 0u;
 }
 
 static void setup(mock *m)
@@ -388,6 +389,7 @@ static void setup(mock *m)
                            (1u << NERO_NL80211_IFTYPE_AP) |
                            (1u << NERO_NL80211_IFTYPE_MONITOR);
     nero_nl80211_test_set_exchange(m, mock_exchange);
+    nero_nl80211_test_set_ifindex(mock_ifindex);
 }
 
 static void test_invalid_interface(void)
@@ -400,6 +402,10 @@ static void test_invalid_interface(void)
     CHECK(error[0] != '\0');
     CHECK(strstr(error, "does not exist") != NULL);
     CHECK(m.ctrl_requests == 0);
+    CHECK(nero_nl80211_set_frequency("nero-no-such-iface-xyz", 2437, error,
+                                     sizeof(error)) != 0);
+    CHECK(strstr(error, "does not exist") != NULL);
+    CHECK(m.ctrl_requests == 0);
 }
 
 static void test_info_parsing(void)
@@ -410,7 +416,7 @@ static void test_info_parsing(void)
     char error[256] = "";
     CHECK(nero_nl80211_get_info(test_interface(), &info, error, sizeof(error)) == 0);
     CHECK(info.available == 1);
-    CHECK(info.ifindex > 0);
+    CHECK(info.ifindex == 7);
     CHECK(info.wiphy == 3);
     CHECK(info.has_iftype == 1);
     CHECK(info.iftype == NERO_NL80211_IFTYPE_STATION);

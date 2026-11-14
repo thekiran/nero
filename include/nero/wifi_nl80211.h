@@ -97,6 +97,9 @@ typedef int (*nero_nl80211_exchange_fn)(void *context, const void *request, size
                                         void *reply, size_t reply_capacity, size_t *reply_len,
                                         char *error, size_t error_len);
 void nero_nl80211_test_set_exchange(void *context, nero_nl80211_exchange_fn exchange);
+/* Test-only name lookup; NULL restores the platform lookup. */
+typedef unsigned (*nero_nl80211_ifindex_fn)(const char *name);
+void nero_nl80211_test_set_ifindex(nero_nl80211_ifindex_fn lookup);
 void nero_nl80211_test_reset(void);
 #endif
 
