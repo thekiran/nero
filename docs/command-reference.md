@@ -130,44 +130,109 @@ frames. Passive capture requires an interface and driver that actually deliver
 IEEE 802.11/radiotap frames; a successful monitor-mode request alone does not
 prove delivery.
 
-### `wifi status` / `wifi interfaces`
-* **Syntax:** `wifi status` | `wifi interfaces`
+### `wifi status` / `wifi capabilities` / `wifi interfaces`
+* **Syntax:** `wifi status` | `wifi capabilities` | `wifi interfaces`
 * **Description:** Reports adapter metadata, capture backend availability,
-  monitor-mode support, and session state; `interfaces` lists visible Wi-Fi
-  interfaces without scanning or transmitting.
+  monitor-mode support, and session state; on Linux it also reports the
+  nl80211 interface type, supported bands and enabled/disabled/no-IR channel
+  counts. `capabilities` expands this into a runtime capability matrix with
+  explicit limitations, and `interfaces` lists visible Wi-Fi interfaces without
+  scanning or transmitting.
 * **Platforms:** macOS (CoreWLAN metadata), Linux (read-only interface
   discovery), Windows (`GetAdaptersAddresses`). Offline builds report that live
   capture is unavailable.
 
-### `wifi scan [INTERFACE]`
-* **Syntax:** `wifi scan [INTERFACE]`
+### `wifi capabilities`
+* **Syntax:** `wifi capabilities`
+* **Description:** Prints the runtime capability matrix for the current build
+  and platform: active-scan availability, passive-capture backend, monitor-mode
+  request support, whether 802.11 frame delivery has actually been observed,
+  interface count, and explicit limitations. On Linux it queries nl80211 for
+  interface type, wiphy monitor support, bands and channel counts. Capability
+  probes are read-only and never change the adapter mode, channel or regulatory
+  settings.
+* **Platforms:** macOS, Linux, Windows, and offline builds. Offline builds
+  report that capture and scanning are unavailable instead of guessing.
+
+### `wifi scan [--band 2.4|5|6] [--channel N] [--live] [INTERFACE]`
+* **Syntax:** `wifi scan [--band 2.4|5|6] [--channel N] [--live] [INTERFACE]`
 * **Description:** Performs an active CoreWLAN survey without joining a
-  network. macOS may redact SSID/BSSID unless Location Services is granted to
-  the terminal; redacted values are displayed as `<redacted>`, never invented.
-  Active survey results are separate from passive-session data. An active scan
-  may interrupt an in-progress passive capture.
+  network. `--band` and `--channel` filter the results client-side; an empty
+  match is reported together with the adapter/regulatory-domain caveat rather
+  than being presented as proof of absence. `--live` repeats the active survey
+  every five seconds until `Ctrl+C`. macOS may redact SSID/BSSID unless Location
+  Services is granted to the terminal; redacted values are displayed as
+  `<redacted>`, never invented. Active survey results are separate from
+  passive-session data. An active scan may interrupt an in-progress passive
+  capture.
 * **Platforms:** macOS only; Linux and Windows report that active scanning is
   unavailable.
 
-### `wifi aps [--channel N]` / `wifi clients [--channel N] [--anonymize]`
+### `wifi aps [--channel N]` / `wifi clients [--channel N] [--bssid MAC] [--live] [--anonymize]`
 * **Description:** Shows access points or client devices observed by the current
   passive session or imported capture. Client observations are not proof of a
-  live association. `--anonymize` applies a process-local pseudonym to client
-  and BSSID addresses in terminal output.
+  live association. `--bssid` limits clients to the AP relationship that was
+  actually observed; `--live` refreshes the table every second until `Ctrl+C`.
+  `--anonymize` applies a process-local pseudonym to client and BSSID addresses
+  in terminal output. Tables adapt to the terminal width (or `COLUMNS`); when a
+  column cannot fit it is hidden and a narrow-view note names it, so piped
+  output never silently drops data.
+
+### `wifi signal [--live]`
+* **Syntax:** `wifi signal [--live]`
+* **Description:** Shows adapter signal diagnostics: RSSI, a qualitative
+  quality label derived from RSSI, channel, band, frequency and adapter state.
+  `--live` refreshes once per second and keeps a short RSSI history graph until
+  `Ctrl+C`. Noise floor, SNR and link bitrate are printed as "not exposed" when
+  the platform backend does not supply them; no metric is fabricated.
+* **Platforms:** macOS supplies RSSI/channel through CoreWLAN. Linux and
+  Windows backends currently expose interface metadata only, so signal fields
+  are reported as not exposed. Offline builds report the panel as unavailable.
 
 ### `wifi inspect <MAC|BSSID>`
 * **Description:** Prints the observed AP or client record, including channel,
   band, RSSI, security, first/last seen, association confidence, and per-client
   RSSI history.
 
-### `wifi monitor [INTERFACE]` / `wifi monitor start|stop|status`
-* **Description:** `wifi monitor` runs a foreground passive dashboard and stops
-  on `Ctrl+C`; `--duration N` bounds it. `start`, `stop`, and `status` manage a
-  background session. Capture is read-only and uses dynamic libpcap on POSIX or
-  Npcap on Windows. A warning is shown after three seconds without frames.
+### `wifi monitor [INTERFACE]` / `wifi monitor --hop` / `wifi monitor start|stop|status|enable|disable`
+* **Description:** `wifi monitor` runs a foreground passive survey and stops on
+  `Ctrl+C`; `--duration N` bounds it. On an interactive terminal it renders a
+  flicker-free, full-screen live table (alternate screen, line-level diff) with
+  keyboard controls — `s` cycles the access-point sort (power/essid/bssid), `f`
+  toggles a real-client filter, `space` pauses auto-refresh, the arrow/PageUp/
+  PageDown/Home/End keys scroll, and `q`/`Esc`/`Ctrl+C` quit. When output is a
+  pipe, file or CI log it degrades to a plain, scriptable transcript redrawn
+  once per second. Both paths share one responsive table engine. The
+  access-point table lists signal, BSSID, beacon/probe counts, channel, band,
+  security, observed clients and ESSID; the station table lists BSSID, station,
+  signal, channel, frame count, notes and resolved ESSID. `start`, `stop`, and
+  `status` manage a background session. Capture is read-only and uses dynamic
+  libpcap on POSIX or Npcap on Windows. A warning is shown after three seconds
+  without frames.
+* **`--hop [--dwell MS] [--bands 2.4,5,6]`:** Opt-in channel hopping. The default
+  survey is strictly read-only and stays on the adapter's current channel; this
+  separate mode tunes the radio across a channel plan so the survey can see
+  every channel. It changes the radio, so it is **Linux only** (nl80211
+  `SET_CHANNEL`), requires root/`CAP_NET_ADMIN`, requires the interface to
+  already be in monitor mode (`wifi monitor enable`), and requires interactive
+  consent (`yes`). `--dwell` sets the per-channel dwell time (default 300 ms) and
+  `--bands` the bands to sweep (default 2.4 GHz). On macOS, Windows and offline
+  builds `--hop` reports that in-NERO channel control is unavailable and the
+  survey stays single-channel; no radio change is made.
 * **Platforms:** Live macOS/Linux/Windows builds. Permission errors, missing
   libpcap/Npcap, non-monitor-capable drivers, and zero-frame delivery are
   reported explicitly; no data is fabricated.
+* **`enable` / `disable`:** Linux only. `wifi monitor enable [INTERFACE]` first
+  queries nl80211 for the current interface type and advertised monitor support,
+  then requires an interactive confirmation of the exact word `yes`. It saves
+  the previous interface type best-effort (mode `0600`, `O_NOFOLLOW`) and only
+  reports success after re-reading the interface and verifying the new type.
+  `wifi monitor disable [INTERFACE]` restores that saved type when it matches the
+  interface, otherwise it clearly reports a fallback to station/managed mode.
+  Changing type requires root or `CAP_NET_ADMIN`. NERO does not modify
+  NetworkManager, service state, regulatory settings or the channel. On macOS,
+  Windows and offline builds these actions report unavailable and make no
+  state changes.
 * **Apple Silicon note:** some adapters accept the monitor-mode request and
   report radiotap link type but still deliver zero frames. Use
   `wifi analyze` with a genuine capture in that case.
@@ -277,10 +342,12 @@ transactions; a crash during rewriting may lose recent history.
 | `exit`, `exit -All` | Supported | Supported | Supported | Supported |
 | `-mode`, `-mode on/off` | Supported | Supported | Supported | Supported |
 | `<target> -Sc` (TCP Diagnostics) | Supported | Supported | Supported | Simulated |
-| `wifi status` / `wifi interfaces` | Supported | Supported | Supported | Metadata only |
-| `wifi scan` (Active CoreWLAN) | Supported | **Unavailable** | **Unavailable** | **Unavailable** |
+| `wifi status` / `wifi capabilities` / `wifi interfaces` | Supported | Supported | Supported | Metadata only |
+| `wifi scan` (Active CoreWLAN, `--band`/`--channel`/`--live`) | Supported | **Unavailable** | **Unavailable** | **Unavailable** |
+| `wifi signal` | Supported (CoreWLAN) | Metadata only | Metadata only | **Unavailable** |
 | `wifi analyze` / `export` / `aps` / `clients` | Supported | Supported | Supported | Supported |
 | `wifi monitor` (Passive capture) | Supported* | Supported* | Supported* | **Unavailable** |
+| `wifi monitor enable/disable` (nl80211 type control) | **Unavailable** | Supported (`sudo`) | **Unavailable** | **Unavailable** |
 | `<target> -Syn` (Raw Flood Engine) | Supported (`sudo`) | Supported (`sudo`) | **Unavailable** | Simulated |
 
 \* Requires permission to open the capture device, a monitor-capable driver and

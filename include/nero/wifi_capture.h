@@ -32,6 +32,7 @@ typedef struct {
     int can_request_monitor; /* pcap_can_set_rfmon() result, if available */
     int monitor_requested;   /* caller asked for monitor mode */
     int monitor_set;         /* pcap_set_rfmon() accepted the request */
+    int link_fallback;       /* monitor was unavailable or delivered nothing */
     int linktype;
     uint64_t packets;
     uint64_t bytes;

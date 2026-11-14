@@ -168,6 +168,7 @@ typedef struct {
     int source_is_file;
     int monitor_requested;
     int monitor_set;
+    int link_fallback;
     char interface[NERO_WIFI_IFNAME_MAX];
     char backend[64];
     char source[NERO_WIFI_PATH_MAX];

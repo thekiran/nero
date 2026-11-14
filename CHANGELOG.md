@@ -6,6 +6,29 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+- Extract the Wi-Fi table renderer into a shared, capability-gated table engine
+  (`nero/table.h`, `src/cli/table.c`) used by every Wi-Fi surface — the static
+  `wifi aps`/`wifi clients`/capture-statistics tables and the live monitor alike.
+  One responsive grid now measures Unicode display cells, grows/shrinks flex
+  columns, drops low-priority columns on narrow terminals with an honest note,
+  and falls back to an ASCII grid under `NERO_ASCII`/`NO_COLOR`. A single
+  `nero_terminal_width()` is the source of truth for terminal width.
+- Make `wifi monitor` a flicker-free, interactive live table on a TTY: it renders
+  into the alternate screen and rewrites only the rows that changed each frame
+  (no full-screen clear), with keyboard controls to sort access points, filter to
+  real clients, pause auto-refresh, scroll, and quit without `Ctrl+C`. In a pipe,
+  file or CI log it degrades automatically to a plain, scriptable transcript. The
+  same engine renders both paths, so the airodump-style survey and the static
+  tables share one look.
+- Add opt-in channel hopping (`wifi monitor --hop [--dwell MS] [--bands 2.4,5,6]`).
+  The default survey remains strictly read-only and never changes the radio; the
+  new mode tunes a monitor-mode interface across a channel plan via nl80211
+  `SET_CHANNEL` so a survey can see every channel. It is Linux-only, needs
+  root/`CAP_NET_ADMIN` and an interactive `yes` consent, and reports itself as
+  unavailable (with no radio change) on macOS, Windows and offline builds. The
+  new channel-set path is protocol-tested with mock netlink exchanges; the table
+  engine has deterministic unit tests. `wifi capabilities` gains a channel-hopping
+  row.
 - Add the `wifi` command family: adapter/interface status, macOS CoreWLAN
   active survey, passive AP/client tracking, live monitor dashboard, offline
   pcap/pcapng analysis, CSV export with optional pseudonymization, and bounded
@@ -13,6 +36,41 @@ advertised as stable or security-certified.
   loads libpcap/Npcap and is unavailable in offline-safe builds. No monitor-mode
   delivery is assumed: zero-frame capture is reported explicitly, and macOS
   SSID/BSSID redaction is preserved rather than invented.
+- Make the `wifi` tables terminal-aware: widths follow `COLUMNS`/the live TTY,
+  flexible columns grow or shrink, low-priority columns are hidden on narrow
+  screens with an explicit narrow-view note, and cell widths are measured in
+  Unicode display cells so accented or wide values cannot shear the grid.
+  Rendering still falls back to an ASCII grid under `NERO_ASCII` or `NO_COLOR`.
+- Render `wifi monitor` as an airodump-ng-style live survey: a compact
+  access-point table (BSSID, PWR, BEACONS, PROBES, CH, BAND, SECURITY, CLIENTS,
+  ESSID) and a station table (BSSID, STATION, PWR, CH, FRAMES, NOTES, ESSID),
+  sorted by signal and grouped by BSSID. The explicit zero-frame warning for
+  adapters that accept monitor mode without delivering frames is preserved.
+- Add Linux nl80211 interface control: `wifi monitor enable [INTERFACE]` and
+  `wifi monitor disable [INTERFACE]` query the wiphy, require an explicit `yes`
+  confirmation, save the previous interface type best-effort and verify the
+  kernel's reported type after the change. Disable restores the saved type or
+  reports a station/managed fallback. `wifi status` and `wifi capabilities`
+  show nl80211 type, monitor support, bands and channel counts on Linux. The
+  implementation is protocol-tested with mock netlink exchanges; real Linux
+  hardware validation is still required, and macOS/Windows/offline builds
+  report the control as unavailable without changing state.
+- Add `wifi capabilities` with a runtime capability matrix: active-scan and
+  passive-capture backends, monitor-mode request support, observed frame
+  delivery, interface count and explicit per-platform limitations. Probes are
+  read-only and offline builds report unavailable instead of guessing.
+- Add `wifi signal [--live]`, a wavemon-style panel for RSSI, channel, band,
+  frequency and a short RSSI history. Noise floor, SNR and link bitrate are
+  reported as not exposed when the backend omits them; no values are invented.
+- Extend `wifi scan` with `--band`, `--channel` and `--live` (client-side
+  filtering and a five-second rescan loop), and `wifi clients` with `--bssid`
+  filtering and `--live` refresh. Empty filtered results carry the
+  adapter/regulatory-domain caveat.
+- Add portable Wi-Fi table-data verification for macOS, Linux and Windows:
+  a deterministic pcap is rendered through `wifi analyze`, `wifi aps`,
+  `wifi clients` and `wifi inspect`, and the test asserts that observed AP,
+  client, filter and inspection fields reach the tables. It avoids pty/termios
+  APIs so the same fixture runs under Make and CTest on all three platforms.
 - Add deterministic Wi-Fi parser/tracker/pcap fixtures to Make and CTest,
   including modern classic-pcap timestamps, little- and big-endian pcapng,
   radiotap fields, association confidence and history privacy coverage.

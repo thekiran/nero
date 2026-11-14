@@ -64,6 +64,7 @@ static void *session_worker_main(void *argument)
     pthread_mutex_lock(&session->mutex);
     session->base.dropped += summary.dropped;
     session->base.monitor_set = summary.monitor_set;
+    session->base.link_fallback = summary.link_fallback;
     session->base.linktype = summary.linktype;
     session->base.ended_us = nero_wifi_now_us();
     snprintf(session->base.backend, sizeof(session->base.backend), "%s", summary.backend);
@@ -152,7 +153,7 @@ int nero_wifi_session_start(nero_wifi_session *session, const char *interface_na
     memset(&session->base, 0, sizeof(session->base));
     session->base.source_is_file = 0;
     session->base.monitor_requested = request_monitor_mode;
-    session->base.monitor_set = request_monitor_mode;
+    session->base.monitor_set = 0;
     snprintf(session->base.backend, sizeof(session->base.backend), "%s", "libpcap/Npcap");
     snprintf(session->base.source, sizeof(session->base.source), "live: %s", interface_name);
     session->base.started_us = nero_wifi_now_us();

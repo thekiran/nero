@@ -25,6 +25,16 @@
 static int alternate_screen_active = 0;
 static nero_operation_ui *current_ui;
 
+/* Flicker-free frame cache for nero_operation_render_lines: the previously
+ * drawn body rows plus the geometry they were drawn at. Reset on every
+ * nero_operation_begin so a new surface always repaints in full. */
+#define RENDER_MAX_ROWS 256
+#define RENDER_MAX_COLS 1024
+static char render_prev[RENDER_MAX_ROWS][RENDER_MAX_COLS];
+static int render_prev_count = 0;
+static int render_prev_rows = -1;
+static int render_prev_cols = -1;
+
 /* Live-discovery viewport state: follow the newest results until the user
  * scrolls up, then resume following once scrolled back to the bottom. Reset
  * per operation in nero_operation_begin. */
@@ -212,6 +222,9 @@ void nero_operation_begin(
     discovery_follow = 1;
     current_ui = ui;
     ui->active = 1;
+    render_prev_count = 0;
+    render_prev_rows = -1;
+    render_prev_cols = -1;
     if (ui->interactive) {
         static int cleanup_registered = 0;
         if (!cleanup_registered && atexit(restore_operation_surface) == 0)
@@ -277,6 +290,71 @@ void nero_operation_status(const char *color, const char *label, const char *det
     if (detail != NULL && detail[0] != '\0')
         printf("  %s", detail);
     putchar('\n');
+    fflush(stdout);
+}
+
+/* Flicker-free block renderer: draw `lines` into the body, rewriting only the
+ * rows that changed since the previous frame. See the header for contract. */
+void nero_operation_render_lines(nero_operation_ui *ui, const char *const *lines, int count,
+                                 int scroll_offset)
+{
+    if (ui == NULL)
+        return;
+    if (!ui->interactive) {
+        for (int i = 0; i < count; ++i)
+            printf("%s\n", lines[i] != NULL ? lines[i] : "");
+        fflush(stdout);
+        return;
+    }
+
+    refresh_layout(ui);
+    if (ui->compact) {
+        fflush(stdout);
+        render_prev_count = 0;
+        render_prev_rows = -1;
+        return;
+    }
+
+    int body_rows = ui->content_bottom - ui->content_top + 1;
+    if (body_rows < 1)
+        body_rows = 1;
+    if (body_rows > RENDER_MAX_ROWS)
+        body_rows = RENDER_MAX_ROWS;
+
+    int max_offset = count - body_rows;
+    if (max_offset < 0)
+        max_offset = 0;
+    if (scroll_offset < 0)
+        scroll_offset = 0;
+    if (scroll_offset > max_offset)
+        scroll_offset = max_offset;
+
+    /* A geometry change (first frame after begin, or a resize that repainted
+     * the fixed frame) invalidates the cache and forces a full repaint. */
+    int full = (ui->rows != render_prev_rows || ui->columns != render_prev_cols);
+    if (full) {
+        render_prev_count = 0;
+        render_prev_rows = ui->rows;
+        render_prev_cols = ui->columns;
+    }
+
+    for (int r = 0; r < body_rows; ++r) {
+        int src = scroll_offset + r;
+        const char *line = (src < count && lines[src] != NULL) ? lines[src] : "";
+        char current[RENDER_MAX_COLS];
+        snprintf(current, sizeof(current), "%s", line);
+        if (full || r >= render_prev_count || strcmp(current, render_prev[r]) != 0) {
+            position(ui->content_top + r, 1);
+            fputs("\033[2K", stdout);
+            position(ui->content_top + r, 3);
+            fputs(current, stdout);
+            snprintf(render_prev[r], sizeof(render_prev[r]), "%s", current);
+        }
+    }
+    render_prev_count = body_rows;
+    /* Park the cursor on the footer row so a stray terminal echo cannot land in
+     * the middle of the table. */
+    position(ui->rows, 1);
     fflush(stdout);
 }
 
@@ -682,12 +760,21 @@ static nero_ui_key wheel_key(int button)
  * contract; the body documents the Escape/CSI/SS3/mouse sequence handling. */
 nero_ui_key nero_operation_read_key(int timeout_ms)
 {
+    return nero_operation_read_key_ex(timeout_ms, NULL);
+}
+
+nero_ui_key nero_operation_read_key_ex(int timeout_ms, int *first_byte)
+{
     char byte;
+    if (first_byte != NULL)
+        *first_byte = 0;
     int status = read_byte(&byte, timeout_ms);
     if (status < 0)
         return NERO_UI_KEY_EOF;
     if (status == 0)
         return NERO_UI_KEY_NONE;
+    if (first_byte != NULL)
+        *first_byte = (unsigned char)byte;
     if (byte == 'q' || byte == 'Q' || byte == 3)
         return NERO_UI_KEY_CANCEL;
     if (byte == '\n' || byte == '\r')

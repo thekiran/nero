@@ -5,6 +5,13 @@
  * user has installed it. Monitor mode is only requested; no channel changes,
  * injection or private Apple80211 ioctls are used. */
 
+#ifdef _WIN32
+/* Included first so WIN32_LEAN_AND_MEAN is set before <windows.h>: that keeps
+ * <ole2.h> out and stops its `interface` macro from colliding with the
+ * `interface` fields/parameters the shared capture code uses. */
+#include "windows/nero_win_compat.h"
+#endif
+
 #include "nero/wifi_capture.h"
 #include "nero/wifi.h"
 
@@ -13,7 +20,7 @@
 #include <string.h>
 
 #if defined(_WIN32)
-#include <windows.h>
+/* <windows.h> arrived through nero_win_compat.h above (with WIN32_LEAN_AND_MEAN). */
 typedef HMODULE nero_library;
 #define NERO_LIBRARY_INVALID NULL
 static nero_library library_open(const char *name)
@@ -122,12 +129,19 @@ typedef struct {
     char backend[64];
 } nero_pcap_api;
 
+/* A monitor-mode capture can be accepted by the driver yet deliver no 802.11
+ * frames (notably on Apple Silicon). After this grace period NERO reopens the
+ * interface in ordinary promiscuous link-layer mode so real packets are still
+ * counted instead of silently reporting an empty capture. */
+#define NERO_WIFI_LINK_FALLBACK_US 3000000LL
+
 struct nero_wifi_capture {
     nero_pcap_api api;
     pcap_t *handle;
     int linktype;
     int monitor_requested;
     int monitor_set;
+    int link_fallback;
     char backend[64];
     char interface[NERO_WIFI_IFNAME_MAX_CAPTURE];
 };
@@ -248,6 +262,76 @@ int nero_wifi_capture_probe(const char *interface_name, int *backend_available,
     return 0;
 }
 
+static int capture_open_handle(nero_wifi_capture *capture, int request_monitor, char *error,
+                               size_t error_len)
+{
+    char errbuf[256] = {0};
+    capture->handle = capture->api.create(capture->interface, errbuf);
+    if (capture->handle == NULL) {
+        set_error(error, error_len, errbuf[0] != '\0' ? errbuf : "pcap_create failed");
+        return -1;
+    }
+    capture->api.set_snaplen(capture->handle, 65535);
+    capture->api.set_promisc(capture->handle, 1);
+    capture->api.set_timeout(capture->handle, 200);
+    if (capture->api.set_immediate != NULL)
+        capture->api.set_immediate(capture->handle, 1);
+
+    int monitor_accepted = 0;
+    if (request_monitor) {
+        if (capture->api.set_rfmon == NULL) {
+            capture->link_fallback = 1;
+        } else if (capture->api.set_rfmon(capture->handle, 1) == 0) {
+            monitor_accepted = 1;
+        } else {
+            /* The driver rejected monitor mode. Keep the already-configured
+             * handle and activate it in ordinary promiscuous mode. */
+            capture->link_fallback = 1;
+        }
+    }
+
+    int result = capture->api.activate(capture->handle);
+    if (result < 0) {
+        char monitor_error[256] = {0};
+        if (monitor_accepted) {
+            snprintf(monitor_error, sizeof(monitor_error), "%s",
+                     capture->api.geterr(capture->handle));
+            capture->api.close(capture->handle);
+            capture->handle = NULL;
+            capture->link_fallback = 1;
+            if (capture_open_handle(capture, 0, error, error_len) == 0)
+                return 0;
+            char message[400];
+            snprintf(message, sizeof(message),
+                     "monitor activation failed (%s); link-layer fallback failed: %s",
+                     monitor_error, error != NULL && error[0] != '\0' ? error : "unknown error");
+            set_error(error, error_len, message);
+            return -1;
+        }
+        char message[320];
+        snprintf(message, sizeof(message), "capture activation failed: %s",
+                 capture->api.geterr(capture->handle));
+        set_error(error, error_len, message);
+        return -1;
+    }
+
+    capture->monitor_set = monitor_accepted;
+    capture->linktype = capture->api.datalink(capture->handle);
+    if (capture->linktype < 0) {
+        set_error(error, error_len, "capture link type is unavailable");
+        return -1;
+    }
+    if (request_monitor &&
+        capture->linktype != NERO_WIFI_LINKTYPE_IEEE802_11 &&
+        capture->linktype != NERO_WIFI_LINKTYPE_RADIOTAP) {
+        /* Monitor was requested but the activated handle is link-layer only.
+         * Its packets are genuine, so keep capturing and label the mode. */
+        capture->link_fallback = 1;
+        capture->monitor_set = 0;
+    }
+    return 0;
+}
+
 nero_wifi_capture *nero_wifi_capture_open(const char *interface_name, int request_monitor,
                                           char *error, size_t error_len)
 {
@@ -268,62 +352,24 @@ nero_wifi_capture *nero_wifi_capture_open(const char *interface_name, int reques
     snprintf(capture->interface, sizeof(capture->interface), "%s", interface_name);
     capture->monitor_requested = request_monitor;
 
-    char errbuf[256] = {0};
-    capture->handle = capture->api.create(interface_name, errbuf);
-    if (capture->handle == NULL) {
-        set_error(error, error_len, errbuf[0] != '\0' ? errbuf : "pcap_create failed");
-        nero_wifi_capture_close(capture);
-        return NULL;
-    }
-    capture->api.set_snaplen(capture->handle, 65535);
-    capture->api.set_promisc(capture->handle, 1);
-    capture->api.set_timeout(capture->handle, 200);
-    if (capture->api.set_immediate != NULL)
-        capture->api.set_immediate(capture->handle, 1);
-
-    if (request_monitor) {
-        if (capture->api.set_rfmon == NULL) {
-            set_error(error, error_len,
-                      "this libpcap build has no monitor-mode support; passive capture requires "
-                      "monitor mode for IEEE 802.11 headers");
-            nero_wifi_capture_close(capture);
-            return NULL;
-        }
-        int result = capture->api.set_rfmon(capture->handle, 1);
-        if (result != 0) {
-            char message[320];
-            snprintf(message, sizeof(message), "monitor mode request failed: %s",
-                     capture->api.geterr(capture->handle));
-            set_error(error, error_len, message);
-            nero_wifi_capture_close(capture);
-            return NULL;
-        }
-        capture->monitor_set = 1;
-    }
-
-    int result = capture->api.activate(capture->handle);
-    if (result < 0) {
-        char message[320];
-        snprintf(message, sizeof(message), "capture activation failed: %s",
-                 capture->api.geterr(capture->handle));
-        set_error(error, error_len, message);
-        nero_wifi_capture_close(capture);
-        return NULL;
-    }
-    capture->linktype = capture->api.datalink(capture->handle);
-    if (capture->linktype != NERO_WIFI_LINKTYPE_IEEE802_11 &&
-        capture->linktype != NERO_WIFI_LINKTYPE_RADIOTAP) {
-        char message[256];
-        snprintf(message, sizeof(message),
-                 "capture link type %d is not IEEE 802.11/radiotap; monitor mode is required",
-                 capture->linktype);
-        set_error(error, error_len, message);
+    if (capture_open_handle(capture, request_monitor, error, error_len) != 0) {
         nero_wifi_capture_close(capture);
         return NULL;
     }
     if (error != NULL && error_len > 0)
         error[0] = '\0';
     return capture;
+}
+
+static int capture_reopen_link(nero_wifi_capture *capture, char *error, size_t error_len)
+{
+    if (capture->handle != NULL) {
+        capture->api.close(capture->handle);
+        capture->handle = NULL;
+    }
+    capture->monitor_set = 0;
+    capture->link_fallback = 1;
+    return capture_open_handle(capture, 0, error, error_len);
 }
 
 int nero_wifi_capture_run(nero_wifi_capture *capture, nero_wifi_capture_callback callback,
@@ -340,19 +386,42 @@ int nero_wifi_capture_run(nero_wifi_capture *capture, nero_wifi_capture_callback
         summary->backend_available = 1;
         summary->monitor_requested = capture->monitor_requested;
         summary->monitor_set = capture->monitor_set;
+        summary->link_fallback = capture->link_fallback;
         summary->linktype = capture->linktype;
         snprintf(summary->backend, sizeof(summary->backend), "%s", capture->backend);
         snprintf(summary->interface, sizeof(summary->interface), "%s", capture->interface);
     }
 
+    int64_t last_packet_us = nero_wifi_now_us();
+    int fallback_checked = 0;
     for (;;) {
         if (stop != NULL && atomic_load_explicit(stop, memory_order_relaxed))
             break;
         struct nero_pcap_pkthdr *header = NULL;
         const unsigned char *data = NULL;
         int result = capture->api.next_ex(capture->handle, &header, &data);
-        if (result == 0)
+        if (result == 0) {
+            if (capture->monitor_set && !fallback_checked &&
+                nero_wifi_now_us() - last_packet_us >= NERO_WIFI_LINK_FALLBACK_US) {
+                fallback_checked = 1;
+                char fallback_error[256] = {0};
+                if (capture_reopen_link(capture, fallback_error, sizeof(fallback_error)) != 0) {
+                    char message[400];
+                    snprintf(message, sizeof(message),
+                             "monitor mode delivered no packets and link-layer fallback failed: %s",
+                             fallback_error[0] != '\0' ? fallback_error : "unknown error");
+                    set_error(error, error_len, message);
+                    return -1;
+                }
+                if (summary != NULL) {
+                    summary->monitor_set = capture->monitor_set;
+                    summary->link_fallback = capture->link_fallback;
+                    summary->linktype = capture->linktype;
+                }
+                last_packet_us = nero_wifi_now_us();
+            }
             continue;
+        }
         if (result == -2)
             break;
         if (result < 0) {
@@ -361,6 +430,7 @@ int nero_wifi_capture_run(nero_wifi_capture *capture, nero_wifi_capture_callback
         }
         if (header == NULL || data == NULL)
             continue;
+        last_packet_us = nero_wifi_now_us();
         nero_wifi_capture_packet packet;
         packet.data = data;
         packet.caplen = header->caplen;

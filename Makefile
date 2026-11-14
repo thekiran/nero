@@ -25,6 +25,7 @@ CLI_SUPPORT_SOURCES := \
     src/cli/input.c \
     src/cli/history.c \
     src/cli/render.c \
+    src/cli/table.c \
     src/cli/operation_ui.c \
     src/cli/commands.c \
     src/cli/workload.c \
@@ -33,6 +34,7 @@ CLI_SUPPORT_SOURCES := \
     src/modules/wifi/wifi_tracker.c \
     src/modules/wifi/wifi_pcap.c \
     src/modules/wifi/wifi_session.c \
+    src/platform/wifi_nl80211.c \
     src/platform/wifi_capture.c \
     src/platform/wifi_platform.c \
     src/cli/ascii.c
@@ -130,6 +132,10 @@ FAULT_SOURCES := src/main.c tests/mocks/terminal_faults.c tests/mocks/input_faul
 
 TEST_DIR ?= $(BUILD_DIR)/tests
 SANITIZERS ?=
+NL80211_TEST_FLAGS := $(COMMON_CFLAGS) -DNERO_NL80211_TEST
+ifeq ($(UNAME_S),Linux)
+    NL80211_TEST_FLAGS += -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
+endif
 
 $(TEST_DIR):
 	@mkdir -p $@
@@ -173,6 +179,16 @@ $(TEST_DIR)/wifi-core: tests/wifi_core.c $(WIFI_CORE_SOURCES) include/nero/wifi.
 
 # Deterministic hardware recommendation and simulation-bound parser tests.
 # Fixtures inject fake CPU/RAM data; the real machine probe is never asserted.
+$(TEST_DIR)/wifi-nl80211: tests/wifi_nl80211.c src/platform/wifi_nl80211.c \
+                          include/nero/wifi_nl80211.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(NL80211_TEST_FLAGS) $(SANITIZERS) \
+	    tests/wifi_nl80211.c src/platform/wifi_nl80211.c -o $@
+
+# Deterministic tests for the shared terminal table engine. The test provides
+# its own capability-gate stubs, so only the engine source is linked.
+$(TEST_DIR)/table-engine: tests/test_table_engine.c src/cli/table.c include/nero/table.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/test_table_engine.c src/cli/table.c -o $@
+
 $(TEST_DIR)/workload-profile: tests/workload_profile.c src/core/hardware.c src/core/platform.c include/nero/hardware.h include/nero/platform.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) -DNERO_HARDWARE_TEST_HOOKS tests/workload_profile.c src/core/hardware.c src/core/platform.c -o $@
 
@@ -191,7 +207,8 @@ TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
              $(TEST_DIR)/nero-mock $(TEST_DIR)/nero-faults \
              $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability $(TEST_DIR)/logging-fixture \
              $(TEST_DIR)/scanner-runtime $(TEST_DIR)/live-select-pty $(TEST_DIR)/parser-boundaries $(TEST_DIR)/scan-session \
-             $(TEST_DIR)/workload-profile $(TEST_DIR)/syn-settings $(TEST_DIR)/wifi-core
+             $(TEST_DIR)/workload-profile $(TEST_DIR)/syn-settings $(TEST_DIR)/wifi-core \
+             $(TEST_DIR)/wifi-nl80211 $(TEST_DIR)/table-engine
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
@@ -222,6 +239,8 @@ endif
 	python3 tests/test_installation.py
 	$(TEST_DIR)/parser-boundaries
 	$(TEST_DIR)/wifi-core
+	$(TEST_DIR)/wifi-nl80211
+	$(TEST_DIR)/table-engine
 	$(TEST_DIR)/workload-profile
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/syn-settings
 	$(TEST_DIR)/diagnostic-process
@@ -233,6 +252,7 @@ endif
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/scanner-runtime
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/live-select-pty
 	NERO_LOG_FILE=:memory: python3 tests/test_safe.py $(TEST_DIR)
+	NERO_LOG_FILE=:memory: python3 tests/test_wifi_tables.py $(TEST_DIR)/nero-safe
 	NERO_LOG_FILE=:memory: python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
 	NERO_LOG_FILE=:memory: python3 tests/test_operation_layout.py $(TEST_DIR)/operation-layout
 

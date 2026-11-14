@@ -28,6 +28,7 @@ set(NERO_CLI_SUPPORT_SOURCES
     src/cli/input.c
     src/cli/history.c
     src/cli/render.c
+    src/cli/table.c
     src/cli/operation_ui.c
     src/cli/commands.c
     src/cli/workload.c
@@ -36,6 +37,7 @@ set(NERO_CLI_SUPPORT_SOURCES
     src/modules/wifi/wifi_tracker.c
     src/modules/wifi/wifi_pcap.c
     src/modules/wifi/wifi_session.c
+    src/platform/wifi_nl80211.c
     src/platform/wifi_capture.c
     src/platform/wifi_platform.c
     src/cli/ascii.c
@@ -250,6 +252,22 @@ if(BUILD_TESTING AND NOT MSVC)
     endif()
     add_test(NAME wifi-core COMMAND wifi-core)
     set_tests_properties(wifi-core PROPERTIES TIMEOUT 60)
+    add_executable(wifi-nl80211 tests/wifi_nl80211.c src/platform/wifi_nl80211.c)
+    nero_target(wifi-nl80211)
+    target_compile_definitions(wifi-nl80211 PRIVATE NERO_NL80211_TEST)
+    if(WIN32)
+        target_link_libraries(wifi-nl80211 PRIVATE ws2_32)
+        target_link_options(wifi-nl80211 PRIVATE -static)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(wifi-nl80211 PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+    endif()
+    add_test(NAME wifi-nl80211 COMMAND wifi-nl80211)
+    set_tests_properties(wifi-nl80211 PROPERTIES TIMEOUT 60)
+    add_executable(table-engine tests/test_table_engine.c src/cli/table.c)
+    nero_target(table-engine)
+    target_compile_definitions(table-engine PRIVATE UNICODE_SUPPORT)
+    add_test(NAME table-engine COMMAND table-engine)
+    set_tests_properties(table-engine PROPERTIES TIMEOUT 60)
     add_executable(portscanner-reliability tests/portscanner_reliability.c src/modules/portscanner.c src/modules/scan_session.c src/cli/operation_ui.c src/core/log.c)
     nero_target(portscanner-reliability)
     target_compile_definitions(portscanner-reliability PRIVATE UNICODE_SUPPORT)
@@ -327,9 +345,13 @@ endif()
 if(BUILD_TESTING AND TARGET nero-safe)
     add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero-safe>)
+    add_test(NAME wifi-tables COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_wifi_tables.py" $<TARGET_FILE:nero-safe>)
 elseif(BUILD_TESTING AND TARGET nero)
     add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero>)
+    add_test(NAME wifi-tables COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_wifi_tables.py" $<TARGET_FILE:nero>)
 endif()
 
 if(BUILD_TESTING)

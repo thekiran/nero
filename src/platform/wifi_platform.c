@@ -17,10 +17,11 @@
 #include <string.h>
 
 #if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
+/* The compat header sets WIN32_LEAN_AND_MEAN and _WIN32_WINNT, and includes
+ * <winsock2.h>/<ws2tcpip.h>/<windows.h> in the correct order; <iphlpapi.h>
+ * (GetAdaptersAddresses, IP_ADAPTER_ADDRESSES) must follow winsock2. */
+#include "windows/nero_win_compat.h"
 #include <iphlpapi.h>
-#include <windows.h>
-#include <winsock2.h>
 #ifndef IF_TYPE_IEEE80211
 #define IF_TYPE_IEEE80211 71
 #endif
