@@ -6,6 +6,13 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
+- Fix `wifi monitor` showing an empty survey labelled `MONITOR` on adapters that
+  accept monitor mode but deliver no 802.11 frames (built-in Apple Silicon
+  Wi-Fi). The status bar now reports the real capture mode live (`LINK-LAYER`
+  after the backend's link-layer fallback), and the access-point table falls
+  back to the operating system's scan, labelled `OS-SCAN`, when no 802.11 frame
+  arrives within four seconds. `wifi monitor --no-scan` keeps the survey
+  strictly passive. Stations are never synthesised.
 - Extract the Wi-Fi table renderer into a shared, capability-gated table engine
   (`nero/table.h`, `src/cli/table.c`) used by every Wi-Fi surface — the static
   `wifi aps`/`wifi clients`/capture-statistics tables and the live monitor alike.

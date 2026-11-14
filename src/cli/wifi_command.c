@@ -23,6 +23,8 @@
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #endif
@@ -75,6 +77,7 @@ static void print_wifi_help(void)
          "  wifi monitor [--link] [INTERFACE]   Live survey (interactive table on a TTY)\n"
          "  wifi monitor --hop [--dwell MS] [--bands 2.4,5,6]\n"
          "                                      Opt-in channel hopping (Linux, root, consented)\n"
+         "  wifi monitor --no-scan              Strictly passive: never fall back to the OS scan\n"
          "  wifi monitor start [--link] [I]     Start a background passive session\n"
          "  wifi monitor stop                   Stop the background session\n"
          "  wifi monitor status                 Show session counters\n"
@@ -1716,6 +1719,179 @@ static void wifi_monitor_opts(nero_table_opts *opts, int width)
     opts->max_width = width;
 }
 
+/* ---- OS-scan assist ------------------------------------------------------ *
+ * Some adapters (notably built-in Apple Silicon Wi-Fi) accept monitor mode yet
+ * deliver zero 802.11 frames; the capture backend then falls back to link-layer
+ * packets, which carry no beacons, so a pure passive survey stays empty forever.
+ * When that happens the live monitor fills the access-point grid from the
+ * operating system's own scan instead, on a background thread so the TUI stays
+ * responsive. The source is always labelled (OS-SCAN); nothing is fabricated,
+ * and `--no-scan` keeps the survey strictly passive. Stations are never
+ * synthesised: they are only observable in real 802.11 frames. */
+#define WIFI_SCAN_IDLE 0
+#define WIFI_SCAN_RUNNING 1
+#define WIFI_SCAN_READY 2
+#define WIFI_SCAN_FAILED 3
+
+typedef struct {
+    int active;    /* the frame's access points come from the OS scan */
+    int state;     /* WIFI_SCAN_* */
+    int redacted;  /* the OS withheld one or more SSID/BSSID values */
+    char error[160];
+} survey_source;
+
+/* Cleared by `wifi monitor --no-scan`. */
+static int scan_assist_allowed = 1;
+
+/* Only CoreWLAN provides an OS scan backend today; elsewhere the assist is
+ * compiled out so the survey never advertises a scan that cannot run. */
+#if defined(__APPLE__)
+#define WIFI_SCAN_ASSIST_AVAILABLE 1
+#else
+#define WIFI_SCAN_ASSIST_AVAILABLE 0
+#endif
+
+#if WIFI_SCAN_ASSIST_AVAILABLE
+typedef struct {
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    atomic_int stop;
+    int started;
+    char iface[NERO_WIFI_IFNAME_MAX];
+    nero_wifi_ap *aps; /* last successful scan; guarded by mutex */
+    int count;
+    int state;
+    int redacted;
+    char error[160];
+} wifi_scan_assist;
+
+static wifi_scan_assist scan_assist = {.mutex = PTHREAD_MUTEX_INITIALIZER};
+
+static void *wifi_scan_assist_main(void *argument)
+{
+    wifi_scan_assist *assist = argument;
+    nero_wifi_ap *buffer = calloc(NERO_WIFI_MAX_APS, sizeof(*buffer));
+    int failures = 0;
+    if (buffer == NULL) {
+        pthread_mutex_lock(&assist->mutex);
+        assist->state = WIFI_SCAN_FAILED;
+        snprintf(assist->error, sizeof(assist->error), "out of memory");
+        pthread_mutex_unlock(&assist->mutex);
+        return NULL;
+    }
+    while (!atomic_load_explicit(&assist->stop, memory_order_relaxed)) {
+        int found = 0;
+        nero_wifi_platform_capabilities capabilities;
+        char error[160] = {0};
+        memset(&capabilities, 0, sizeof(capabilities));
+        int rc = nero_wifi_platform_scan(assist->iface[0] != '\0' ? assist->iface : NULL, buffer,
+                                         NERO_WIFI_MAX_APS, &found, &capabilities, error,
+                                         sizeof(error));
+        pthread_mutex_lock(&assist->mutex);
+        if (rc == 0) {
+            if (found > NERO_WIFI_MAX_APS)
+                found = NERO_WIFI_MAX_APS;
+            memcpy(assist->aps, buffer, (size_t)found * sizeof(*buffer));
+            assist->count = found;
+            assist->redacted = capabilities.identifiers_redacted;
+            assist->state = WIFI_SCAN_READY;
+            failures = 0;
+        } else {
+            /* One failed scan keeps the previous result; three in a row mean
+             * the radio is gone (Wi-Fi off), so drop the stale list rather
+             * than keep presenting it as live. Retrying continues. */
+            ++failures;
+            if (assist->state != WIFI_SCAN_READY || failures >= 3) {
+                assist->state = WIFI_SCAN_FAILED;
+                assist->count = 0;
+            }
+            snprintf(assist->error, sizeof(assist->error), "%s",
+                     error[0] != '\0' ? error : "scan failed");
+        }
+        pthread_mutex_unlock(&assist->mutex);
+        for (int i = 0; i < 50 && !atomic_load_explicit(&assist->stop, memory_order_relaxed); ++i)
+            sleep_milliseconds(100);
+    }
+    free(buffer);
+    return NULL;
+}
+
+static void wifi_scan_assist_start(const char *interface)
+{
+    wifi_scan_assist *assist = &scan_assist;
+    if (assist->started)
+        return;
+    assist->aps = calloc(NERO_WIFI_MAX_APS, sizeof(*assist->aps));
+    if (assist->aps == NULL)
+        return;
+    snprintf(assist->iface, sizeof(assist->iface), "%s", interface != NULL ? interface : "");
+    assist->count = 0;
+    assist->redacted = 0;
+    assist->error[0] = '\0';
+    assist->state = WIFI_SCAN_RUNNING;
+    atomic_store_explicit(&assist->stop, 0, memory_order_relaxed);
+    if (pthread_create(&assist->thread, NULL, wifi_scan_assist_main, assist) != 0) {
+        free(assist->aps);
+        assist->aps = NULL;
+        assist->state = WIFI_SCAN_IDLE;
+        return;
+    }
+    assist->started = 1;
+}
+
+/* Joins the scan thread. May wait for an in-flight OS scan (a few seconds). */
+static void wifi_scan_assist_stop(void)
+{
+    wifi_scan_assist *assist = &scan_assist;
+    if (!assist->started)
+        return;
+    atomic_store_explicit(&assist->stop, 1, memory_order_relaxed);
+    pthread_join(assist->thread, NULL);
+    free(assist->aps);
+    assist->aps = NULL;
+    assist->count = 0;
+    assist->state = WIFI_SCAN_IDLE;
+    assist->started = 0;
+}
+
+/* Copies the latest scan result (optionally channel-filtered) into `out`. */
+static int wifi_scan_assist_view(nero_wifi_ap *out, int capacity, int channel_filter,
+                                 survey_source *source)
+{
+    wifi_scan_assist *assist = &scan_assist;
+    int written = 0;
+    if (!assist->started)
+        return 0;
+    pthread_mutex_lock(&assist->mutex);
+    for (int i = 0; i < assist->count && written < capacity; ++i) {
+        if (channel_filter >= 0 &&
+            (!assist->aps[i].has_channel || assist->aps[i].channel != channel_filter))
+            continue;
+        out[written++] = assist->aps[i];
+    }
+    if (source != NULL) {
+        source->state = assist->state;
+        source->redacted = assist->redacted;
+        snprintf(source->error, sizeof(source->error), "%s", assist->error);
+    }
+    pthread_mutex_unlock(&assist->mutex);
+    return written;
+}
+#else
+static void wifi_scan_assist_stop(void)
+{
+}
+static int wifi_scan_assist_view(nero_wifi_ap *out, int capacity, int channel_filter,
+                                 survey_source *source)
+{
+    (void)out;
+    (void)capacity;
+    (void)channel_filter;
+    (void)source;
+    return 0;
+}
+#endif /* WIFI_SCAN_ASSIST_AVAILABLE */
+
 /* Writes one complete survey frame (status bar + AP grid + station grid +
  * honest capture warnings) into `out`. Used for both the live alternate-screen
  * TUI (out = an in-memory stream that is then diffed) and the inline/piped
@@ -1724,8 +1900,15 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
                                const nero_wifi_stats *stats, const nero_wifi_ap *aps, int aps_count,
                                const nero_wifi_client *clients, int client_count,
                                int elapsed_seconds, double pps, int channel_filter, int paused,
-                               const char *sort_label, int clients_only)
+                               const char *sort_label, int clients_only,
+                               const survey_source *source)
 {
+    int from_scan = source != NULL && source->active;
+    int scan_ready = from_scan && source->state == WIFI_SCAN_READY;
+    const char *mode = scan_ready ? "OS-SCAN"
+                                 : (stats->link_fallback
+                                        ? "LINK-LAYER"
+                                        : (stats->monitor_requested ? "MONITOR" : "PASSIVE"));
     char interface[NERO_WIFI_IFNAME_MAX] = {0};
     char now_text[32];
     char channel[16];
@@ -1740,15 +1923,26 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
             " %sNERO WIFI SURVEY%s  CH %s | %ds | %s | IFACE %s | %s | %llu pkt | %.1f/s | drop %llu%s\n",
             wc(WIFI_HEAD), wc_off(), channel, elapsed_seconds, now_text,
             interface[0] != '\0' ? interface : "(unknown)",
-            stats->monitor_requested ? "MONITOR" : "PASSIVE", (unsigned long long)stats->packets,
+            mode, (unsigned long long)stats->packets,
             pps, (unsigned long long)stats->dropped, paused ? "  [PAUSED]" : "");
     if (stats->malformed > 0 || stats->non_wifi > 0)
         fprintf(out, " %smalformed %llu, non-802.11 %llu%s\n", wc(WIFI_DIM),
                 (unsigned long long)stats->malformed, (unsigned long long)stats->non_wifi, wc_off());
 
-    fprintf(out, "\n %sACCESS POINTS%s %s(%d, sort: %s)%s\n", wc(WIFI_HEAD), wc_off(), wc(WIFI_DIM),
-            aps_count, sort_label != NULL ? sort_label : "power", wc_off());
-    if (aps_count == 0)
+    fprintf(out, "\n %sACCESS POINTS%s %s(%d, sort: %s%s)%s\n", wc(WIFI_HEAD), wc_off(),
+            wc(WIFI_DIM), aps_count, sort_label != NULL ? sort_label : "power",
+            scan_ready ? ", source: OS scan" : "", wc_off());
+    if (aps_count == 0 && from_scan && source->state == WIFI_SCAN_FAILED)
+        fprintf(out, " %s(no 802.11 frames from this adapter, and the OS scan failed: %s)%s\n",
+                wc(WIFI_DIM), source->error[0] != '\0' ? source->error : "unknown error",
+                wc_off());
+    else if (aps_count == 0 && scan_ready)
+        fprintf(out, " %s(the OS scan reported no networks%s)%s\n", wc(WIFI_DIM),
+                channel_filter >= 0 ? " on this channel" : "", wc_off());
+    else if (aps_count == 0 && from_scan)
+        fprintf(out, " %s(no 802.11 frames from this adapter: running an OS scan instead...)%s\n",
+                wc(WIFI_DIM), wc_off());
+    else if (aps_count == 0)
         fprintf(out, " %s(no access points observed yet: waiting for beacon/probe frames)%s\n",
                 wc(WIFI_DIM), wc_off());
     else
@@ -1758,20 +1952,44 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
 
     fprintf(out, "\n %sSTATIONS%s %s(%d%s)%s\n", wc(WIFI_HEAD), wc_off(), wc(WIFI_DIM), client_count,
             clients_only ? ", filtered" : "", wc_off());
-    if (client_count == 0)
+    if (client_count == 0 && from_scan)
+        fprintf(out, " %s(stations are only visible in 802.11 monitor frames; an OS scan cannot "
+                     "list them)%s\n",
+                wc(WIFI_DIM), wc_off());
+    else if (client_count == 0)
         fprintf(out, " %s(no client stations observed yet)%s\n", wc(WIFI_DIM), wc_off());
     else
         nero_table_draw(out, opts, monitor_client_cols,
                         (int)(sizeof(monitor_client_cols) / sizeof(monitor_client_cols[0])),
                         client_count, monitor_client_row_build, (void *)clients);
 
-    if (stats->packets == 0 && elapsed_seconds >= 3) {
-        fprintf(out, "\n %sWARNING: monitor mode was accepted but zero 802.11 frames arrived.%s\n",
-                wc(WIFI_YEL), wc_off());
-        fprintf(out, " %sOn Apple Silicon the built-in adapter may not expose monitor capture;%s\n",
+    if (stats->monitor_requested && stats->frames == 0 && elapsed_seconds >= 3) {
+        if (stats->non_wifi > 0)
+            fprintf(out,
+                    "\n %sWARNING: no 802.11 frames from this adapter (%llu link-layer packets "
+                    "only).%s\n",
+                    wc(WIFI_YEL), (unsigned long long)stats->non_wifi, wc_off());
+        else
+            fprintf(out,
+                    "\n %sWARNING: monitor mode was requested but zero 802.11 frames arrived.%s\n",
+                    wc(WIFI_YEL), wc_off());
+        fprintf(out, " %sBuilt-in Apple Silicon Wi-Fi and some drivers do not expose monitor "
+                     "capture.%s\n",
                 wc(WIFI_DIM), wc_off());
-        fprintf(out, " %suse a genuine monitor-mode pcap with `wifi analyze` in that case.%s\n",
-                wc(WIFI_DIM), wc_off());
+        if (scan_ready) {
+            fprintf(out, " %sAccess points above come from the OS scan (an active probe).%s\n",
+                    wc(WIFI_DIM), wc_off());
+            fprintf(out, " %s`wifi monitor --no-scan` keeps the survey strictly passive.%s\n",
+                    wc(WIFI_DIM), wc_off());
+            if (source->redacted)
+                fprintf(out, " %sSSID/BSSID redacted by the OS: grant Location Services to the "
+                             "terminal app.%s\n",
+                        wc(WIFI_DIM), wc_off());
+        } else {
+            fprintf(out, " %sUse a monitor-capable adapter, or a genuine monitor-mode pcap with "
+                         "`wifi analyze`.%s\n",
+                    wc(WIFI_DIM), wc_off());
+        }
     }
     if (stats->dropped > 0)
         fprintf(out, "\n %sCapture loss: %llu packet(s) dropped by the kernel/backend.%s\n",
@@ -1780,11 +1998,32 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
 
 /* Fetch + sort + optional filter of the current survey snapshot. Returns the
  * displayed AP/client counts through the out params. */
-static void survey_collect(nero_wifi_session *session, int channel_filter, int sort_mode,
+static void survey_collect(nero_wifi_session *session, const nero_wifi_stats *stats,
+                           int elapsed_seconds, int channel_filter, int sort_mode,
                            int clients_only, nero_wifi_ap *aps, int *aps_count,
-                           nero_wifi_client *clients, int *client_count)
+                           nero_wifi_client *clients, int *client_count, survey_source *source)
 {
     *aps_count = nero_wifi_session_get_aps(session, aps, NERO_WIFI_MAX_APS, channel_filter);
+    memset(source, 0, sizeof(*source));
+#if WIFI_SCAN_ASSIST_AVAILABLE
+    /* Monitor was requested, several seconds passed and not one 802.11 frame
+     * arrived: the adapter does not expose monitor capture. Fill the grid from
+     * the OS scan instead (see the OS-scan assist notes above). */
+    if (scan_assist_allowed && stats->monitor_requested && stats->frames == 0 &&
+        *aps_count == 0 && elapsed_seconds >= 4) {
+        wifi_scan_assist_start(stats->interface);
+        if (scan_assist.started) {
+            source->active = 1;
+            *aps_count = wifi_scan_assist_view(aps, NERO_WIFI_MAX_APS, channel_filter, source);
+        }
+    } else if (scan_assist.started && stats->frames > 0) {
+        /* Real 802.11 frames started arriving: let the scan thread wind down. */
+        atomic_store_explicit(&scan_assist.stop, 1, memory_order_relaxed);
+    }
+#else
+    (void)stats;
+    (void)elapsed_seconds;
+#endif
     *client_count =
         nero_wifi_session_get_clients(session, clients, NERO_WIFI_MAX_CLIENTS, channel_filter);
     if (sort_mode == 1)
@@ -1913,11 +2152,14 @@ static int run_dashboard_plain(nero_wifi_session *session, int duration_seconds,
         if (terminal_ansi_enabled())
             clear_screen();
         int aps_count = 0, client_count = 0;
-        survey_collect(session, channel_filter, 0, 0, aps, &aps_count, clients, &client_count);
+        int elapsed_seconds = (int)((now - started) / 1000000LL);
+        survey_source source;
+        survey_collect(session, &current, elapsed_seconds, channel_filter, 0, 0, aps, &aps_count,
+                       clients, &client_count, &source);
         nero_table_opts opts;
         wifi_monitor_opts(&opts, nero_terminal_width());
         survey_build_frame(stdout, &opts, session, &current, aps, aps_count, clients, client_count,
-                           (int)((now - started) / 1000000LL), pps, channel_filter, 0, "power", 0);
+                           elapsed_seconds, pps, channel_filter, 0, "power", 0, &source);
         previous = current;
         previous_time = now;
         fflush(stdout);
@@ -1943,10 +2185,16 @@ static int run_dashboard_tui(nero_wifi_session *session, int duration_seconds, i
         return -1;
     }
 
+    nero_wifi_stats previous;
+    nero_wifi_session_snapshot_stats(session, &previous);
     nero_operation_ui ui;
     memset(&ui, 0, sizeof(ui));
-    nero_operation_begin(&ui, "WI-FI LIVE MONITOR  (read-only passive 802.11 survey)",
-                         "Capture is read-only: NERO never joins, injects or changes channel.",
+    nero_operation_begin(&ui, "WI-FI LIVE MONITOR  (passive 802.11 survey)",
+                         WIFI_SCAN_ASSIST_AVAILABLE && scan_assist_allowed &&
+                                 previous.monitor_requested
+                             ? "Passive capture; if the adapter yields no 802.11 frames the OS scan "
+                               "fills the grid (--no-scan disables)."
+                             : "Capture is read-only: NERO never joins, injects or changes channel.",
                          "s sort  f clients  space pause  \xE2\x86\x91\xE2\x86\x93/PgUp/PgDn/Home/End scroll  q quit");
     if (!ui.interactive) {
         nero_operation_end(&ui);
@@ -1956,14 +2204,14 @@ static int run_dashboard_tui(nero_wifi_session *session, int duration_seconds, i
     }
 
     int64_t started = nero_wifi_now_us();
-    nero_wifi_stats previous;
-    nero_wifi_session_snapshot_stats(session, &previous);
     nero_wifi_stats current = previous;
     int64_t previous_time = started;
     int64_t last_sample = 0;
     double pps = 0.0;
     int aps_count = 0, client_count = 0;
     int sort_mode = 0, clients_only = 0, paused = 0, scroll = 0, dirty = 1;
+    survey_source source;
+    memset(&source, 0, sizeof(source));
 
     for (;;) {
         if (cli_termination_signal != 0)
@@ -1984,8 +2232,9 @@ static int run_dashboard_tui(nero_wifi_session *session, int duration_seconds, i
             previous = current;
             previous_time = now;
             last_sample = now;
-            survey_collect(session, channel_filter, sort_mode, clients_only, aps, &aps_count,
-                           clients, &client_count);
+            survey_collect(session, &current, (int)((now - started) / 1000000LL), channel_filter,
+                           sort_mode, clients_only, aps, &aps_count, clients, &client_count,
+                           &source);
             dirty = 0;
         }
 
@@ -1999,7 +2248,7 @@ static int run_dashboard_tui(nero_wifi_session *session, int duration_seconds, i
             wifi_monitor_opts(&opts, ui.columns - 4);
             survey_build_frame(ms, &opts, session, &current, aps, aps_count, clients, client_count,
                                (int)((now - started) / 1000000LL), pps, channel_filter, paused,
-                               survey_sort_label(sort_mode), clients_only);
+                               survey_sort_label(sort_mode), clients_only, &source);
             fclose(ms);
             char *p = buf;
             while (p != NULL && *p != '\0' &&
@@ -2491,6 +2740,7 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
     int channel = -1;
     int request_link = 0;
     int want_hop = 0;
+    int no_scan = 0;
     int dwell_ms = 300;
     unsigned hop_bands = 0;
     for (size_t i = 1; i < count; ++i) {
@@ -2504,6 +2754,8 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
             request_link = 1;
         } else if (strcmp(tokens[i], "--hop") == 0) {
             want_hop = 1;
+        } else if (strcmp(tokens[i], "--no-scan") == 0) {
+            no_scan = 1;
         } else if (strcmp(tokens[i], "--dwell") == 0 && i + 1 < count) {
             if (parse_number(tokens[++i], 50, 10000, &dwell_ms) != 0)
                 return CLI_CMD_INVALID;
@@ -2578,6 +2830,7 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
     (void)channel;
     (void)request_link;
     (void)want_hop;
+    (void)no_scan;
     (void)dwell_ms;
     (void)hop_bands;
     puts("\nwifi monitor: live capture is unavailable in this offline build.");
@@ -2667,6 +2920,7 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
 
     puts("\nStarting passive monitor. Press Ctrl+C to stop.");
     fflush(stdout);
+    scan_assist_allowed = !no_scan;
     run_dashboard(session, duration, channel);
     active_hop = NULL;
     if (nero_wifi_session_running(session))
@@ -2687,9 +2941,22 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
         int aps_count = nero_wifi_session_get_aps(session, aps, NERO_WIFI_MAX_APS, -1);
         int client_count =
             nero_wifi_session_get_clients(session, clients, NERO_WIFI_MAX_CLIENTS, -1);
+        if (aps_count == 0 && stats.frames == 0) {
+            /* Nothing was captured: show what the OS-scan assist found, labelled. */
+            survey_source source;
+            memset(&source, 0, sizeof(source));
+            aps_count = wifi_scan_assist_view(aps, NERO_WIFI_MAX_APS, -1, &source);
+            if (aps_count > 0) {
+                qsort(aps, (size_t)aps_count, sizeof(aps[0]), ap_power_compare);
+                puts("\nNo 802.11 frames were captured; the access points below come from the OS "
+                     "scan, not from monitor capture.");
+            }
+        }
         print_ap_table(aps, aps_count);
         print_client_table(clients, client_count, 0);
     }
+    wifi_scan_assist_stop();
+    scan_assist_allowed = 1;
     free(aps);
     free(clients);
     return CLI_CMD_CONTINUE;

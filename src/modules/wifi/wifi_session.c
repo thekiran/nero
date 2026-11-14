@@ -23,6 +23,11 @@ struct nero_wifi_session {
     atomic_uint_fast64_t packets;
     atomic_uint_fast64_t bytes;
     atomic_uint_fast64_t non_wifi;
+    /* Link type of the most recent packet (0 = none yet). The capture backend
+     * may silently reopen a monitor handle in link-layer mode when the adapter
+     * delivers no 802.11 frames; tracking this live keeps the dashboard honest
+     * instead of reporting MONITOR until the worker exits. */
+    atomic_int live_linktype;
     nero_wifi_stats base;
     char interface[NERO_WIFI_IFNAME_MAX];
     char last_error[256];
@@ -39,6 +44,7 @@ static int session_packet_callback(void *context, const nero_wifi_capture_packet
     char parse_error[128] = {0};
     atomic_fetch_add_explicit(&session->packets, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&session->bytes, packet->caplen, memory_order_relaxed);
+    atomic_store_explicit(&session->live_linktype, packet->linktype, memory_order_relaxed);
     if (packet->linktype != NERO_WIFI_LINKTYPE_IEEE802_11 &&
         packet->linktype != NERO_WIFI_LINKTYPE_RADIOTAP) {
         atomic_fetch_add_explicit(&session->non_wifi, 1, memory_order_relaxed);
@@ -102,6 +108,7 @@ nero_wifi_session *nero_wifi_session_create(void)
     atomic_init(&session->packets, 0);
     atomic_init(&session->bytes, 0);
     atomic_init(&session->non_wifi, 0);
+    atomic_init(&session->live_linktype, 0);
     return session;
 }
 
@@ -165,6 +172,7 @@ int nero_wifi_session_start(nero_wifi_session *session, const char *interface_na
     atomic_store_explicit(&session->packets, 0, memory_order_relaxed);
     atomic_store_explicit(&session->bytes, 0, memory_order_relaxed);
     atomic_store_explicit(&session->non_wifi, 0, memory_order_relaxed);
+    atomic_store_explicit(&session->live_linktype, 0, memory_order_relaxed);
     atomic_store_explicit(&session->stop_flag, 0, memory_order_relaxed);
     atomic_store_explicit(&session->stop_requested, 0, memory_order_relaxed);
     atomic_store_explicit(&session->running, 1, memory_order_release);
@@ -253,6 +261,7 @@ int nero_wifi_session_analyze(nero_wifi_session *session, const char *path, char
     atomic_store_explicit(&session->packets, stats.packets, memory_order_relaxed);
     atomic_store_explicit(&session->bytes, stats.bytes, memory_order_relaxed);
     atomic_store_explicit(&session->non_wifi, stats.non_wifi, memory_order_relaxed);
+    atomic_store_explicit(&session->live_linktype, 0, memory_order_relaxed);
     return 0;
 }
 
@@ -270,6 +279,7 @@ void nero_wifi_session_reset(nero_wifi_session *session)
     atomic_store_explicit(&session->packets, 0, memory_order_relaxed);
     atomic_store_explicit(&session->bytes, 0, memory_order_relaxed);
     atomic_store_explicit(&session->non_wifi, 0, memory_order_relaxed);
+    atomic_store_explicit(&session->live_linktype, 0, memory_order_relaxed);
 }
 
 void nero_wifi_session_snapshot_stats(const nero_wifi_session *session, nero_wifi_stats *out)
@@ -290,6 +300,17 @@ void nero_wifi_session_snapshot_stats(const nero_wifi_session *session, nero_wif
     out->packets = atomic_load_explicit(&mutable_session->packets, memory_order_relaxed);
     out->bytes = atomic_load_explicit(&mutable_session->bytes, memory_order_relaxed);
     out->non_wifi = atomic_load_explicit(&mutable_session->non_wifi, memory_order_relaxed);
+    int live_linktype =
+        atomic_load_explicit(&mutable_session->live_linktype, memory_order_relaxed);
+    if (live_linktype != 0 && !out->source_is_file) {
+        int is_wifi = live_linktype == NERO_WIFI_LINKTYPE_IEEE802_11 ||
+                      live_linktype == NERO_WIFI_LINKTYPE_RADIOTAP;
+        out->linktype = live_linktype;
+        if (out->monitor_requested) {
+            out->monitor_set = is_wifi;
+            out->link_fallback = !is_wifi;
+        }
+    }
     out->frames = tracker_stats.frames;
     out->management = tracker_stats.management;
     out->control = tracker_stats.control;
