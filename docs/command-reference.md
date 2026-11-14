@@ -208,7 +208,20 @@ prove delivery.
   signal, channel, frame count, notes and resolved ESSID. `start`, `stop`, and
   `status` manage a background session. Capture is read-only and uses dynamic
   libpcap on POSIX or Npcap on Windows. A warning is shown after three seconds
-  without frames.
+  without 802.11 frames, and the status bar states the real capture mode
+  (`MONITOR`, `LINK-LAYER` when the backend fell back to link-layer packets,
+  `OS-SCAN`, or `PASSIVE`).
+* **OS-scan assist / `--no-scan`:** Some adapters (notably built-in Apple Silicon
+  Wi-Fi) accept monitor mode but deliver no 802.11 frames, so a purely passive
+  survey would stay empty. When monitor mode was requested and no 802.11 frame
+  has arrived after four seconds, the access-point table is filled from the
+  operating system's own scan (CoreWLAN on macOS), refreshed in the background
+  and clearly labelled `OS-SCAN` / `source: OS scan`. An OS scan is an active
+  probe, cannot list stations, and may return redacted SSID/BSSID values until
+  the terminal application is granted Location Services. `--no-scan` disables
+  the assist and keeps the survey strictly passive. On Linux and Windows no OS
+  scan backend exists, so the assist is compiled out and the survey stays
+  passive.
 * **`--hop [--dwell MS] [--bands 2.4,5,6]`:** Opt-in channel hopping. The default
   survey is strictly read-only and stays on the adapter's current channel; this
   separate mode tunes the radio across a channel plan so the survey can see
