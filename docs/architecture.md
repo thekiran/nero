@@ -32,6 +32,18 @@ I/O, while runtime tests use guarded loopback connections. The existing
 `portscanner(target)` entry point and menu remain available. See the
 [quality acceptance plan](engineering/quality-plan.md).
 
+Wireless support is split the same way: `include/nero/wifi.h` is the public
+contract, `src/modules/wifi/` owns the bounds-checked radiotap/802.11 parser,
+tracker and pcap/pcapng reader, and `src/platform/wifi_*.c` owns optional live
+capture and platform metadata. The CLI in `src/cli/wifi_command.c` never injects
+custom frames or changes the adapter's channel, power, or configured profile;
+monitor mode is requested only through libpcap/Npcap. The capture library is
+loaded dynamically, so builds do not require its development headers and
+offline/safe binaries do not link a live capture engine. Active CoreWLAN survey
+is macOS-only and may cause normal OS probe requests; monitor-mode delivery is
+reported, never assumed.
+See the [command reference](command-reference.md#wireless-monitoring-commands).
+
 `src/modules/` holds the packet engine and scanner. Their header is retained as
 `include/nero/syn_flood_powered.h`. Both Linux and macOS Make builds link them;
 macOS raw sockets require root. The offline-safe executables use

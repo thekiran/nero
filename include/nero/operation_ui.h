@@ -93,8 +93,24 @@ void nero_operation_menu(nero_operation_ui *ui, const char *heading,
  * no network. Returns "" for unknown ports. */
 const char *nero_service_name(int port);
 
+/* Render an arbitrary block of pre-formatted text lines inside the operation
+ * body, diffing against the previous frame so only changed rows are rewritten
+ * (flicker-free; no full-screen clear). `lines[0..count-1]` are already fitted
+ * to the terminal width by the caller (e.g. the shared table engine).
+ * `scroll_offset` is the index of the first line shown and is clamped to the
+ * body height. On a redirected (non-interactive) surface the lines are simply
+ * written once as a plain transcript. */
+void nero_operation_render_lines(nero_operation_ui *ui, const char *const *lines, int count,
+                                 int scroll_offset);
+
 /* Decodes a standalone Escape separately from CSI/SS3 arrow sequences.
  * timeout_ms < 0 waits indefinitely; zero performs a non-blocking poll. */
 nero_ui_key nero_operation_read_key(int timeout_ms);
+
+/* As nero_operation_read_key, but also reports the first raw byte read in
+ * *first_byte (0 when nothing was read). Callers inspect it only for the
+ * NERO_UI_KEY_OTHER case to recognise their own plain-letter shortcuts (e.g.
+ * 's', 'f', space) without re-implementing the escape-sequence decoder. */
+nero_ui_key nero_operation_read_key_ex(int timeout_ms, int *first_byte);
 
 #endif

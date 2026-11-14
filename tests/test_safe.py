@@ -6,6 +6,7 @@ import re
 import select
 import subprocess
 import sys
+import tempfile
 import termios
 import time
 import unittest
@@ -16,9 +17,52 @@ INTERFACE_BINARY = "interfaces-mock" if sys.platform.startswith("linux") else "i
 ANSI = re.compile(rb"\x1b\[[0-9;]*[A-Za-z]")
 
 
-def run(name, data):
+def run(name, data, env=None):
     return subprocess.run([str(ROOT / name)], input=data, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, env=ENV, timeout=15)
+                          stderr=subprocess.PIPE, env=env or ENV, timeout=15)
+
+
+def radiotap_header():
+    return (bytes([0, 0]) + (16).to_bytes(2, "little") + (0x2A).to_bytes(4, "little") +
+            bytes([0, 0]) + (2437).to_bytes(2, "little") + bytes([0, 0]) + bytes([0xD6, 0]))
+
+
+def pcap_bytes(packets):
+    header = ((0xA1B2C3D4).to_bytes(4, "little") + (2).to_bytes(2, "little") +
+              (4).to_bytes(2, "little") + b"\x00" * 8 + (65535).to_bytes(4, "little") +
+              (0x00010000 | 127).to_bytes(4, "little"))
+    records = bytearray(header)
+    for index, packet in enumerate(packets):
+        records += ((1700000000 + index).to_bytes(4, "little") + b"\x00" * 4 +
+                    len(packet).to_bytes(4, "little") + len(packet).to_bytes(4, "little") + packet)
+    return bytes(records)
+
+
+def beacon_packet():
+    """One radiotap beacon: TestNet on channel 6, WPA2."""
+    bssid = bytes.fromhex("021122334455")
+    ssid = b"TestNet"
+    rsn = ((1).to_bytes(2, "little") + bytes.fromhex("000fac04") + b"\x01\x00" +
+           bytes.fromhex("000fac04") + (1).to_bytes(2, "little") + bytes.fromhex("000fac02") +
+           (0).to_bytes(2, "little"))
+    frame = ((0x0080).to_bytes(2, "little") + b"\x00\x00" + b"\xff" * 6 + bssid + bssid +
+             (0x0010).to_bytes(2, "little") + b"\x00" * 8 + (100).to_bytes(2, "little") +
+             (0x0011).to_bytes(2, "little") + bytes([0, len(ssid)]) + ssid +
+             bytes([3, 1, 6]) + bytes([48, len(rsn)]) + rsn)
+    return radiotap_header() + frame
+
+
+def beacon_pcap():
+    return pcap_bytes([beacon_packet()])
+
+
+def client_pcap():
+    """Beacon plus one to-DS data frame, so the client has a BSSID relationship."""
+    bssid = bytes.fromhex("021122334455")
+    client = bytes.fromhex("aabbccddeeff")
+    frame = ((0x0108).to_bytes(2, "little") + b"\x00\x00" + bssid + client + bssid +
+             (0x0020).to_bytes(2, "little"))
+    return pcap_bytes([beacon_packet(), radiotap_header() + frame])
 
 
 class SafeTests(unittest.TestCase):
@@ -152,6 +196,83 @@ class SafeTests(unittest.TestCase):
                 result = run("interfaces-mock", data)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(b"SELECTED:fixture0", result.stdout)
+
+    def test_wifi_tables_adapt_to_terminal_width(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = pathlib.Path(tmp) / "beacon.pcap"
+            capture.write_bytes(beacon_pcap())
+
+            def analyze(columns):
+                env = dict(ENV, COLUMNS=str(columns), NERO_ASCII="1")
+                result = run("nero-safe", f"wifi analyze {capture}\nexit\n".encode(), env)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                self.assertNotIn(b"Sanitizer", result.stderr)
+                return ANSI.sub(b"", result.stdout + result.stderr).decode(errors="replace")
+
+            narrow = analyze(50)
+            self.assertIn("| TestNet", narrow)
+            self.assertIn("narrow view:", narrow)
+            self.assertNotIn("LAST SEEN", narrow)
+            wide = analyze(120)
+            self.assertIn("LAST SEEN", wide)
+            self.assertNotIn("narrow view:", wide)
+            for output, limit in ((narrow, 50), (wide, 120)):
+                for line in output.splitlines():
+                    if line.startswith(("+", "|", "  (")):
+                        self.assertLessEqual(len(line), limit, line)
+
+    def test_wifi_capabilities_offline(self):
+        output = self.cli(b"wifi capabilities\nexit\n")
+        for expected in (b"NERO WIRELESS CAPABILITIES", b"Offline build",
+                         b"unavailable in this offline build", b"nl80211 control"):
+            self.assertIn(expected, output)
+        self.assertNotIn(b"delivery must be verified", output)
+
+    def test_wifi_monitor_mode_offline(self):
+        output = self.cli(b"wifi monitor enable lo0\nwifi monitor disable lo0\n"
+                          b"wifi monitor enable lo0 --channel 6\nexit\n")
+        self.assertEqual(output.count(b"unavailable in this offline build"), 2)
+        self.assertEqual(output.count(b"No interface state was changed."), 2)
+        self.assertIn(b"Invalid command parameters", output)
+
+    def test_wifi_signal_offline_and_validation(self):
+        output = self.cli(b"wifi signal\nwifi signal --live\nwifi signal --bogus\nexit\n")
+        self.assertEqual(output.count(b"unavailable in this offline build"), 2)
+        self.assertIn(b"Invalid command parameters", output)
+        self.assertNotIn(b"RSSI:", output)
+
+    def test_wifi_scan_band_channel_validation(self):
+        output = self.cli(b"wifi scan --band 7\nwifi scan --channel 999\n"
+                          b"wifi scan --band 5 --channel 36\nwifi scan --live\nexit\n")
+        self.assertEqual(output.count(b"Invalid command parameters"), 2)
+        self.assertEqual(output.count(b"unsupported in this offline build"), 2)
+
+    def test_wifi_clients_bssid_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = pathlib.Path(tmp) / "clients.pcap"
+            capture.write_bytes(client_pcap())
+            matching = self.cli(f"wifi analyze {capture}\n"
+                                f"wifi clients --bssid 02:11:22:33:44:55\nexit\n".encode())
+            self.assertIn(b"BSSID filter:   02:11:22:33:44:55", matching)
+            self.assertIn(b"1 client device(s) observed", matching)
+
+            missing = self.cli(f"wifi analyze {capture}\n"
+                               f"wifi clients --bssid ff:ff:ff:ff:ff:ff\nexit\n".encode())
+            self.assertIn(b"BSSID filter:   FF:FF:FF:FF:FF:FF", missing)
+            self.assertIn(b"0 client device(s) observed", missing)
+
+    def test_wifi_observed_tables_are_populated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = pathlib.Path(tmp) / "clients.pcap"
+            capture.write_bytes(client_pcap())
+            output = self.cli(f"wifi analyze {capture}\n"
+                              f"wifi aps\nwifi clients\nexit\n".encode())
+            for expected in (b"ACCESS POINTS  (1 observed)", b"TestNet",
+                             b"02:11:22:33:44:55", b"CLIENT DEVICES",
+                             b"AA:BB:CC:DD:EE:FF", b"-42", b"1 client device(s) observed",
+                             b"ch  6"):
+                self.assertIn(expected, output)
+            self.assertNotIn(b"no access points", output.lower())
 
     def test_pty_restores_terminal(self):
         master, slave = pty.openpty()

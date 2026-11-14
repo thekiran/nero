@@ -22,6 +22,7 @@ NERO maintains a deterministic, automated test infrastructure. All automated CI 
 | **Core Safe Regressions** | `tests/test_safe.py` | Command line options, input validation, offline mock CLI | macOS, Linux |
 | **Terminal Quality & PTY** | `tests/test_terminal_quality.py` | PTY allocation, ANSI rendering, signal handling (SIGINT, SIGHUP, SIGTERM), EOF | macOS, Linux |
 | **Operation Layout** | `tests/test_operation_layout.py` | Viewport dimensions, line wrapping, logo rendering, `NO_COLOR` support | macOS, Linux |
+| **Wi-Fi Fixtures** | `tests/wifi_core.c` | Radiotap/802.11 parsing, AP/client tracking, classic pcap and pcapng fixtures | macOS, Linux; parser/tracker on Windows |
 | **Platform Foundation** | `tests/integration/test_foundation.py` | Platform identification, CPU, OS release, compiler version | macOS, Linux, Windows |
 | **Windows Native CLI** | `tests/windows/test_cli.py` | Interactive pipe, EOF, input boundaries, invalid input recovery | Windows (MinGW) |
 | **Win32 Boundaries** | `tests/windows/compat_boundaries.c` | Pointer-sized `SOCKET` handles (`> INT_MAX`), `fd_set`, polling boundary | Windows (MinGW) |

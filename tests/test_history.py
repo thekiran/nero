@@ -43,6 +43,12 @@ class HistoryTests(unittest.TestCase):
                  b"192.0.2.1 -Sc\nversion\nexit\n")
         self.assertEqual(self.path.read_bytes(), b"-mode off\n192.0.2.1 -Sc\nversion\n")
 
+    def test_wifi_identifiers_are_not_persisted(self):
+        self.cli(b"wifi status\nwifi interfaces\nwifi scan\n"
+                 b"wifi inspect 02:11:22:33:44:55\n"
+                 b"wifi monitor status\nhelp\nexit\n")
+        self.assertEqual(self.path.read_bytes(), b"help\n")
+
     def test_readable_aliases_preserve_privacy_allowlist_and_clear(self):
         self.cli(b"network disable\nhelp --all\nlogs path\nscan 192.0.2.1\n"
                  b"scan 001.2.3.4\nscan 192.0.2.1 secret\nlogs password=secret\nexit\n")

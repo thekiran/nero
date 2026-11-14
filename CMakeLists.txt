@@ -28,9 +28,18 @@ set(NERO_CLI_SUPPORT_SOURCES
     src/cli/input.c
     src/cli/history.c
     src/cli/render.c
+    src/cli/table.c
     src/cli/operation_ui.c
     src/cli/commands.c
     src/cli/workload.c
+    src/cli/wifi_command.c
+    src/modules/wifi/wifi_ieee80211.c
+    src/modules/wifi/wifi_tracker.c
+    src/modules/wifi/wifi_pcap.c
+    src/modules/wifi/wifi_session.c
+    src/platform/wifi_nl80211.c
+    src/platform/wifi_capture.c
+    src/platform/wifi_platform.c
     src/cli/ascii.c
 )
 
@@ -133,7 +142,7 @@ elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(nero-safe src/main.c src/cli/terminal.c ${NERO_CLI_SUPPORT_SOURCES})
     nero_target(nero-safe)
     target_compile_definitions(nero-safe PRIVATE UNICODE_SUPPORT NERO_SAFE_TEST NERO_NETWORK_UNAVAILABLE)
-    target_link_libraries(nero-safe PRIVATE Threads::Threads)
+    target_link_libraries(nero-safe PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_compile_definitions(nero-safe PRIVATE _POSIX_C_SOURCE=200809L)
         set(interface_source src/platform/linux/select_interface.c)
@@ -185,7 +194,7 @@ elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
             if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 target_compile_definitions(${mock_target} PRIVATE _POSIX_C_SOURCE=200809L)
             endif()
-            target_link_libraries(${mock_target} PRIVATE Threads::Threads)
+            target_link_libraries(${mock_target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
         endforeach()
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_executable(interfaces-mock tests/interfaces.c tests/mocks/interfaces_linux.c src/platform/linux/select_interface.c)
@@ -230,6 +239,35 @@ if(BUILD_TESTING AND NOT MSVC)
     endif()
     add_test(NAME scan-session COMMAND scan-session)
     set_tests_properties(scan-session PROPERTIES TIMEOUT 60)
+    add_executable(wifi-core tests/wifi_core.c
+        src/modules/wifi/wifi_ieee80211.c
+        src/modules/wifi/wifi_tracker.c
+        src/modules/wifi/wifi_pcap.c)
+    nero_target(wifi-core)
+    target_link_libraries(wifi-core PRIVATE Threads::Threads)
+    if(WIN32)
+        target_link_options(wifi-core PRIVATE -static)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(wifi-core PRIVATE _POSIX_C_SOURCE=200809L)
+    endif()
+    add_test(NAME wifi-core COMMAND wifi-core)
+    set_tests_properties(wifi-core PROPERTIES TIMEOUT 60)
+    add_executable(wifi-nl80211 tests/wifi_nl80211.c src/platform/wifi_nl80211.c)
+    nero_target(wifi-nl80211)
+    target_compile_definitions(wifi-nl80211 PRIVATE NERO_NL80211_TEST)
+    if(WIN32)
+        target_link_libraries(wifi-nl80211 PRIVATE ws2_32)
+        target_link_options(wifi-nl80211 PRIVATE -static)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(wifi-nl80211 PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+    endif()
+    add_test(NAME wifi-nl80211 COMMAND wifi-nl80211)
+    set_tests_properties(wifi-nl80211 PROPERTIES TIMEOUT 60)
+    add_executable(table-engine tests/test_table_engine.c src/cli/table.c)
+    nero_target(table-engine)
+    target_compile_definitions(table-engine PRIVATE UNICODE_SUPPORT)
+    add_test(NAME table-engine COMMAND table-engine)
+    set_tests_properties(table-engine PROPERTIES TIMEOUT 60)
     add_executable(portscanner-reliability tests/portscanner_reliability.c src/modules/portscanner.c src/modules/scan_session.c src/cli/operation_ui.c src/core/log.c)
     nero_target(portscanner-reliability)
     target_compile_definitions(portscanner-reliability PRIVATE UNICODE_SUPPORT)
@@ -307,9 +345,13 @@ endif()
 if(BUILD_TESTING AND TARGET nero-safe)
     add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero-safe>)
+    add_test(NAME wifi-tables COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_wifi_tables.py" $<TARGET_FILE:nero-safe>)
 elseif(BUILD_TESTING AND TARGET nero)
     add_test(NAME doctor-privacy COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/test_doctor.py" $<TARGET_FILE:nero>)
+    add_test(NAME wifi-tables COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/tests/test_wifi_tables.py" $<TARGET_FILE:nero>)
 endif()
 
 if(BUILD_TESTING)

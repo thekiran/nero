@@ -56,4 +56,8 @@ typedef enum {
  * sending a packet or starting -Syn. */
 cli_cmd_result cmd_preflight(char **tokens, size_t count);
 
+/* wifi_command.c: passive wireless monitoring, active CoreWLAN survey and
+ * offline 802.11 capture analysis. Live capture is unavailable in safe builds. */
+cli_cmd_result cmd_wifi(char **tokens, size_t count);
+
 #endif
