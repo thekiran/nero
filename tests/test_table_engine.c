@@ -2,12 +2,8 @@
  *
  * These exercise display-width measurement, UTF-8-aware fitting, the signal
  * level thresholds and the responsive grid (growth, shrink, column drop and the
- * honest narrow-view note) by rendering into an in-memory stream. No terminal
+ * honest narrow-view note) by rendering into a temporary stream. No terminal
  * or capture device is touched. */
-
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200809L
-#endif
 
 #include "nero/table.h"
 
@@ -87,9 +83,9 @@ static void row2_build(int index, void *ctx, nero_table_cell *out)
 static char *render(const nero_table_col *cols, int ncols, int nrows, nero_table_row_fn fn,
                     void *ctx, int width)
 {
-    char *buf = NULL;
-    size_t len = 0;
-    FILE *ms = open_memstream(&buf, &len);
+    /* tmpfile is ISO C and also works with the Windows UCRT, which does not
+     * provide POSIX open_memstream. It is removed automatically on close. */
+    FILE *ms = tmpfile();
     if (ms == NULL)
         return NULL;
     nero_table_opts opts = {0};
@@ -98,7 +94,28 @@ static char *render(const nero_table_col *cols, int ncols, int nrows, nero_table
     opts.width = width;
     opts.max_width = width;
     nero_table_draw(ms, &opts, cols, ncols, nrows, fn, ctx);
-    fclose(ms);
+    if (fflush(ms) != 0 || fseek(ms, 0, SEEK_END) != 0) {
+        fclose(ms);
+        return NULL;
+    }
+    long length = ftell(ms);
+    if (length < 0 || fseek(ms, 0, SEEK_SET) != 0) {
+        fclose(ms);
+        return NULL;
+    }
+    size_t len = (size_t)length;
+    char *buf = malloc(len + 1);
+    if (buf == NULL) {
+        fclose(ms);
+        return NULL;
+    }
+    size_t count = fread(buf, 1, len, ms);
+    int close_status = fclose(ms);
+    if (count != len || close_status != 0) {
+        free(buf);
+        return NULL;
+    }
+    buf[len] = '\0';
     return buf;
 }
 
