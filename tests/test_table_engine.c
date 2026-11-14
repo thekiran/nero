@@ -5,6 +5,10 @@
  * honest narrow-view note) by rendering into an in-memory stream. No terminal
  * or capture device is touched. */
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "nero/table.h"
 
 #include <stdio.h>

@@ -22,6 +22,11 @@
  * (GetAdaptersAddresses, IP_ADAPTER_ADDRESSES) must follow winsock2. */
 #include "windows/nero_win_compat.h"
 #include <iphlpapi.h>
+/* Windows COM headers define interface as struct. Keep the Wi-Fi status
+ * member name usable after all Windows headers have been included. */
+#ifdef interface
+#undef interface
+#endif
 #ifndef IF_TYPE_IEEE80211
 #define IF_TYPE_IEEE80211 71
 #endif

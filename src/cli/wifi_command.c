@@ -1803,10 +1803,12 @@ static void survey_collect(nero_wifi_session *session, int channel_filter, int s
     }
 }
 
+#if !defined(_WIN32)
 static const char *survey_sort_label(int sort_mode)
 {
     return sort_mode == 1 ? "essid" : (sort_mode == 2 ? "bssid" : "power");
 }
+#endif
 
 /* ---- opt-in channel hopping -------------------------------------------- *
  * Default `wifi monitor` is strictly read-only and never changes the radio.
@@ -2091,13 +2093,10 @@ static int wifi_monitor_state_path(char *path, size_t path_len)
         snprintf(path, path_len, "/run/nero-wifi-monitor.state");
         return 0;
     }
-    const char *runtime = getenv("XDG_RUNTIME_DIR");
-    if (runtime != NULL && runtime[0] == '/') {
-        snprintf(path, path_len, "%s/nero-wifi-monitor.state", runtime);
-    } else {
-        snprintf(path, path_len, "/tmp/nero-wifi-monitor-%lu.state",
-                 (unsigned long)geteuid());
-    }
+    /* Use the OS-managed per-user runtime directory, never an environment
+     * path: this command can run with network-administration privileges. */
+    snprintf(path, path_len, "/run/user/%lu/nero-wifi-monitor.state",
+             (unsigned long)geteuid());
     return 0;
 }
 
