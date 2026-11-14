@@ -440,23 +440,27 @@ int nero_wifi_analyze_pcap(nero_wifi_tracker *tracker, const char *path, nero_wi
     stats->started_us = nero_wifi_now_us();
     snprintf(stats->source, sizeof(stats->source), "%s", path);
 
-    struct stat info;
-    if (stat(path, &info) != 0) {
-        char message[256];
-        snprintf(message, sizeof(message), "cannot open %s: %s", path, strerror(errno));
-        set_error(error, error_len, message);
-        return -1;
-    }
-    if (!S_ISREG(info.st_mode)) {
-        set_error(error, error_len, "pcap source is not a regular file");
-        return -1;
-    }
-
+    /* Open first, then validate the opened handle with fstat: checking the path
+     * with stat() before fopen() leaves a time-of-check/time-of-use window where
+     * the path could be swapped for a device or a different file. */
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
         char message[256];
         snprintf(message, sizeof(message), "cannot open %s: %s", path, strerror(errno));
         set_error(error, error_len, message);
+        return -1;
+    }
+    struct stat info;
+    if (fstat(fileno(file), &info) != 0) {
+        char message[256];
+        snprintf(message, sizeof(message), "cannot stat %s: %s", path, strerror(errno));
+        set_error(error, error_len, message);
+        fclose(file);
+        return -1;
+    }
+    if (!S_ISREG(info.st_mode)) {
+        set_error(error, error_len, "pcap source is not a regular file");
+        fclose(file);
         return -1;
     }
 

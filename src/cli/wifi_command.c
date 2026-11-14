@@ -452,7 +452,10 @@ static void print_stats_summary(const nero_wifi_stats *stats)
 
     rows[n].label = "Source";
     rows[n].color = NULL;
-    snprintf(rows[n].value, sizeof(rows[n].value), "%s",
+    /* stats->source is a long path buffer; it is deliberately clipped to the
+     * value cell (the table also fits it to the column). The explicit precision
+     * tells the compiler the write is bounded. */
+    snprintf(rows[n].value, sizeof(rows[n].value), "%.*s", (int)sizeof(rows[n].value) - 1,
              stats->source[0] != '\0' ? stats->source : "(no capture source)");
     ++n;
     rows[n].label = "Link type";
@@ -1468,7 +1471,16 @@ static cli_cmd_result cmd_wifi_export(char **tokens, size_t count)
     int aps_count = nero_wifi_session_get_aps(session, aps, NERO_WIFI_MAX_APS, channel);
     int client_count =
         nero_wifi_session_get_clients(session, clients, NERO_WIFI_MAX_CLIENTS, channel);
+    /* The export holds MAC addresses, so create it with owner-only permissions
+     * (0600) rather than fopen's umask-dependent 0666 on POSIX. */
+#if defined(_WIN32)
     FILE *file = fopen(path, "w");
+#else
+    int export_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    FILE *file = export_fd >= 0 ? fdopen(export_fd, "w") : NULL;
+    if (file == NULL && export_fd >= 0)
+        close(export_fd);
+#endif
     if (file == NULL) {
         printf("\nwifi export failed: %s: %s\n", path, strerror(errno));
         free(aps);
@@ -2066,7 +2078,11 @@ static int run_dashboard(nero_wifi_session *session, int duration_seconds, int c
 #endif
 
 
-#if defined(__linux__)
+/* The nl80211 monitor enable/disable helpers run only in a live Linux build;
+ * cmd_wifi_monitor_mode (below, outside this guard) carries its own offline and
+ * non-Linux stubs, so excluding these here keeps offline Linux builds free of
+ * unused-function warnings. */
+#if defined(__linux__) && !defined(NERO_NETWORK_UNAVAILABLE) && !defined(NERO_SAFE_TEST)
 #define WIFI_MONITOR_STATE_MAGIC "nero-wifi-monitor-state=1"
 
 static int wifi_monitor_state_path(char *path, size_t path_len)
