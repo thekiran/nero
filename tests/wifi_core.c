@@ -8,7 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
 #endif
 
@@ -364,7 +367,6 @@ static int write_bytes(FILE *file, const void *data, size_t length)
     return fwrite(data, 1, length, file) == length ? 0 : -1;
 }
 
-#ifndef _WIN32
 static void put_le64(uint8_t *out, uint64_t value)
 {
     put_le32(out, (uint32_t)(value & 0xffffffffu));
@@ -510,7 +512,7 @@ static void test_pcap_files(void)
 {
     uint8_t file_data[2048];
     char path[128];
-    snprintf(path, sizeof(path), "/tmp/nero-wifi-test-%ld.pcap", (long)getpid());
+    snprintf(path, sizeof(path), "nero-wifi-test-%ld.pcap", (long)getpid());
 
     size_t length = build_classic_pcap(file_data, sizeof(file_data));
     CHECK(length > 0);
@@ -535,7 +537,7 @@ static void test_pcap_files(void)
         remove(path);
     }
 
-    snprintf(path, sizeof(path), "/tmp/nero-wifi-test-%ld.pcapng", (long)getpid());
+    snprintf(path, sizeof(path), "nero-wifi-test-%ld.pcapng", (long)getpid());
     length = build_pcapng(file_data, sizeof(file_data));
     CHECK(length > 0);
     file = fopen(path, "wb");
@@ -557,7 +559,7 @@ static void test_pcap_files(void)
         remove(path);
     }
 
-    snprintf(path, sizeof(path), "/tmp/nero-wifi-test-%ld-be.pcapng", (long)getpid());
+    snprintf(path, sizeof(path), "nero-wifi-test-%ld-be.pcapng", (long)getpid());
     length = build_pcapng_big_endian(file_data, sizeof(file_data));
     CHECK(length > 0);
     file = fopen(path, "wb");
@@ -580,15 +582,12 @@ static void test_pcap_files(void)
         remove(path);
     }
 }
-#endif
 
 int main(void)
 {
     test_rsn_security();
     test_tracker();
-#ifndef _WIN32
     test_pcap_files();
-#endif
     if (failures != 0) {
         fprintf(stderr, "%d Wi-Fi test failure(s)\n", failures);
         return 1;
