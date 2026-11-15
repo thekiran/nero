@@ -34,6 +34,17 @@ int cli_history_clear(void);
 /* render.c: presentation only. */
 void cli_render_prompt(void);
 void cli_render_line(const cli_line *line);
+/* Like cli_render_line, but also draws `ghost` (inline gray suggestion) after
+ * the cursor, clipped to the viewport. `ghost` NULL/empty renders no ghost.
+ * Ghost is drawn only when the terminal supports color (so it is visually
+ * distinct from typed text); otherwise it is silently ignored. */
+void cli_render_line_ex(const cli_line *line, const char *ghost);
+/* Draw `count` lines beneath the current input line (completion menu or live
+ * help), then return the cursor to the input position. No-op unless the output
+ * is an ANSI-capable TTY. */
+void cli_render_below(const char *const *lines, size_t count);
+/* Erase any below-line region previously drawn by cli_render_below. */
+void cli_render_below_clear(void);
 void cli_show_help(void);
 void cli_show_help_details(void);
 void cli_show_syn_status(void);

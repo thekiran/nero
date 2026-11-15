@@ -79,6 +79,11 @@ int row_location_function(void)
 
 void cli_render_line(const cli_line *line)
 {
+    cli_render_line_ex(line, NULL);
+}
+
+void cli_render_line_ex(const cli_line *line, const char *ghost)
+{
     if (!isatty(STDOUT_FILENO))
         return;
     struct winsize size;
@@ -104,7 +109,22 @@ void cli_render_line(const cli_line *line)
         /* Commands are ASCII; non-ASCII bytes get one safe display cell each. */
         fputc(ch >= 32 && ch < 127 ? ch : '?', stdout);
     }
-    size_t back = end - line->cursor;
+    /* Inline ghost suggestion: dim, clipped to the remaining viewport width,
+     * and only when the cursor sits at the end of what is shown. Requires color
+     * so it is visually distinct from real input. */
+    size_t ghost_drawn = 0;
+    if (ghost != NULL && ghost[0] != '\0' && terminal_ansi_enabled() &&
+        terminal_color_enabled() && line->cursor == line->length && end == line->length) {
+        size_t room = visible - (end - start);
+        fputs("\033[90m", stdout); /* bright-black / gray */
+        for (size_t i = 0; ghost[i] != '\0' && ghost_drawn < room; ++i) {
+            unsigned char ch = (unsigned char)ghost[i];
+            fputc(ch >= 32 && ch < 127 ? ch : '?', stdout);
+            ++ghost_drawn;
+        }
+        fputs("\033[0m", stdout);
+    }
+    size_t back = (end - line->cursor) + ghost_drawn;
     if (!terminal_ansi_enabled()) {
         size_t spaces = visible - (end - start);
         for (size_t i = 0; i < spaces; ++i)
@@ -115,6 +135,36 @@ void cli_render_line(const cli_line *line)
     } else if (back > 0) {
         printf("\033[%zuD", back);
     }
+    fflush(stdout);
+    pthread_mutex_unlock(&ekran_mutex);
+}
+
+/* Draw a transient region (completion menu / live help) below the input line
+ * using DEC save/restore cursor, so the input line and cursor are untouched. */
+void cli_render_below(const char *const *lines, size_t count)
+{
+    if (!isatty(STDOUT_FILENO) || !terminal_ansi_enabled())
+        return;
+    pthread_mutex_lock(&ekran_mutex);
+    fputs("\0337", stdout); /* save cursor */
+    for (size_t i = 0; i < count; ++i) {
+        fputs("\r\n\033[K", stdout);
+        if (lines[i] != NULL)
+            fputs(lines[i], stdout);
+    }
+    fputs("\033[J", stdout); /* clear any taller previous region below */
+    fputs("\0338", stdout);  /* restore cursor to the input line */
+    fflush(stdout);
+    pthread_mutex_unlock(&ekran_mutex);
+}
+
+void cli_render_below_clear(void)
+{
+    if (!isatty(STDOUT_FILENO) || !terminal_ansi_enabled())
+        return;
+    pthread_mutex_lock(&ekran_mutex);
+    /* Cursor is at the input position; clear from here to end of screen. */
+    fputs("\033[J", stdout);
     fflush(stdout);
     pthread_mutex_unlock(&ekran_mutex);
 }

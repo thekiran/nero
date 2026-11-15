@@ -109,7 +109,7 @@ Network diagnostics commands examine session configuration and perform controlle
 * **Syntax:** `<target> -Sc`
 * **Description:** Runs TCP connect diagnostics across ports 1–65535 on the specified IPv4 target. Discovery does not gate the scan. Results distinguish open, closed, filtered, error/unknown and unscanned ports.
 * **Execution behavior:**
-  * **Live production builds (macOS, Linux, Windows):** Uses nonblocking `connect()` with per-socket deadlines. First-pass/retry timeouts are 500/1000 ms for Hizli, 1000/2000 ms for Orta (default), and 1500/3000 ms for Yavas. Manual first-pass timeouts range from 200–5000 ms; retries use twice that timeout, capped at 5000 ms. Every filtered or error/unknown result receives one retry; later profile-defined rounds retry only remaining error/unknown results. Silent targets can take many minutes.
+  * **Live production builds (macOS, Linux, Windows):** Uses nonblocking `connect()` with per-socket deadlines. First-pass/retry timeouts are 500/1000 ms for Fast, 1000/2000 ms for Balanced (default), and 1500/3000 ms for Slow. Manual first-pass timeouts range from 200–5000 ms; retries use twice that timeout, capped at 5000 ms. Every filtered or error/unknown result receives one retry; later profile-defined rounds retry only remaining error/unknown results. Silent targets can take many minutes.
   * **Interactive controls:** Esc cancels. Once an open port appears, Enter stops scanning and opens port selection using the results found so far. Early selection reports partial coverage and leaves unfinished ports unscanned.
   * **Offline test builds (`NERO_SAFE_TEST` / `NERO_NETWORK_UNAVAILABLE`):** Simulates port state in memory without opening remote network sockets.
 * **Platforms:** macOS, Linux, Windows (native MinGW).
@@ -222,6 +222,14 @@ prove delivery.
   the assist and keeps the survey strictly passive. On Linux and Windows no OS
   scan backend exists, so the assist is compiled out and the survey stays
   passive.
+* **OS neighbor assist / `--no-neighbors`:** When monitor mode yields zero
+  802.11 frames and no station rows exist, the STATIONS table is filled from the
+  operating system's read-only IPv4 neighbor cache (ARP). These rows are local
+  link devices that recently answered on the subnet, not proven Wi-Fi stations;
+  they are labelled `source: OS neighbor cache` and `ARP`, and entries matching
+  an observed AP BSSID are skipped. Reading the cache sends no probes and changes
+  no interface setting. `--no-neighbors` disables the fallback; it is separate
+  from `--no-scan`, which disables the access-point scan fallback.
 * **`--hop [--dwell MS] [--bands 2.4,5,6]`:** Opt-in channel hopping. The default
   survey is strictly read-only and stays on the adapter's current channel; this
   separate mode tunes the radio across a channel plan so the survey can see
@@ -304,9 +312,61 @@ NERO provides a responsive line editor that handles key sequences across platfor
 | `Up Arrow` (`\033[A`) | Navigate to previous command in history |
 | `Down Arrow` (`\033[B`) | Navigate to next command in history |
 | `Left Arrow` (`\033[D`) | Move cursor one position left |
-| `Right Arrow` (`\033[C`) | Move cursor one position right |
+| `Right Arrow` (`\033[C`) | Move cursor right; at end of buffer, accept the inline ghost suggestion |
+| `Tab` (`\t`) | Complete the current command; a unique result is inserted, an ambiguous one opens the completion menu |
+| `Shift+Tab` (`\033[Z`) | Move backward through the completion menu (where the terminal sends it) |
+| `Escape` (`\033`) | Close the completion menu without changing the line |
 | `Backspace` (`\x7f`, `\x08`) | Delete character preceding cursor |
 | `Delete` (`\033[3~`) | Delete character at cursor |
+
+Inside the completion menu, `Tab`/`Down` move to the next item, `Shift+Tab`/`Up`
+move to the previous, `Right`/`Enter` accept the highlighted item into the line
+(without running it), and `Escape` closes the menu. `Ctrl+C` and `Ctrl+D` keep
+their normal shell semantics while the menu is open.
+
+### NERO IntelliSense (inline suggestions, completion and help)
+
+The line editor is backed by a pure, deterministic suggestion engine
+(`src/cli/suggestion_engine.c`) driven by a single command/argument registry
+(`src/cli/suggestion_catalog.h`), with contextual help in
+`src/cli/inline_help.c`. Suggestion, completion, validation and rendering never
+execute a command, open a socket, or perform any network or background activity.
+
+* **Inline ghost text.** As you type, the most likely completion is shown in
+  gray after the cursor, drawn from registered executable commands, their valid
+  argument schemas, and matching entries from your session history. Help-usage
+  placeholders (`<PCAP>`, `[INTERFACE]`, `<IP>`) are never shown as executable
+  values. Press `Right` at the end of the line to accept the ghost.
+* **Tab completion.** A unique match is inserted immediately; a common prefix is
+  extended as far as it is unambiguous; and a genuinely ambiguous result opens a
+  compact, selectable menu. Tab never inserts a literal space as an ambiguous
+  fallback.
+* **Contextual help.** In full mode the command you are typing is described
+  below the prompt with its syntax, one-line description and live status.
+* **Typo hints.** When the first word matches no command but is within a small
+  bounded edit distance of exactly one keyword, that keyword is offered as a
+  suggestion only — it is never applied automatically.
+* **Validation states.** Input is classified as *incomplete*, *ready* (valid),
+  *unknown* (invalid) or *unsupported on this build* (a valid command whose
+  engine is compiled out, e.g. `scan`/`-Syn` in network-unavailable builds),
+  with no side effects.
+
+**Configuration and fallbacks.** The assistant is controlled by the
+`NERO_INTELLISENSE` environment variable:
+
+| Value | Effect |
+| --- | --- |
+| unset / any other value | Assistant on, compact presentation (ghost text + Tab menu) |
+| `full` | Also show the live contextual help line beneath the prompt |
+| `off` or `0` | Disable ghost text, menu and help; Tab still completes a unique match |
+
+Rendering degrades safely: inline ghost text requires a color-capable TTY, so it
+is suppressed under `NO_COLOR`, `TERM=dumb`, and when output is redirected or
+non-interactive. In all of those cases Tab completion of the buffer still works.
+Ghost text is clipped to the viewport width and respects horizontal scrolling,
+so narrow terminals are never corrupted. Session history used for suggestions is
+read only from the in-process history buffer and is never written anywhere by the
+suggestion engine.
 
 ### Tokenization and Limits
 * **Maximum command line length:** 255 bytes (`CLI_LINE_CAPACITY` is 256 including the terminating NUL). This is a byte limit, not a Unicode character count. Longer input produces a `Command too long` warning and is rejected safely without buffer overflow.
