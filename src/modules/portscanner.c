@@ -57,7 +57,7 @@ static void scan_test_signal(const char *tag)
 #endif
 
 #include "scan_cli_internal.h"
-static scan_profile manual_profile = {"Manuel", 6, 200, 1000, 4, 100, 2000, 12000, 2};
+static scan_profile manual_profile = {"Manual", 6, 200, 1000, 4, 100, 2000, 12000, 2};
 static struct termios orig_termios;
 volatile sig_atomic_t portscanner_interrupt_requested;
 static atomic_uint scan_sequence;
@@ -166,7 +166,7 @@ void report_scan_summary(nero_scan_session *s)
         printf("  Additional ungrouped error outcomes: %d\n", overflow);
 }
 
-/* --- Terminal yardımcıları --- */
+/* --- Terminal helpers --- */
 static int raw_mode_active = 0;
 #define SCAN_FRAME_NANOSECONDS 70000000L
 
@@ -177,24 +177,24 @@ typedef struct {
     int animate;
 } scan_animation_state;
 
-/* Animasyon yalnızca gerçek bir terminalde, NERO_REDUCE_MOTION tanımsızken ve
- * TERM "dumb" değilken etkindir. */
+/* Animation is enabled only on a real terminal, when NERO_REDUCE_MOTION is
+ * unset and TERM is not "dumb". */
 static int scan_motion_enabled(void)
 {
     const char *reduced = getenv("NERO_REDUCE_MOTION");
     const char *term = getenv("TERM");
 #ifdef _WIN32
-    /* Windows konsollarında TERM kuralı yoktur; VT çıkışı nero_windows_init()
-     * ile açılır, canlı konsol varsayılan olarak ANSI yeteneklidir. */
+    /* Windows consoles have no TERM convention; VT output is enabled by
+     * nero_windows_init(), so a live console is ANSI-capable by default. */
     return isatty(STDOUT_FILENO) && reduced == NULL && (term == NULL || strcmp(term, "dumb") != 0);
 #else
     return isatty(STDOUT_FILENO) && reduced == NULL && (term == NULL || strcmp(term, "dumb") != 0);
 #endif
 }
 
-/* Tarama sırasında ekranı canlı tutan iş parçacığı: keşfedilen portları çizer,
- * ilerlemeyi günceller, tekerlek/ok ile kaydırmayı ve Esc ile iptali işler.
- * Hem hızlı hem derin aşama boyunca çalışır, sonunda bir kez durdurulur. */
+/* Worker that keeps the screen live during a scan: it draws discovered ports,
+ * updates progress, and handles wheel/arrow scrolling and Esc cancellation.
+ * It runs through both the fast and deep phases and is stopped once at the end. */
 static void *scan_animation_worker(void *arg)
 {
     scan_animation_state *state = arg;
@@ -275,7 +275,7 @@ static void *scan_animation_worker(void *arg)
     return NULL;
 }
 
-/* Terminali, kaydedilen ayarlara (satır modu) geri döndürür. Idempotent. */
+/* Restores the terminal to the saved settings (line mode). Idempotent. */
 void disable_raw_mode(void)
 {
     if (!raw_mode_active)
@@ -284,8 +284,8 @@ void disable_raw_mode(void)
     raw_mode_active = 0;
 }
 
-/* Anlık tuş/fare girişi için raw moda geçer; orijinal termios ayarlarını saklar
- * ve normal çıkışta eski haline döndürmek için bir kez atexit kaydı yapar. */
+/* Switches to raw mode for immediate key/mouse input; saves the original
+ * termios settings and registers one atexit hook to restore them on exit. */
 int enable_raw_mode(void)
 {
     static int atexit_installed = 0;
@@ -305,15 +305,15 @@ int enable_raw_mode(void)
     return 0;
 }
 
-/* SGR (1006) + normal (1000) fare raporlamasını açar/kapatır; liste
- * kaydırmada tekerleği okuyabilmek için. */
+/* Enables/disables SGR (1006) + normal (1000) mouse reporting so the wheel
+ * can be read while scrolling the list. */
 static void set_mouse_reporting(int enable)
 {
     fputs(enable ? "\033[?1000h\033[?1006h" : "\033[?1006l\033[?1000l", stdout);
     fflush(stdout);
 }
 
-/* Port listesini artan sırada göstermek için qsort karşılaştırıcısı. */
+/* qsort comparator that shows the port list in ascending order. */
 static int compare_ports_asc(const void *a, const void *b)
 {
     return (*(const int *)a - *(const int *)b);
@@ -322,7 +322,7 @@ static int compare_ports_asc(const void *a, const void *b)
 /* Reserve descriptors for the terminal/runtime. Never raise the user's limit.
  * This budget applies to all scanner workers together, not to each worker. */
 
-/* --- Port seçim menüsü --- */
+/* --- Port selection menu --- */
 static int select_port_menu_in_ui(int *open_ports, int count, nero_operation_ui *ui)
 {
     if (count == 0)
@@ -381,7 +381,7 @@ static int select_port_menu_in_ui(int *open_ports, int count, nero_operation_ui 
     return open_ports[current_selection];
 }
 
-/* Kendi operasyon yüzeyini açıp port seçim menüsünü gösteren genel sarmalayıcı. */
+/* Generic wrapper that opens its own operation surface and shows the port selection menu. */
 int select_port_menu(int *open_ports, int count)
 {
     nero_operation_ui ui = {0};
@@ -391,14 +391,14 @@ int select_port_menu(int *open_ports, int count)
     return result;
 }
 
-/* --- Banner / sürüm yakalama ---
- * Açık bir porta bağlanıp gelen ilk satırı (banner) okur. SSH/FTP/SMTP/POP3/
- * IMAP gibi servisler bağlantıda kendiliğinden banner yollar; HTTP portlarına
- * küçük bir istek gönderilir. Yazdırılamayan baytlar '.' ile değiştirilir ve
- * yalnızca ilk satır, kısaltılarak saklanır. */
+/* --- Banner / version capture ---
+ * Connects to an open port and reads the first incoming line (banner). Services
+ * such as SSH/FTP/SMTP/POP3/IMAP send a banner on connect; HTTP ports receive a
+ * small request. Unprintable bytes become '.' and only the first line is kept,
+ * truncated to fit. */
 #define BANNER_MAX 72
 
-/* Banner için küçük bir HTTP isteği gönderilecek yaygın düz-metin HTTP portları. */
+/* Common plain-text HTTP ports that receive a small banner request. */
 static int is_http_port(int port)
 {
     return port == 80 || port == 8080 || port == 8000 || port == 8888 || port == 9000 ||
@@ -498,8 +498,8 @@ typedef struct {
     char (*store)[BANNER_MAX];
 } banner_args;
 
-/* Banner yakalamayı paralelleştiren iş parçacığı: kendine düşen port aralığını
- * işler ve yalnızca kendi store[] satırlarına yazdığından kilit gerekmez. */
+/* Worker that parallelizes banner capture: it processes its assigned port range
+ * and writes only its own store[] rows, so no lock is needed. */
 static void *banner_worker(void *p)
 {
     banner_args *b = p;
@@ -513,8 +513,8 @@ static void *banner_worker(void *p)
     return NULL;
 }
 
-/* Açık portlar için banner'ları paralel yakalar (çok iş parçacığı, her biri
- * kendi dizin aralığına yazar; kilit gerekmez). En çok `cap` port denenir. */
+/* Captures banners for open ports in parallel (multiple workers, each writes
+ * its own index range; no lock is needed). At most `cap` ports are probed. */
 #define BANNER_THREADS 12
 #define BANNER_PORT_CAP 128
 void grab_banners(nero_scan_session *s, const char *ip, const int *ports, int count,
@@ -620,26 +620,26 @@ host_state host_probe_alive(nero_scan_session *s, const char *ip)
 #endif
 }
 
-/* --- Manuel hız ayarı ekranı ---
- * Üç satır (iş parçacığı, parti başına soket, zaman aşımı) ←/→ ile ayarlanır.
- * Enter taramayı başlatır, Esc menüye döner. manual_profile'ı günceller.
- * 1 döndürürse kullanıcı onayladı, 0 döndürürse iptal etti. */
+/* --- Manual speed settings screen ---
+ * Three rows (threads, sockets per batch, timeout) are adjusted with left/right.
+ * Enter starts the scan, Esc returns to the menu. It updates manual_profile.
+ * Returns 1 when the user confirmed and 0 when they cancelled. */
 static int adjust_manual_profile(nero_operation_ui *ui)
 {
     int threads = manual_profile.fast_threads;
     int batch = manual_profile.fast_batch;
     int timeout = manual_profile.fast_timeout_ms;
     int row = 0;
-    ui->controls = "Up/Down: Satir   Left/Right: Degistir   Enter: Basla   Esc: Geri";
+    ui->controls = "Up/Down: Row   Left/Right: Change   Enter: Start   Esc: Back";
 
     for (;;) {
         char v0[24], v1[24], v2[24];
         snprintf(v0, sizeof v0, "%d", threads);
         snprintf(v1, sizeof v1, "%d", batch);
         snprintf(v2, sizeof v2, "%d ms", timeout);
-        const char *labels[3] = {"Is parcacigi", "Parti basina soket", "Zaman asimi"};
+        const char *labels[3] = {"Threads", "Sockets per batch", "Timeout"};
         const char *values[3] = {v0, v1, v2};
-        nero_operation_menu(ui, "Manuel hiz ayari", labels, values, 3, row);
+        nero_operation_menu(ui, "Manual speed settings", labels, values, 3, row);
         if (portscanner_interrupt_requested)
             return 0;
 
@@ -681,18 +681,18 @@ static int adjust_manual_profile(nero_operation_ui *ui)
     manual_profile.fast_threads = threads;
     manual_profile.fast_batch = batch;
     manual_profile.fast_timeout_ms = timeout;
-    /* Derin aşama: daha nazik ve daha uzun bekleyen türev değerler. */
+    /* Deep phase: gentler derived values with a longer wait. */
     manual_profile.deep_threads = threads > 1 ? threads / 2 : 1;
     manual_profile.deep_batch = batch > 32 ? batch / 2 : 16;
     manual_profile.deep_timeout_ms = timeout * 2 > 5000 ? 5000 : timeout * 2;
-    manual_profile.deep_max_candidates = 65535; /* manuelde her zaman derin tara */
+    manual_profile.deep_max_candidates = 65535; /* always scan deep in manual mode */
     manual_profile.deep_rounds = 2;
     return 1;
 }
 
-/* --- Tarama hızı seçim menüsü ---
- * İnteraktif değilse menü göstermeden önerilen (Orta) profili kullanır.
- * Kullanıcı iptal ederse NULL döndürür. */
+/* --- Scan speed selection menu ---
+ * When not interactive, uses the recommended (Balanced) profile without showing
+ * the menu. Returns NULL when the user cancels. */
 static const scan_profile *select_scan_profile(nero_operation_ui *ui)
 {
     if (!ui->interactive)
@@ -702,26 +702,27 @@ static const scan_profile *select_scan_profile(nero_operation_ui *ui)
     if (raw)
         set_mouse_reporting(1);
 
-    const char *labels[PROFILE_COUNT] = {"Hizli", "Orta  (onerilen)", "Yavas", "Manuel ayar"};
+    const char *labels[PROFILE_COUNT] = {"Fast", "Balanced (recommended)", "Slow",
+                                         "Manual settings"};
     char vbuf[PROFILE_COUNT][40];
     const char *values[PROFILE_COUNT];
     for (int i = 0; i < 3; ++i) {
-        snprintf(vbuf[i], sizeof vbuf[i], "%dx%d soket, %d ms", SCAN_PROFILES[i].fast_threads,
+        snprintf(vbuf[i], sizeof vbuf[i], "%dx%d sockets, %d ms", SCAN_PROFILES[i].fast_threads,
                  SCAN_PROFILES[i].fast_batch, SCAN_PROFILES[i].fast_timeout_ms);
         values[i] = vbuf[i];
     }
 
     int sel = PROFILE_MEDIUM;
     const scan_profile *chosen = NULL;
-    ui->controls = "Up/Down: Sec   Enter: Onayla   Esc: Iptal";
+    ui->controls = "Up/Down: Select   Enter: Confirm   Esc: Cancel";
 
     for (;;) {
-        snprintf(vbuf[PROFILE_MANUAL], sizeof vbuf[PROFILE_MANUAL], "%dx%d soket, %d ms",
+        snprintf(vbuf[PROFILE_MANUAL], sizeof vbuf[PROFILE_MANUAL], "%dx%d sockets, %d ms",
                  manual_profile.fast_threads, manual_profile.fast_batch,
                  manual_profile.fast_timeout_ms);
         values[PROFILE_MANUAL] = vbuf[PROFILE_MANUAL];
 
-        nero_operation_menu(ui, "Tarama hizi secin", labels, values, PROFILE_COUNT, sel);
+        nero_operation_menu(ui, "Select scan speed", labels, values, PROFILE_COUNT, sel);
         if (portscanner_interrupt_requested) {
             chosen = NULL;
             break;
@@ -748,7 +749,7 @@ static const scan_profile *select_scan_profile(nero_operation_ui *ui)
                     chosen = NULL;
                     break;
                 }
-                ui->controls = "Up/Down: Sec   Enter: Onayla   Esc: Iptal";
+                ui->controls = "Up/Down: Select   Enter: Confirm   Esc: Cancel";
             } else {
                 chosen = &SCAN_PROFILES[sel];
                 break;
@@ -774,7 +775,7 @@ static void scan_cli_open(void *context)
     (void)context;
     SCAN_TEST_SIGNAL("OPEN");
 }
-/* --- Ana kontrolcü --- */
+/* --- Main controller --- */
 int portscanner_with_io(const char *target_ip, const scan_io *io)
 {
     struct in_addr address;
@@ -801,7 +802,7 @@ int portscanner_with_io(const char *target_ip, const scan_io *io)
     nero_operation_ui ui = {0};
     char detail[96];
     snprintf(detail, sizeof(detail), "%s", target_ip);
-    nero_operation_begin(&ui, "Port scan", detail, "Enter: port sec  ·  Esc: Geri");
+    nero_operation_begin(&ui, "Port scan", detail, "Enter: select port  ·  Esc: Back");
     active_profile = select_scan_profile(&ui);
     if (active_profile == NULL) {
         nero_scan_destroy(s);
@@ -908,8 +909,8 @@ int portscanner_with_io(const char *target_ip, const scan_io *io)
                           selected_early ? "Scan stopped early (partial)" : "Scan complete",
                           result_detail);
 
-    /* Açık portlar için servis banner'larını yakala (varsa menüde gösterilir).
-     * Port değerine göre arandığından menüdeki sıralamadan bağımsızdır. */
+    /* Capture service banners for open ports (shown in the menu when present).
+     * Lookup is by port value, so it is independent of the menu ordering. */
     int *banner_port_list = NULL;
     char (*banner_store)[BANNER_MAX] = NULL;
     const char **banner_texts = NULL;
@@ -923,7 +924,7 @@ int portscanner_with_io(const char *target_ip, const scan_io *io)
                 banner_port_list[i] = open_ports[i];
                 banner_store[i][0] = '\0';
             }
-            nero_operation_status("36", "Servis bilgileri toplaniyor", result_detail);
+            nero_operation_status("36", "Collecting service banners", result_detail);
             grab_banners(s, target_ip, banner_port_list, banner_n, banner_store);
             for (int i = 0; i < banner_n; ++i)
                 banner_texts[i] = banner_store[i];

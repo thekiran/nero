@@ -14,11 +14,11 @@
 const scan_profile SCAN_PROFILES[] = {
     /* Fast, balanced and slow timeout/batch preferences. The per-session socket
      * budget is enforced independently; all profiles retry every uncertainty. */
-    {"Hizli", 8, 256, 500, 4, 128, 1000, 8000, 1},
-    /* Orta (önerilen): dengeli. */
-    {"Orta", 6, 200, 1000, 4, 100, 2000, 12000, 2},
-    /* Yavaş: düşük eşzamanlılık, uzun zaman aşımı. En kararlı/eksiksiz. */
-    {"Yavas", 4, 100, 1500, 2, 64, 3000, 65535, 3},
+    {"Fast", 8, 256, 500, 4, 128, 1000, 8000, 1},
+    /* Balanced (recommended): moderate. */
+    {"Balanced", 6, 200, 1000, 4, 100, 2000, 12000, 2},
+    /* Slow: low concurrency, long timeout. Most stable and complete. */
+    {"Slow", 4, 100, 1500, 2, 64, 3000, 65535, 3},
 };
 
 int scan_cancelled(nero_scan_session *s)
