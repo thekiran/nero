@@ -41,8 +41,8 @@
     X("WIRELESS", "wifi clients", "Show observed client devices")                                  \
     X("WIRELESS", "wifi monitor", "Passive monitor dashboard")                                     \
     X("WIRELESS", "wifi analyze <PCAP>", "Analyze a capture file offline")                         \
-    X("LABORATORY", "syn preflight", "Show resource requirements")                                 \
-    X("LABORATORY", "syn <IP>", "Run authorized laboratory operation")
+    X("LABORATORY", "preflight", "Show -Syn resource requirements (read-only)")                    \
+    X("LABORATORY", "<IP> -Syn", "Run SYN/UDP packet flood (authorized lab target only)")
 
 #define CLI_HELP_ENTRIES(X)                                                                        \
     X("<network IP> -Syn", ": Run SYN/UDP packet flood (authorized targets)")                      \

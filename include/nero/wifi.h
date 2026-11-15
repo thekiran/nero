@@ -109,6 +109,8 @@ typedef struct {
     int rssi_history[NERO_WIFI_RSSI_HISTORY];
     uint8_t rssi_history_count;
     uint8_t rssi_history_next;
+    int neighbor_cache; /* row came from the OS ARP cache, not 802.11 frames */
+    char neighbor_ip[16]; /* IPv4 address reported by the neighbor cache */
 } nero_wifi_client;
 
 /* Decoded 802.11 frame header. body points into the caller's receive buffer

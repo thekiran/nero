@@ -466,6 +466,19 @@ int nero_wifi_capture_run(nero_wifi_capture *capture, nero_wifi_capture_callback
     return stop != NULL && atomic_load_explicit(stop, memory_order_relaxed) ? 1 : 0;
 }
 
+void nero_wifi_capture_mode(const nero_wifi_capture *capture, int *monitor_set,
+                            int *link_fallback, int *linktype)
+{
+    if (capture == NULL)
+        return;
+    if (monitor_set != NULL)
+        *monitor_set = capture->monitor_set;
+    if (link_fallback != NULL)
+        *link_fallback = capture->link_fallback;
+    if (linktype != NULL)
+        *linktype = capture->linktype;
+}
+
 void nero_wifi_capture_close(nero_wifi_capture *capture)
 {
     if (capture == NULL)

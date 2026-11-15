@@ -160,7 +160,12 @@ int nero_wifi_session_start(nero_wifi_session *session, const char *interface_na
     memset(&session->base, 0, sizeof(session->base));
     session->base.source_is_file = 0;
     session->base.monitor_requested = request_monitor_mode;
-    session->base.monitor_set = 0;
+    /* The capture already decided its real mode at open time (monitor accepted,
+     * or a link-layer fallback). Reflect it now so the live survey header shows
+     * the actual mode instead of the one that was merely requested; the worker
+     * refreshes these when it exits. */
+    nero_wifi_capture_mode(capture, &session->base.monitor_set, &session->base.link_fallback,
+                           &session->base.linktype);
     snprintf(session->base.backend, sizeof(session->base.backend), "%s", "libpcap/Npcap");
     snprintf(session->base.source, sizeof(session->base.source), "live: %s", interface_name);
     session->base.started_us = nero_wifi_now_us();

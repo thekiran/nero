@@ -50,6 +50,11 @@ int nero_wifi_capture_probe(const char *interface_name, int *backend_available,
 
 nero_wifi_capture *nero_wifi_capture_open(const char *interface_name, int request_monitor,
                                           char *error, size_t error_len);
+/* Reports the capture mode decided at open time (before any packets flow), so a
+ * live survey can label the real mode instead of the requested one. Any output
+ * pointer may be NULL. */
+void nero_wifi_capture_mode(const nero_wifi_capture *capture, int *monitor_set,
+                            int *link_fallback, int *linktype);
 /* Runs until the callback aborts, *stop becomes non-zero, or an error occurs.
  * Returns 0 for a clean stop, 1 when *stop was observed, -1 on error. */
 int nero_wifi_capture_run(nero_wifi_capture *capture, nero_wifi_capture_callback callback,
