@@ -244,6 +244,18 @@ if(BUILD_TESTING AND NOT MSVC)
     endif()
     add_test(NAME scan-session COMMAND scan-session)
     set_tests_properties(scan-session PROPERTIES TIMEOUT 60)
+    add_executable(wifi-capture tests/wifi_capture.c)
+    nero_target(wifi-capture)
+    target_link_libraries(wifi-capture PRIVATE ${CMAKE_DL_LIBS})
+    if(WIN32)
+        target_link_libraries(wifi-capture PRIVATE ws2_32 advapi32)
+        target_link_options(wifi-capture PRIVATE -static)
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(wifi-capture PRIVATE _POSIX_C_SOURCE=200809L)
+    endif()
+    add_test(NAME wifi-capture COMMAND wifi-capture)
+    set_tests_properties(wifi-capture PROPERTIES TIMEOUT 15)
     add_executable(wifi-core tests/wifi_core.c
         src/modules/wifi/wifi_ieee80211.c
         src/modules/wifi/wifi_tracker.c

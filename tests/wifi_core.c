@@ -241,6 +241,17 @@ static size_t build_deauth(uint8_t *out)
     return 26;
 }
 
+static size_t build_auth(uint8_t *out)
+{
+    memset(out, 0, 32);
+    put_le16(out, 0x00b0);                           /* management, authentication */
+    memcpy(out + 4, BSSID, NERO_WIFI_MAC_LEN);       /* addr1 DA  = AP           */
+    memcpy(out + 10, CLIENT_MAC, NERO_WIFI_MAC_LEN); /* addr2 SA  = client (TX)  */
+    memcpy(out + 16, BSSID, NERO_WIFI_MAC_LEN);      /* addr3 BSSID              */
+    put_le16(out + 22, 0x0010);
+    return 24;
+}
+
 static size_t wrap_radiotap(uint8_t *out, int frequency, int rssi, const uint8_t *frame,
                             size_t frame_len)
 {
@@ -307,6 +318,10 @@ static void test_tracker(void)
     CHECK(client.frames == 1);
     CHECK(client.has_channel == 1 && client.channel == 6);
     CHECK(client.band == NERO_WIFI_BAND_2GHZ);
+    /* A probe request carries a radiotap header, so its signal must be recorded
+     * (regression: probe-only stations previously showed an empty SIGNAL). */
+    CHECK(client.has_rssi == 1 && client.rssi == -61);
+    CHECK(client.rssi_history_count == 1);
 
     frame_len = build_assoc_request(frame);
     packet_len = wrap_radiotap(packet, 2437, -48, frame, frame_len);
@@ -335,7 +350,9 @@ static void test_tracker(void)
     CHECK(nero_wifi_tracker_find_client(tracker, CLIENT_MAC, &client) == 0);
     CHECK(client.frames == 4);
     CHECK(client.data_frames == 2);
-    CHECK(client.rssi_history_count == 2);
+    /* probe(-61) + assoc(-48) + the ToDS data frame(-50); the FromDS data frame
+     * updates the AP, not the client. */
+    CHECK(client.rssi_history_count == 3);
     CHECK(client.rssi == -50);
 
     frame_len = build_deauth(frame);
@@ -537,6 +554,30 @@ static void test_pcap_files(void)
         remove(path);
     }
 
+    /* A capture killed mid-write leaves complete records followed by a partial
+     * one. Analysis must keep every complete frame, not discard the file. */
+    snprintf(path, sizeof(path), "nero-wifi-test-%ld-trunc.pcap", (long)getpid());
+    length = build_classic_pcap(file_data, sizeof(file_data));
+    CHECK(length > 0);
+    file = fopen(path, "wb");
+    CHECK(file != NULL);
+    if (file != NULL) {
+        uint8_t partial_header[10] = {0}; /* fewer than the 16-byte record header */
+        CHECK(write_bytes(file, file_data, length) == 0);
+        CHECK(write_bytes(file, partial_header, sizeof(partial_header)) == 0);
+        CHECK(fclose(file) == 0);
+        nero_wifi_tracker *tracker = nero_wifi_tracker_create();
+        nero_wifi_stats stats;
+        char error[256] = {0};
+        CHECK(nero_wifi_analyze_pcap(tracker, path, &stats, error, sizeof(error)) == 0);
+        CHECK(stats.packets == 1);
+        CHECK(stats.frames == 1);
+        nero_wifi_ap ap;
+        CHECK(nero_wifi_tracker_find_ap(tracker, BSSID, &ap) == 0);
+        nero_wifi_tracker_destroy(tracker);
+        remove(path);
+    }
+
     snprintf(path, sizeof(path), "nero-wifi-test-%ld.pcapng", (long)getpid());
     length = build_pcapng(file_data, sizeof(file_data));
     CHECK(length > 0);
@@ -583,10 +624,67 @@ static void test_pcap_files(void)
     }
 }
 
+/* Regression coverage for honest-reporting fixes in the frame handlers. */
+static void test_tracker_honesty(void)
+{
+    uint8_t frame[64];
+    uint8_t packet[128];
+    size_t frame_len, packet_len;
+    nero_wifi_client client;
+
+    /* (1) Authentication precedes association: a station seen only authenticating
+     * must stay OBSERVED (never ASSOCIATED), yet carry LIKELY confidence and the
+     * observed RSSI and channel. */
+    nero_wifi_tracker *tracker = nero_wifi_tracker_create();
+    CHECK(tracker != NULL);
+    frame_len = build_auth(frame);
+    packet_len = wrap_radiotap(packet, 2412, -55, frame, frame_len); /* channel 1 */
+    CHECK(nero_wifi_tracker_ingest_l2(tracker, packet, packet_len, NERO_WIFI_LINKTYPE_RADIOTAP,
+                                      1000000, NULL, 0) == 1);
+    CHECK(nero_wifi_tracker_find_client(tracker, CLIENT_MAC, &client) == 0);
+    CHECK(client.confidence == NERO_WIFI_CONFIDENCE_LIKELY);
+    CHECK(client.state == NERO_WIFI_STATE_OBSERVED);
+    CHECK(client.has_rssi == 1 && client.rssi == -55);
+    CHECK(client.has_channel == 1 && client.channel == 1);
+    nero_wifi_tracker_destroy(tracker);
+
+    /* (2) A deauth transmitted BY the client records the client's radiotap RSSI
+     * (previously dropped because handle_disconnect ignored the radio header). */
+    tracker = nero_wifi_tracker_create();
+    CHECK(tracker != NULL);
+    memset(frame, 0, 32);
+    put_le16(frame, 0x00c0);                           /* deauthentication */
+    memcpy(frame + 4, BSSID, NERO_WIFI_MAC_LEN);       /* addr1 DA = AP        */
+    memcpy(frame + 10, CLIENT_MAC, NERO_WIFI_MAC_LEN); /* addr2 SA = client TX */
+    memcpy(frame + 16, BSSID, NERO_WIFI_MAC_LEN);      /* addr3 BSSID          */
+    frame_len = 26;
+    packet_len = wrap_radiotap(packet, 2412, -66, frame, frame_len);
+    CHECK(nero_wifi_tracker_ingest_l2(tracker, packet, packet_len, NERO_WIFI_LINKTYPE_RADIOTAP,
+                                      1100000, NULL, 0) == 1);
+    CHECK(nero_wifi_tracker_find_client(tracker, CLIENT_MAC, &client) == 0);
+    CHECK(client.state == NERO_WIFI_STATE_DISASSOCIATED);
+    CHECK(client.has_rssi == 1 && client.rssi == -66);
+    nero_wifi_tracker_destroy(tracker);
+
+    /* (3) A deauth from an AP never seen before must resolve the real client via
+     * the BSSID and must NOT register the AP's own MAC as a phantom client. */
+    tracker = nero_wifi_tracker_create();
+    CHECK(tracker != NULL);
+    frame_len = build_deauth(frame); /* addr1=client, addr2=addr3=BSSID (AP -> client) */
+    packet_len = wrap_radiotap(packet, 2412, -60, frame, frame_len);
+    CHECK(nero_wifi_tracker_ingest_l2(tracker, packet, packet_len, NERO_WIFI_LINKTYPE_RADIOTAP,
+                                      1200000, NULL, 0) == 1);
+    CHECK(nero_wifi_tracker_find_client(tracker, CLIENT_MAC, &client) == 0);
+    CHECK(client.state == NERO_WIFI_STATE_DISASSOCIATED);
+    CHECK(nero_wifi_tracker_find_client(tracker, BSSID, &client) != 0);
+    nero_wifi_tracker_destroy(tracker);
+}
+
 int main(void)
 {
     test_rsn_security();
     test_tracker();
+    test_tracker_honesty();
     test_pcap_files();
     if (failures != 0) {
         fprintf(stderr, "%d Wi-Fi test failure(s)\n", failures);

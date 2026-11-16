@@ -157,8 +157,10 @@ static int parse_classic_pcap(FILE *file, const uint8_t *header, nero_wifi_track
         if (got == 0)
             break;
         if (got < 0) {
-            set_error(error, error_len, "truncated pcap packet header");
-            status = -1;
+            /* A partial final record is the common signature of a capture process
+             * killed mid-write. Stop at the last complete record and keep every
+             * frame already parsed (as tcpdump/Wireshark do) instead of discarding
+             * the whole capture. */
             break;
         }
         uint32_t seconds = read32(record, little);
@@ -173,8 +175,8 @@ static int parse_classic_pcap(FILE *file, const uint8_t *header, nero_wifi_track
         if (captured > 0) {
             got = read_exact(file, buffer, captured);
             if (got != 1) {
-                set_error(error, error_len, "truncated pcap packet data");
-                status = -1;
+                /* Truncated final record: keep the frames parsed so far rather
+                 * than failing the whole analysis. */
                 break;
             }
         }

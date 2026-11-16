@@ -333,3 +333,11 @@ ifeq ($(UNAME_S),Darwin)
 test-wifi-helper-bundle: wifi-helper
 	python3 tests/test_macos_wifi_bundle.py NEROWiFi.app
 endif
+
+$(TEST_DIR)/wifi-capture: tests/wifi_capture.c src/platform/wifi_capture.c include/nero/wifi_capture.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/wifi_capture.c -o $@ $(DL_LIBS)
+
+.PHONY: test-wifi-capture
+test: test-wifi-capture
+test-wifi-capture: $(TEST_DIR)/wifi-capture
+	$(TEST_DIR)/wifi-capture

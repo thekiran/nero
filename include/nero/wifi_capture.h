@@ -6,7 +6,9 @@
  * The macOS and Linux implementation dynamically loads libpcap so a build does
  * not require libpcap headers or link-time flags. Other platforms get a stub
  * that reports unsupported. Capture never injects frames and never changes
- * channel or regulatory settings through private APIs. */
+ * channel or regulatory settings through private APIs. macOS monitor capture
+ * disassociates and pins the existing channel using public CoreWLAN; callers
+ * must warn that Wi-Fi may need to be reconnected after closing capture. */
 
 #include <stdatomic.h>
 #include <stddef.h>
@@ -31,8 +33,8 @@ typedef struct {
     int backend_available;   /* libpcap could be loaded */
     int can_request_monitor; /* pcap_can_set_rfmon() result, if available */
     int monitor_requested;   /* caller asked for monitor mode */
-    int monitor_set;         /* pcap_set_rfmon() accepted the request */
-    int link_fallback;       /* monitor was unavailable or delivered nothing */
+    int monitor_set;         /* RFMON activated with verified 802.11 DLT; delivery not guaranteed */
+    int link_fallback;       /* reserved; monitor requests never silently fall back */
     int linktype;
     uint64_t packets;
     uint64_t bytes;

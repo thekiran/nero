@@ -209,29 +209,30 @@ prove delivery.
   `status` manage a background session. Capture is read-only and uses dynamic
   libpcap on POSIX or Npcap on Windows. A warning is shown after three seconds
   without 802.11 frames, and the status bar states the real capture mode
-  (`MONITOR`, `LINK-LAYER` when the backend fell back to link-layer packets,
-  `OS-SCAN`, or `PASSIVE`).
-* **OS-scan assist / `--no-scan`:** Some adapters (notably built-in Apple Silicon
-  Wi-Fi) accept monitor mode but deliver no 802.11 frames, so a purely passive
-  survey would stay empty. When monitor mode was requested and no 802.11 frame
-  has arrived after four seconds, the access-point table is filled from the
-  operating system's own scan (CoreWLAN on macOS), refreshed in the background
-  and clearly labelled `OS-SCAN` / `source: OS scan`. An OS scan is an active
-  probe, cannot list stations, and may return redacted SSID/BSSID values until
-  the terminal application is granted Location Services. `--no-scan` disables
-  the assist and keeps the survey strictly passive. On Linux and Windows no OS
-  scan backend exists, so the assist is compiled out and the survey stays
-  passive.
-* **OS neighbor assist / `--no-neighbors`:** When monitor mode yields zero
-  802.11 frames and no station rows exist, the STATIONS table is filled from the
-  operating system's read-only IPv4 neighbor cache (ARP). These rows are local
-  link devices that recently answered on the subnet, not proven Wi-Fi stations;
-  they are labelled `source: OS neighbor cache` and `ARP`, and entries matching
-  an observed AP BSSID are skipped. Reading the cache sends no probes and changes
-  no interface setting. `--no-neighbors` disables the fallback; it is separate
-  from `--no-scan`, which disables the access-point scan fallback.
+  (`MONITOR`, `LINK-LAYER`, `OS-SCAN`, or `PASSIVE`).
+* **Strict monitor capture:** The default requests RFMON and verifies the
+  activated 802.11/radiotap link type. Ethernet-only activation fails explicitly;
+  it does not silently fall back. Zero packets leave capture open and delivery
+  unverified, rather than proving a hardware limitation. Idle capture remains
+  cancellable. Active CoreWLAN scans and ARP station substitution are disabled
+  in this mode. Nearby stations, including those on other networks, appear only
+  when their 802.11 frames are actually received on the tuned channel. This is
+  not an inventory of every nearby device and does not decrypt their traffic.
+* **Explicit `--link` survey:** Captures ordinary link-layer traffic and permits
+  clearly labelled OS-scan/ARP assistance. `--no-scan` and `--no-neighbors`
+  disable those sources. ARP entries are local subnet neighbors, not evidence
+  of over-the-air stations. Use `wifi scan` for a separate active AP survey.
+* **macOS usage:** Start NERO with capture privileges, then run
+  `wifi monitor en0 --duration 30`. NERO disassociates from Wi-Fi and pins the
+  current channel through public CoreWLAN before requesting RFMON. This fixes
+  zero-frame capture caused by keeping the radio associated. Use local terminal
+  access and reconnect Wi-Fi after capture if it does not rejoin automatically.
+  If CoreWLAN has no current channel, connect to a network before starting.
+  Channel hopping remains Linux-only. The MONITOR
+  label verifies the capture format; a nonzero decoded frame count verifies
+  actual delivery. A silent capture is inconclusive.
 * **`--hop [--dwell MS] [--bands 2.4,5,6]`:** Opt-in channel hopping. The default
-  survey is strictly read-only and stays on the adapter's current channel; this
+  survey receives frames on the adapter's current channel; this
   separate mode tunes the radio across a channel plan so the survey can see
   every channel. It changes the radio, so it is **Linux only** (nl80211
   `SET_CHANNEL`), requires root/`CAP_NET_ADMIN`, requires the interface to
@@ -254,9 +255,11 @@ prove delivery.
   NetworkManager, service state, regulatory settings or the channel. On macOS,
   Windows and offline builds these actions report unavailable and make no
   state changes.
-* **Apple Silicon note:** some adapters accept the monitor-mode request and
-  report radiotap link type but still deliver zero frames. Use
-  `wifi analyze` with a genuine capture in that case.
+* **Apple Silicon note:** radiotap activation alone does not prove frame delivery.
+  The macOS preparation above enabled real management-frame delivery on a tested
+  integrated adapter. It does not guarantee reception of client traffic or
+  operation on every driver. Check actual frame counters; use `wifi analyze`
+  with a genuine capture to test decoding independently.
 
 ### `wifi analyze <PCAP_FILE>`
 * **Description:** Analyzes classic pcap or pcapng files offline. Supported
