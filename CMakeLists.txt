@@ -15,6 +15,7 @@ option(NERO_STATIC_ANALYSIS "Enable MSVC code analysis for foundation targets" O
 # this registers the non-gating source-baseline-audit test; it is OFF by
 # default so a legitimate source change never fails the default test run.
 option(NERO_SOURCE_AUDIT "Register the non-gating source baseline hash audit" OFF)
+option(NERO_BUILD_GUI "Build the NERO Desktop (Qt 6) application" OFF)
 include(CTest)
 
 include(cmake/NeroTargets.cmake)
@@ -101,6 +102,21 @@ if(WIN32)
         endif()
         target_link_libraries(nero PRIVATE Threads::Threads ws2_32 iphlpapi advapi32)
         target_link_options(nero PRIVATE -static) # self-contained exe (winpthread/libgcc)
+        # NERO Console: same C core and terminal engine as `nero`, separate entry point.
+        add_executable(neroconsole
+            src/apps/neroconsole_main.c
+            src/cli/terminal.c
+            ${NERO_CLI_SUPPORT_SOURCES}
+            src/modules/portscanner.c
+            src/modules/scan_session.c
+            src/platform/windows/select_interface_windows.c)
+        nero_target(neroconsole)
+        target_compile_definitions(neroconsole PRIVATE UNICODE_SUPPORT NERO_SYN_UNAVAILABLE)
+        if(NERO_RELEASE_VERSION)
+            target_compile_definitions(neroconsole PRIVATE "NERO_BUILD_VERSION=\"${NERO_RELEASE_VERSION}\"")
+        endif()
+        target_link_libraries(neroconsole PRIVATE Threads::Threads ws2_32 iphlpapi advapi32)
+        target_link_options(neroconsole PRIVATE -static)
         if(BUILD_TESTING)
             add_executable(win-interfaces tests/interfaces.c
                 src/platform/windows/select_interface_windows.c)
@@ -438,6 +454,15 @@ if(BUILD_TESTING AND NERO_CORPUS_REPLAY)
     add_test(NAME fuzz-corpus COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/fuzz/run.py" $<TARGET_FILE_DIR:fuzz-parser>)
     set_tests_properties(fuzz-corpus PROPERTIES TIMEOUT 180)
+endif()
+
+# NERO Desktop (Qt 6) — optional; enables C++ only when explicitly requested so
+# the default CLI/Console build needs no C++ toolchain or Qt.
+if(NERO_BUILD_GUI)
+    enable_language(CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    add_subdirectory(apps/desktop)
 endif()
 
 # Optional macOS Location-authorized app. CMake's CLI fixtures remain offline.

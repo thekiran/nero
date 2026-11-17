@@ -85,6 +85,10 @@ OBJS := $(addprefix $(BUILD_DIR)/obj/,$(SRCS:.c=.o))
 DEPS := $(OBJS:.o=.d)
 
 TARGET := nero
+# NERO Console shares the entire C core; only the entry point differs from nero.
+CONSOLE_TARGET := neroconsole
+CONSOLE_MAIN_OBJ := $(BUILD_DIR)/obj/src/apps/neroconsole_main.o
+CONSOLE_OBJS := $(filter-out $(BUILD_DIR)/obj/src/main.o,$(OBJS)) $(CONSOLE_MAIN_OBJ)
 PREFIX ?= /usr/local
 DESTDIR ?=
 INSTALL_DIR ?= $(PREFIX)/bin
@@ -92,12 +96,16 @@ INSTALL_DIR ?= $(PREFIX)/bin
 .PHONY: all clean install uninstall run help test test-sanitize test-tsan analyze
 .DEFAULT_GOAL := all
 
-all: $(TARGET)
-	@echo "[INFO] Built $(TARGET)"
+all: $(TARGET) $(CONSOLE_TARGET)
+	@echo "[INFO] Built $(TARGET) and $(CONSOLE_TARGET)"
 
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS) $(LDLIBS)
 	@echo "[INFO] Linked $(TARGET) successfully"
+
+$(CONSOLE_TARGET): $(CONSOLE_OBJS)
+	$(CC) $(CONSOLE_OBJS) -o $@ $(LDFLAGS) $(LDLIBS)
+	@echo "[INFO] Linked $(CONSOLE_TARGET) successfully"
 
 $(BUILD_DIR)/obj/%.o: %.c Makefile
 	@mkdir -p $(dir $@)
@@ -116,8 +124,8 @@ uninstall:
 	rm -f "$(DESTDIR)$(INSTALL_DIR)/nero"
 
 clean:
-	@echo "[CLEAN] Removing build artifacts and $(TARGET)"
-	rm -rf $(BUILD_DIR) $(TARGET)
+	@echo "[CLEAN] Removing build artifacts, $(TARGET) and $(CONSOLE_TARGET)"
+	rm -rf $(BUILD_DIR) $(TARGET) $(CONSOLE_TARGET)
 
 -include $(DEPS)
 
@@ -303,6 +311,12 @@ help:
 	@echo "make analyze         Run Clang static analysis"
 	@echo "make clean           Remove generated build files"
 	@echo "Code map: docs/code-map.md"
+
+# NERO Console parity: neroconsole must match nero through the shared core.
+.PHONY: test-console-parity
+test: test-console-parity
+test-console-parity: $(TARGET) $(CONSOLE_TARGET)
+	python3 tests/test_console_parity.py ./$(TARGET) ./$(CONSOLE_TARGET)
 
 # The GUI helper is separate from the C CLI; no authorization prompt at build time.
 WIFI_SIGN_IDENTITY ?= -
