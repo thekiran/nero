@@ -204,3 +204,12 @@ Green CI runs verify offline behavior and package integrity; they do not imply c
 
 Distributed under the [MIT License](LICENSE.txt).
 Copyright © 2025–2026 Muhammed Emin Kıran.
+
+### macOS Wi-Fi SSID/BSSID permission
+
+Build the signed Location-permission helper with `make wifi-helper`, open
+`NEROWiFi.app`, and click **Allow Wi-Fi Identifier Access**. Run the CLI without
+`sudo`; `wifi scan` uses the authorized app, and `wifi aps` uses it when no passive
+capture is present. Missing/denied permissions produce an explicit diagnostic,
+never invented identifiers or clients. See the [macOS Wi-Fi helper guide](docs/macos-wifi-helper.md)
+for signing, installation, safe IPC, tests and manual permission checks.

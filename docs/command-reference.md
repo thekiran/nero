@@ -109,7 +109,7 @@ Network diagnostics commands examine session configuration and perform controlle
 * **Syntax:** `<target> -Sc`
 * **Description:** Runs TCP connect diagnostics across ports 1–65535 on the specified IPv4 target. Discovery does not gate the scan. Results distinguish open, closed, filtered, error/unknown and unscanned ports.
 * **Execution behavior:**
-  * **Live production builds (macOS, Linux, Windows):** Uses nonblocking `connect()` with per-socket deadlines. First-pass/retry timeouts are 500/1000 ms for Hizli, 1000/2000 ms for Orta (default), and 1500/3000 ms for Yavas. Manual first-pass timeouts range from 200–5000 ms; retries use twice that timeout, capped at 5000 ms. Every filtered or error/unknown result receives one retry; later profile-defined rounds retry only remaining error/unknown results. Silent targets can take many minutes.
+  * **Live production builds (macOS, Linux, Windows):** Uses nonblocking `connect()` with per-socket deadlines. First-pass/retry timeouts are 500/1000 ms for Fast, 1000/2000 ms for Balanced (default), and 1500/3000 ms for Slow. Manual first-pass timeouts range from 200–5000 ms; retries use twice that timeout, capped at 5000 ms. Every filtered or error/unknown result receives one retry; later profile-defined rounds retry only remaining error/unknown results. Silent targets can take many minutes.
   * **Interactive controls:** Esc cancels. Once an open port appears, Enter stops scanning and opens port selection using the results found so far. Early selection reports partial coverage and leaves unfinished ports unscanned.
   * **Offline test builds (`NERO_SAFE_TEST` / `NERO_NETWORK_UNAVAILABLE`):** Simulates port state in memory without opening remote network sockets.
 * **Platforms:** macOS, Linux, Windows (native MinGW).
@@ -209,21 +209,30 @@ prove delivery.
   `status` manage a background session. Capture is read-only and uses dynamic
   libpcap on POSIX or Npcap on Windows. A warning is shown after three seconds
   without 802.11 frames, and the status bar states the real capture mode
-  (`MONITOR`, `LINK-LAYER` when the backend fell back to link-layer packets,
-  `OS-SCAN`, or `PASSIVE`).
-* **OS-scan assist / `--no-scan`:** Some adapters (notably built-in Apple Silicon
-  Wi-Fi) accept monitor mode but deliver no 802.11 frames, so a purely passive
-  survey would stay empty. When monitor mode was requested and no 802.11 frame
-  has arrived after four seconds, the access-point table is filled from the
-  operating system's own scan (CoreWLAN on macOS), refreshed in the background
-  and clearly labelled `OS-SCAN` / `source: OS scan`. An OS scan is an active
-  probe, cannot list stations, and may return redacted SSID/BSSID values until
-  the terminal application is granted Location Services. `--no-scan` disables
-  the assist and keeps the survey strictly passive. On Linux and Windows no OS
-  scan backend exists, so the assist is compiled out and the survey stays
-  passive.
+  (`MONITOR`, `LINK-LAYER`, `OS-SCAN`, or `PASSIVE`).
+* **Strict monitor capture:** The default requests RFMON and verifies the
+  activated 802.11/radiotap link type. Ethernet-only activation fails explicitly;
+  it does not silently fall back. Zero packets leave capture open and delivery
+  unverified, rather than proving a hardware limitation. Idle capture remains
+  cancellable. Active CoreWLAN scans and ARP station substitution are disabled
+  in this mode. Nearby stations, including those on other networks, appear only
+  when their 802.11 frames are actually received on the tuned channel. This is
+  not an inventory of every nearby device and does not decrypt their traffic.
+* **Explicit `--link` survey:** Captures ordinary link-layer traffic and permits
+  clearly labelled OS-scan/ARP assistance. `--no-scan` and `--no-neighbors`
+  disable those sources. ARP entries are local subnet neighbors, not evidence
+  of over-the-air stations. Use `wifi scan` for a separate active AP survey.
+* **macOS usage:** Start NERO with capture privileges, then run
+  `wifi monitor en0 --duration 30`. NERO disassociates from Wi-Fi and pins the
+  current channel through public CoreWLAN before requesting RFMON. This fixes
+  zero-frame capture caused by keeping the radio associated. Use local terminal
+  access and reconnect Wi-Fi after capture if it does not rejoin automatically.
+  If CoreWLAN has no current channel, connect to a network before starting.
+  Channel hopping remains Linux-only. The MONITOR
+  label verifies the capture format; a nonzero decoded frame count verifies
+  actual delivery. A silent capture is inconclusive.
 * **`--hop [--dwell MS] [--bands 2.4,5,6]`:** Opt-in channel hopping. The default
-  survey is strictly read-only and stays on the adapter's current channel; this
+  survey receives frames on the adapter's current channel; this
   separate mode tunes the radio across a channel plan so the survey can see
   every channel. It changes the radio, so it is **Linux only** (nl80211
   `SET_CHANNEL`), requires root/`CAP_NET_ADMIN`, requires the interface to
@@ -246,9 +255,11 @@ prove delivery.
   NetworkManager, service state, regulatory settings or the channel. On macOS,
   Windows and offline builds these actions report unavailable and make no
   state changes.
-* **Apple Silicon note:** some adapters accept the monitor-mode request and
-  report radiotap link type but still deliver zero frames. Use
-  `wifi analyze` with a genuine capture in that case.
+* **Apple Silicon note:** radiotap activation alone does not prove frame delivery.
+  The macOS preparation above enabled real management-frame delivery on a tested
+  integrated adapter. It does not guarantee reception of client traffic or
+  operation on every driver. Check actual frame counters; use `wifi analyze`
+  with a genuine capture to test decoding independently.
 
 ### `wifi analyze <PCAP_FILE>`
 * **Description:** Analyzes classic pcap or pcapng files offline. Supported
@@ -304,9 +315,61 @@ NERO provides a responsive line editor that handles key sequences across platfor
 | `Up Arrow` (`\033[A`) | Navigate to previous command in history |
 | `Down Arrow` (`\033[B`) | Navigate to next command in history |
 | `Left Arrow` (`\033[D`) | Move cursor one position left |
-| `Right Arrow` (`\033[C`) | Move cursor one position right |
+| `Right Arrow` (`\033[C`) | Move cursor right; at end of buffer, accept the inline ghost suggestion |
+| `Tab` (`\t`) | Complete the current command; a unique result is inserted, an ambiguous one opens the completion menu |
+| `Shift+Tab` (`\033[Z`) | Move backward through the completion menu (where the terminal sends it) |
+| `Escape` (`\033`) | Close the completion menu without changing the line |
 | `Backspace` (`\x7f`, `\x08`) | Delete character preceding cursor |
 | `Delete` (`\033[3~`) | Delete character at cursor |
+
+Inside the completion menu, `Tab`/`Down` move to the next item, `Shift+Tab`/`Up`
+move to the previous, `Right`/`Enter` accept the highlighted item into the line
+(without running it), and `Escape` closes the menu. `Ctrl+C` and `Ctrl+D` keep
+their normal shell semantics while the menu is open.
+
+### NERO IntelliSense (inline suggestions, completion and help)
+
+The line editor is backed by a pure, deterministic suggestion engine
+(`src/cli/suggestion_engine.c`) driven by a single command/argument registry
+(`src/cli/suggestion_catalog.h`), with contextual help in
+`src/cli/inline_help.c`. Suggestion, completion, validation and rendering never
+execute a command, open a socket, or perform any network or background activity.
+
+* **Inline ghost text.** As you type, the most likely completion is shown in
+  gray after the cursor, drawn from registered executable commands, their valid
+  argument schemas, and matching entries from your session history. Help-usage
+  placeholders (`<PCAP>`, `[INTERFACE]`, `<IP>`) are never shown as executable
+  values. Press `Right` at the end of the line to accept the ghost.
+* **Tab completion.** A unique match is inserted immediately; a common prefix is
+  extended as far as it is unambiguous; and a genuinely ambiguous result opens a
+  compact, selectable menu. Tab never inserts a literal space as an ambiguous
+  fallback.
+* **Contextual help.** In full mode the command you are typing is described
+  below the prompt with its syntax, one-line description and live status.
+* **Typo hints.** When the first word matches no command but is within a small
+  bounded edit distance of exactly one keyword, that keyword is offered as a
+  suggestion only — it is never applied automatically.
+* **Validation states.** Input is classified as *incomplete*, *ready* (valid),
+  *unknown* (invalid) or *unsupported on this build* (a valid command whose
+  engine is compiled out, e.g. `scan`/`-Syn` in network-unavailable builds),
+  with no side effects.
+
+**Configuration and fallbacks.** The assistant is controlled by the
+`NERO_INTELLISENSE` environment variable:
+
+| Value | Effect |
+| --- | --- |
+| unset / any other value | Assistant on, compact presentation (ghost text + Tab menu) |
+| `full` | Also show the live contextual help line beneath the prompt |
+| `off` or `0` | Disable ghost text, menu and help; Tab still completes a unique match |
+
+Rendering degrades safely: inline ghost text requires a color-capable TTY, so it
+is suppressed under `NO_COLOR`, `TERM=dumb`, and when output is redirected or
+non-interactive. In all of those cases Tab completion of the buffer still works.
+Ghost text is clipped to the viewport width and respects horizontal scrolling,
+so narrow terminals are never corrupted. Session history used for suggestions is
+read only from the in-process history buffer and is never written anywhere by the
+suggestion engine.
 
 ### Tokenization and Limits
 * **Maximum command line length:** 255 bytes (`CLI_LINE_CAPACITY` is 256 including the terminating NUL). This is a byte limit, not a Unicode character count. Longer input produces a `Command too long` warning and is rejected safely without buffer overflow.

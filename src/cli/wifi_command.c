@@ -13,6 +13,8 @@
 #include "nero/wifi_nl80211.h"
 
 #include <errno.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,8 +25,6 @@
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <poll.h>
-#include <pthread.h>
-#include <stdatomic.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #endif
@@ -75,9 +75,11 @@ static void print_wifi_help(void)
          "  wifi signal [--live]                Signal diagnostics (Ctrl+C stops live mode)\n"
          "  wifi inspect <MAC|BSSID>            Inspect a client or access point\n"
          "  wifi monitor [--link] [INTERFACE]   Live survey (interactive table on a TTY)\n"
+         "  wifi monitor --select               Pick the Wi-Fi adapter from a menu\n"
          "  wifi monitor --hop [--dwell MS] [--bands 2.4,5,6]\n"
          "                                      Opt-in channel hopping (Linux, root, consented)\n"
-         "  wifi monitor --no-scan              Strictly passive: never fall back to the OS scan\n"
+         "  wifi monitor --no-scan              Disable OS-scan assist in explicit --link mode\n"
+         "  wifi monitor --no-neighbors         Disable ARP assist in explicit --link mode\n"
          "  wifi monitor start [--link] [I]     Start a background passive session\n"
          "  wifi monitor stop                   Stop the background session\n"
          "  wifi monitor status                 Show session counters\n"
@@ -323,6 +325,16 @@ static void client_group_label(const nero_wifi_client *group, int anonymize)
     char label[128];
     char line[192];
     char fitted[192];
+    if (group->neighbor_cache) {
+        snprintf(bssid, sizeof(bssid), "-");
+        snprintf(label, sizeof(label), "OS neighbor cache");
+        snprintf(line, sizeof(line), "%s (%s)", label, bssid);
+        int room = wifi_target_width() - 4; /* "  > " prefix */
+        nero_fit(line, room, !wifi_unicode(), fitted, sizeof(fitted));
+        printf("\n  %s%s%s %s%s%s\n", wc(WIFI_CYAN), wifi_unicode() ? "▸" : ">", wc_off(),
+               wc(WIFI_HEAD), fitted, wc_off());
+        return;
+    }
     if (group->has_bssid) {
         nero_wifi_format_mac(group->bssid, bssid, sizeof(bssid));
         if (anonymize) {
@@ -812,7 +824,10 @@ static cli_cmd_result cmd_wifi_capabilities(void)
     puts("    Native Wi-Fi active scanning is not implemented in this backend.");
 #else
     puts("    Monitor mode and regulatory channel availability depend on the driver/firmware.");
-    puts("    NERO probes capabilities but never changes channel or regulatory settings.");
+#if defined(__APPLE__)
+    puts("    macOS RFMON disconnects Wi-Fi and pins its current channel via CoreWLAN.");
+    puts("    Reconnect Wi-Fi after capture if macOS does not automatically rejoin.");
+#endif
 #endif
     return CLI_CMD_CONTINUE;
 }
@@ -1079,7 +1094,7 @@ static cli_cmd_result cmd_wifi_scan(char **tokens, size_t count)
         }
         if (capabilities.identifiers_redacted) {
             puts("  NOTE: macOS redacted one or more SSID/BSSID values. Grant Location Services");
-            puts("        to the terminal application to reveal identifiers. Hidden values are");
+            puts("        to NERO Wi-Fi in System Settings. Withheld values are");
             puts("        never invented.");
         }
         print_ap_table(aps, count_aps);
@@ -1090,7 +1105,7 @@ static cli_cmd_result cmd_wifi_scan(char **tokens, size_t count)
         }
         if (!live) {
             puts("  Active survey results are separate from passive session data; use `wifi analyze`");
-            puts("  or `wifi monitor` to populate data shown by `wifi aps` and `wifi export`.");
+            puts("  or `wifi monitor` to populate passive data shown by `wifi export`.");
             break;
         }
         puts("  Active scans transmit normal probe requests. No network is joined.");
@@ -1124,6 +1139,24 @@ static cli_cmd_result cmd_wifi_aps(char **tokens, size_t count)
         return CLI_CMD_FAILURE;
     nero_wifi_ap aps[NERO_WIFI_MAX_APS];
     int aps_count = nero_wifi_session_get_aps(session, aps, NERO_WIFI_MAX_APS, channel);
+#if defined(__APPLE__) && !defined(NERO_SAFE_TEST) && !defined(NERO_NETWORK_UNAVAILABLE)
+    nero_wifi_stats stats;
+    nero_wifi_session_snapshot_stats(session, &stats);
+    if (aps_count == 0 && stats.packets == 0 && !nero_wifi_session_running(session)) {
+        nero_wifi_platform_capabilities caps;
+        char error[256] = {0};
+        puts("\nNo passive data: requesting an active CoreWLAN app scan (no network is joined).");
+        if (nero_wifi_platform_scan(NULL, aps, NERO_WIFI_MAX_APS, &aps_count, &caps,
+                                    error, sizeof(error)) != 0) {
+            printf("wifi aps: %s\n", error);
+            return CLI_CMD_FAILURE;
+        }
+        aps_count = filter_aps_by_radio(aps, aps_count, NERO_WIFI_BAND_UNKNOWN, channel);
+        if (caps.identifiers_redacted)
+            puts("macOS withheld identifiers; no SSIDs/BSSIDs have been invented.");
+        puts("Source: active CoreWLAN app scan; no client or monitor-frame data.");
+    }
+#endif
     print_ap_table(aps, aps_count);
     if (channel >= 0)
         printf("\n  Channel filter: %d\n", channel);
@@ -1505,10 +1538,17 @@ static cli_cmd_result cmd_wifi_export(char **tokens, size_t count)
         char first[32], last[32];
         nero_wifi_format_time(aps[i].first_seen_us, first, sizeof(first));
         nero_wifi_format_time(aps[i].last_seen_us, last, sizeof(last));
+        /* Leave channel/rssi blank when they were never observed instead of
+         * emitting a fabricated 0, matching the on-screen "-" convention. */
+        char ap_channel[16] = "", ap_rssi[16] = "";
+        if (aps[i].has_channel)
+            snprintf(ap_channel, sizeof(ap_channel), "%d", aps[i].channel);
+        if (aps[i].has_rssi)
+            snprintf(ap_rssi, sizeof(ap_rssi), "%d", aps[i].rssi);
         fprintf(file, "ap,,%s,", bssid_text);
         csv_field(file, aps[i].ssid);
-        fprintf(file, ",%d,%s,%d,%s,,,%s,%s,,,,,\n", aps[i].channel,
-                nero_wifi_band_name(aps[i].band), aps[i].rssi,
+        fprintf(file, ",%s,%s,%s,%s,,,%s,%s,,,,,\n", ap_channel,
+                nero_wifi_band_name(aps[i].band), ap_rssi,
                 nero_wifi_security_name(aps[i].security), first, last);
     }
     for (int i = 0; i < client_count; ++i) {
@@ -1528,11 +1568,15 @@ static cli_cmd_result cmd_wifi_export(char **tokens, size_t count)
         char first[32], last[32];
         nero_wifi_format_time(clients[i].first_seen_us, first, sizeof(first));
         nero_wifi_format_time(clients[i].last_seen_us, last, sizeof(last));
+        char cl_channel[16] = "", cl_rssi[16] = "";
+        if (clients[i].has_channel)
+            snprintf(cl_channel, sizeof(cl_channel), "%d", clients[i].channel);
+        if (clients[i].has_rssi)
+            snprintf(cl_rssi, sizeof(cl_rssi), "%d", clients[i].rssi);
         fprintf(file, "client,%s,%s,", mac_text, bssid_text);
         csv_field(file, clients[i].ssid);
-        fprintf(file, ",%d,%s,%d,,%s,%s,%s,%s,%u,%u,%u,%u,%s\n",
-                clients[i].has_channel ? clients[i].channel : 0,
-                nero_wifi_band_name(clients[i].band), clients[i].has_rssi ? clients[i].rssi : 0,
+        fprintf(file, ",%s,%s,%s,,%s,%s,%s,%s,%u,%u,%u,%u,%s\n", cl_channel,
+                nero_wifi_band_name(clients[i].band), cl_rssi,
                 nero_wifi_confidence_name(clients[i].confidence),
                 nero_wifi_state_name(clients[i].state), first, last, clients[i].frames,
                 clients[i].management_frames, clients[i].data_frames, clients[i].duplicates,
@@ -1682,6 +1726,14 @@ static void airodump_client_notes(const nero_wifi_client *client, char *out, siz
         strncat(out, "ASSOC ", out_len - strlen(out) - 1);
     else if (client->confidence == NERO_WIFI_CONFIDENCE_LIKELY)
         strncat(out, "LIKELY ", out_len - strlen(out) - 1);
+    if (client->neighbor_cache) {
+        char arp[32];
+        if (client->neighbor_ip[0] != '\0')
+            snprintf(arp, sizeof(arp), "ARP %s ", client->neighbor_ip);
+        else
+            snprintf(arp, sizeof(arp), "ARP ");
+        strncat(out, arp, out_len - strlen(out) - 1);
+    }
     size_t used = strlen(out);
     if (used > 0 && out[used - 1] == ' ')
         out[used - 1] = '\0';
@@ -1737,11 +1789,21 @@ typedef struct {
     int active;    /* the frame's access points come from the OS scan */
     int state;     /* WIFI_SCAN_* */
     int redacted;  /* the OS withheld one or more SSID/BSSID values */
+    int neighbors_active; /* station rows come from the OS neighbor cache */
+    int neighbor_count;
+    char neighbor_error[160];
     char error[160];
 } survey_source;
 
 /* Cleared by `wifi monitor --no-scan`. */
 static int scan_assist_allowed = 1;
+/* Cleared by `wifi monitor --no-neighbors`. */
+static int neighbor_assist_allowed = 1;
+/* Epoch for neighbor "first seen" timestamps. Live station rows come from a
+ * background poller (wifi_neighbor_assist, below) so the render thread never
+ * blocks on the ARP read, which can be slow on recent macOS where it launches
+ * the signed helper. */
+static int64_t neighbor_epoch_us = 0;
 
 /* Only CoreWLAN provides an OS scan backend today; elsewhere the assist is
  * compiled out so the survey never advertises a scan that cannot run. */
@@ -1892,6 +1954,179 @@ static int wifi_scan_assist_view(nero_wifi_ap *out, int capacity, int channel_fi
 }
 #endif /* WIFI_SCAN_ASSIST_AVAILABLE */
 
+/* Fills `clients` from the OS neighbor cache when no 802.11 station frames are
+ * available. This keeps the STATIONS table useful on adapters that accept
+ * monitor mode but deliver zero frames. Entries that match an observed AP
+ * BSSID are skipped, and every row is marked `neighbor_cache` so the UI can
+ * state that it is a local-link device, not a proven Wi-Fi station. */
+/* Pure conversion of raw OS neighbors into station rows: drops entries whose
+ * MAC is a known AP BSSID and marks every row as a local-link device. No I/O,
+ * so it is safe to call on the render thread every frame. */
+static int wifi_neighbor_convert(const nero_wifi_neighbor *neighbors, int found,
+                                 const nero_wifi_ap *aps, int aps_count,
+                                 nero_wifi_client *clients, int capacity, survey_source *source)
+{
+    if (source != NULL) {
+        source->neighbors_active = 0;
+        source->neighbor_count = 0;
+        source->neighbor_error[0] = '\0';
+    }
+    if (clients == NULL || capacity <= 0)
+        return 0;
+    if (found > NERO_WIFI_MAX_CLIENTS)
+        found = NERO_WIFI_MAX_CLIENTS;
+    int64_t now = nero_wifi_now_us();
+    if (neighbor_epoch_us == 0)
+        neighbor_epoch_us = now;
+    int count = 0;
+    for (int i = 0; i < found && count < capacity; ++i) {
+        int is_ap = 0;
+        for (int a = 0; a < aps_count; ++a) {
+            if (aps[a].has_bssid &&
+                memcmp(aps[a].bssid, neighbors[i].mac, NERO_WIFI_MAC_LEN) == 0) {
+                is_ap = 1;
+                break;
+            }
+        }
+        if (is_ap)
+            continue;
+        nero_wifi_client *client = &clients[count++];
+        memset(client, 0, sizeof(*client));
+        memcpy(client->mac, neighbors[i].mac, NERO_WIFI_MAC_LEN);
+        client->confidence = NERO_WIFI_CONFIDENCE_OBSERVED;
+        client->state = NERO_WIFI_STATE_OBSERVED;
+        client->randomized = (neighbors[i].mac[0] & 0x02) != 0;
+        client->first_seen_us = neighbor_epoch_us;
+        client->last_seen_us = now;
+        client->neighbor_cache = 1;
+        snprintf(client->neighbor_ip, sizeof(client->neighbor_ip), "%s", neighbors[i].ip);
+    }
+    if (source != NULL) {
+        source->neighbors_active = 1;
+        source->neighbor_count = count;
+    }
+    return count;
+}
+
+/* Synchronous fetch + convert. Used by the post-capture summary, where a short
+ * block is acceptable; the live survey uses the background poller instead. */
+static int wifi_neighbor_clients(const char *interface, const nero_wifi_ap *aps, int aps_count,
+                                 nero_wifi_client *clients, int capacity, survey_source *source)
+{
+    if (clients == NULL || capacity <= 0) {
+        if (source != NULL) {
+            source->neighbors_active = 0;
+            source->neighbor_count = 0;
+            source->neighbor_error[0] = '\0';
+        }
+        return 0;
+    }
+    nero_wifi_neighbor neighbors[NERO_WIFI_MAX_CLIENTS];
+    char error[160] = {0};
+    int found = nero_wifi_platform_neighbor_cache(interface, neighbors, NERO_WIFI_MAX_CLIENTS,
+                                                  error, sizeof(error));
+    int count = wifi_neighbor_convert(neighbors, found, aps, aps_count, clients, capacity, source);
+    if (source != NULL)
+        snprintf(source->neighbor_error, sizeof(source->neighbor_error), "%s", error);
+    return count;
+}
+
+/* Background neighbor-cache poller. The OS ARP read can take a second or two on
+ * recent macOS (it launches the signed helper), so the live survey must never
+ * do it on the render thread. This thread refreshes a cached snapshot; the
+ * survey converts the latest snapshot instantly on every frame. */
+typedef struct {
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    atomic_int stop;
+    int started;
+    char iface[NERO_WIFI_IFNAME_MAX];
+    nero_wifi_neighbor neighbors[NERO_WIFI_MAX_CLIENTS];
+    int count;
+    int active; /* 1 once at least one read has completed */
+} wifi_neighbor_assist;
+
+static wifi_neighbor_assist neighbor_assist_state = {.mutex = PTHREAD_MUTEX_INITIALIZER};
+
+static void *wifi_neighbor_assist_main(void *argument)
+{
+    wifi_neighbor_assist *assist = argument;
+    nero_wifi_neighbor *buffer = calloc(NERO_WIFI_MAX_CLIENTS, sizeof(*buffer));
+    if (buffer == NULL)
+        return NULL;
+    while (!atomic_load_explicit(&assist->stop, memory_order_relaxed)) {
+        char error[160] = {0};
+        int found = nero_wifi_platform_neighbor_cache(
+            assist->iface[0] != '\0' ? assist->iface : NULL, buffer, NERO_WIFI_MAX_CLIENTS, error,
+            sizeof(error));
+        if (found >= 0) {
+            if (found > NERO_WIFI_MAX_CLIENTS)
+                found = NERO_WIFI_MAX_CLIENTS;
+            pthread_mutex_lock(&assist->mutex);
+            /* Keep the previous rows on a transient empty read so stations do
+             * not flicker away between refreshes. */
+            if (found > 0 || !assist->active) {
+                memcpy(assist->neighbors, buffer, (size_t)found * sizeof(*buffer));
+                assist->count = found;
+            }
+            assist->active = 1;
+            pthread_mutex_unlock(&assist->mutex);
+        }
+        for (int i = 0; i < 40 && !atomic_load_explicit(&assist->stop, memory_order_relaxed); ++i)
+            sleep_milliseconds(100); /* refresh every ~4s */
+    }
+    free(buffer);
+    return NULL;
+}
+
+static void wifi_neighbor_assist_start(const char *interface)
+{
+    wifi_neighbor_assist *assist = &neighbor_assist_state;
+    if (assist->started)
+        return;
+    snprintf(assist->iface, sizeof(assist->iface), "%s", interface != NULL ? interface : "");
+    assist->count = 0;
+    assist->active = 0;
+    atomic_store_explicit(&assist->stop, 0, memory_order_relaxed);
+    if (pthread_create(&assist->thread, NULL, wifi_neighbor_assist_main, assist) != 0)
+        return;
+    assist->started = 1;
+}
+
+static void wifi_neighbor_assist_stop(void)
+{
+    wifi_neighbor_assist *assist = &neighbor_assist_state;
+    if (!assist->started)
+        return;
+    atomic_store_explicit(&assist->stop, 1, memory_order_relaxed);
+    pthread_join(assist->thread, NULL);
+    assist->count = 0;
+    assist->active = 0;
+    assist->started = 0;
+}
+
+/* Copy the latest cached neighbor snapshot into `out`. Returns the row count, or
+ * -1 when no read has completed yet (so the caller distinguishes "not ready yet"
+ * from "zero neighbors"). */
+static int wifi_neighbor_assist_view(nero_wifi_neighbor *out, int capacity, int *active)
+{
+    wifi_neighbor_assist *assist = &neighbor_assist_state;
+    if (!assist->started) {
+        if (active != NULL)
+            *active = 0;
+        return -1;
+    }
+    pthread_mutex_lock(&assist->mutex);
+    int ready = assist->active;
+    int n = 0;
+    for (int i = 0; i < assist->count && n < capacity; ++i)
+        out[n++] = assist->neighbors[i];
+    pthread_mutex_unlock(&assist->mutex);
+    if (active != NULL)
+        *active = ready;
+    return ready ? n : -1;
+}
+
 /* Writes one complete survey frame (status bar + AP grid + station grid +
  * honest capture warnings) into `out`. Used for both the live alternate-screen
  * TUI (out = an in-memory stream that is then diffed) and the inline/piped
@@ -1950,9 +2185,20 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
                         (int)(sizeof(monitor_ap_cols) / sizeof(monitor_ap_cols[0])), aps_count,
                         monitor_ap_row_build, (void *)aps);
 
-    fprintf(out, "\n %sSTATIONS%s %s(%d%s)%s\n", wc(WIFI_HEAD), wc_off(), wc(WIFI_DIM), client_count,
-            clients_only ? ", filtered" : "", wc_off());
-    if (client_count == 0 && from_scan)
+    int neighbors_active = from_scan && source->neighbors_active && client_count > 0;
+    fprintf(out, "\n %sSTATIONS%s %s(%d%s%s)%s\n", wc(WIFI_HEAD), wc_off(), wc(WIFI_DIM),
+            client_count, clients_only ? ", filtered" : "",
+            neighbors_active ? ", source: OS neighbor cache" : "", wc_off());
+    if (client_count == 0 && from_scan && source->neighbor_count > 0)
+        fprintf(out, " %s(%d local-link device(s) hidden by the client filter)%s\n",
+                wc(WIFI_DIM), source->neighbor_count, wc_off());
+    else if (client_count == 0 && from_scan && source->neighbors_active)
+        fprintf(out,
+                " %s(no local-link devices in the OS neighbor cache%s; real Wi-Fi stations need "
+                "802.11 monitor frames)%s\n",
+                wc(WIFI_DIM),
+                source->neighbor_error[0] != '\0' ? ": cache unavailable" : "", wc_off());
+    else if (client_count == 0 && from_scan)
         fprintf(out, " %s(stations are only visible in 802.11 monitor frames; an OS scan cannot "
                      "list them)%s\n",
                 wc(WIFI_DIM), wc_off());
@@ -1962,6 +2208,10 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
         nero_table_draw(out, opts, monitor_client_cols,
                         (int)(sizeof(monitor_client_cols) / sizeof(monitor_client_cols[0])),
                         client_count, monitor_client_row_build, (void *)clients);
+    if (neighbors_active)
+        fprintf(out, " %sThese are local-link devices from the OS ARP cache, not proven 802.11 "
+                     "stations.%s\n",
+                wc(WIFI_DIM), wc_off());
 
     if (stats->monitor_requested && stats->frames == 0 && elapsed_seconds >= 3) {
         if (stats->non_wifi > 0)
@@ -1973,8 +2223,8 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
             fprintf(out,
                     "\n %sWARNING: monitor mode was requested but zero 802.11 frames arrived.%s\n",
                     wc(WIFI_YEL), wc_off());
-        fprintf(out, " %sBuilt-in Apple Silicon Wi-Fi and some drivers do not expose monitor "
-                     "capture.%s\n",
+        fprintf(out, " %sCapture remains open; delivery is unverified. Check channel and driver "
+                     "conditions.%s\n",
                 wc(WIFI_DIM), wc_off());
         if (scan_ready) {
             fprintf(out, " %sAccess points above come from the OS scan (an active probe).%s\n",
@@ -1983,7 +2233,7 @@ static void survey_build_frame(FILE *out, const nero_table_opts *opts, nero_wifi
                     wc(WIFI_DIM), wc_off());
             if (source->redacted)
                 fprintf(out, " %sSSID/BSSID redacted by the OS: grant Location Services to the "
-                             "terminal app.%s\n",
+                             "NERO Wi-Fi app.%s\n",
                         wc(WIFI_DIM), wc_off());
         } else {
             fprintf(out, " %sUse a monitor-capable adapter, or a genuine monitor-mode pcap with "
@@ -2006,11 +2256,10 @@ static void survey_collect(nero_wifi_session *session, const nero_wifi_stats *st
     *aps_count = nero_wifi_session_get_aps(session, aps, NERO_WIFI_MAX_APS, channel_filter);
     memset(source, 0, sizeof(*source));
 #if WIFI_SCAN_ASSIST_AVAILABLE
-    /* Monitor was requested, several seconds passed and not one 802.11 frame
-     * arrived: the adapter does not expose monitor capture. Fill the grid from
-     * the OS scan instead (see the OS-scan assist notes above). */
-    if (scan_assist_allowed && stats->monitor_requested && stats->frames == 0 &&
-        *aps_count == 0 && elapsed_seconds >= 4) {
+    /* OS assistance is confined to explicit link capture. Never interrupt a
+     * real monitor session with an active scan just because it is quiet. */
+    if (scan_assist_allowed && !stats->monitor_requested && stats->frames == 0 &&
+        *aps_count == 0 && elapsed_seconds >= 2) {
         wifi_scan_assist_start(stats->interface);
         if (scan_assist.started) {
             source->active = 1;
@@ -2026,6 +2275,26 @@ static void survey_collect(nero_wifi_session *session, const nero_wifi_stats *st
 #endif
     *client_count =
         nero_wifi_session_get_clients(session, clients, NERO_WIFI_MAX_CLIENTS, channel_filter);
+    if (*client_count == 0 && channel_filter < 0 && neighbor_assist_allowed &&
+        !stats->monitor_requested && stats->frames == 0) {
+        /* Reading the ARP cache is not an RF action, so start the poller as soon
+         * as the survey begins and show rows the instant the first read lands.
+         * The slow part runs off the render thread, so frames never stall. */
+        wifi_neighbor_assist_start(stats->interface);
+        nero_wifi_neighbor raw[NERO_WIFI_MAX_CLIENTS];
+        int active = 0;
+        int found = wifi_neighbor_assist_view(raw, NERO_WIFI_MAX_CLIENTS, &active);
+        if (found > 0) {
+            *client_count = wifi_neighbor_convert(raw, found, aps, *aps_count, clients,
+                                                  NERO_WIFI_MAX_CLIENTS, source);
+        } else {
+            source->neighbors_active = active;
+            source->neighbor_count = 0;
+        }
+    } else if (neighbor_assist_state.started && stats->frames > 0) {
+        /* Real 802.11 client frames arrived: let the neighbor poller wind down. */
+        atomic_store_explicit(&neighbor_assist_state.stop, 1, memory_order_relaxed);
+    }
     if (sort_mode == 1)
         qsort(aps, (size_t)*aps_count, sizeof(aps[0]), ap_essid_compare);
     else if (sort_mode == 2)
@@ -2191,7 +2460,7 @@ static int run_dashboard_tui(nero_wifi_session *session, int duration_seconds, i
     memset(&ui, 0, sizeof(ui));
     nero_operation_begin(&ui, "WI-FI LIVE MONITOR  (passive 802.11 survey)",
                          WIFI_SCAN_ASSIST_AVAILABLE && scan_assist_allowed &&
-                                 previous.monitor_requested
+                                 !previous.monitor_requested
                              ? "Passive capture; if the adapter yields no 802.11 frames the OS scan "
                                "fills the grid (--no-scan disables)."
                              : "Capture is read-only: NERO never joins, injects or changes channel.",
@@ -2434,7 +2703,12 @@ static void wifi_monitor_clear_state(void)
     wifi_monitor_state_path(path, sizeof(path));
     (void)unlink(path);
 }
+#endif /* __linux__ nl80211 interface-state helpers */
 
+/* The raw-mode confirmation prompt is pure POSIX (read/poll/isatty), so it also
+ * serves macOS, where starting monitor mode disassociates the active network. */
+#if (defined(__linux__) || defined(__APPLE__)) && !defined(NERO_NETWORK_UNAVAILABLE) &&            \
+    !defined(NERO_SAFE_TEST)
 static void wifi_monitor_drain_escape(void)
 {
     char byte;
@@ -2731,6 +3005,92 @@ static void print_nl80211_capabilities(const char *interface)
 #endif
 }
 
+#if !defined(NERO_NETWORK_UNAVAILABLE) && !defined(NERO_SAFE_TEST) && !defined(_WIN32)
+/* Interactive adapter picker for `wifi monitor` when no interface was named.
+ * Lists the detected Wi-Fi interfaces (e.g. a monitor-capable USB adapter next
+ * to the built-in radio) and lets the user choose one. Returns 1 and writes the
+ * chosen name to `out`; 0 to fall back to the default interface (no list, a
+ * single interface with `force` off, or a non-interactive session); -1 if the
+ * user cancelled. Selection performs no RF action and changes no interface. */
+static int wifi_pick_interface(char *out, size_t out_size, int force)
+{
+    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+        return 0;
+    nero_wifi_interface_info list[16];
+    int count = 0;
+    char error[256] = {0};
+    if (nero_wifi_platform_list_interfaces(list, 16, &count, error, sizeof(error)) != 0 ||
+        count <= 0)
+        return 0;
+    if (count > 16)
+        count = 16;
+    if (count == 1 && !force) {
+        snprintf(out, out_size, "%s", list[0].name);
+        return 1;
+    }
+    const char *current = default_interface();
+    char labels_buf[16][128];
+    char values_buf[16][40];
+    const char *labels[16];
+    const char *values[16];
+    int sel = 0;
+    for (int i = 0; i < count; ++i) {
+        int is_current = current != NULL && strcmp(current, list[i].name) == 0;
+        if (is_current)
+            sel = i;
+        snprintf(labels_buf[i], sizeof(labels_buf[i]), "%-10s %s%s", list[i].name,
+                 list[i].hardware_address[0] != '\0' ? list[i].hardware_address : "unknown",
+                 is_current ? "  (current)" : "");
+        snprintf(values_buf[i], sizeof(values_buf[i]), "%s", list[i].powered ? "on" : "off");
+        labels[i] = labels_buf[i];
+        values[i] = values_buf[i];
+    }
+    nero_operation_ui ui;
+    memset(&ui, 0, sizeof(ui));
+    nero_operation_begin(&ui, "WI-FI ADAPTER", "Select the Wi-Fi interface for the survey",
+                         "Up/Down: Select   1-9: Jump   Enter: Confirm   Esc: Cancel");
+    if (!ui.interactive) {
+        nero_operation_end(&ui);
+        snprintf(out, out_size, "%s", list[0].name);
+        return 1;
+    }
+    int max_digit = count < 9 ? count : 9;
+    int picked = -1;
+    for (;;) {
+        nero_operation_menu(&ui, "Available Wi-Fi interfaces", labels, values, count, sel);
+        if (cli_termination_signal == SIGINT) {
+            picked = -1;
+            break;
+        }
+        int first = 0;
+        nero_ui_key key = nero_operation_read_key_ex(100, &first);
+        if (key == NERO_UI_KEY_CANCEL || key == NERO_UI_KEY_EOF) {
+            picked = -1;
+            break;
+        } else if (key == NERO_UI_KEY_UP || key == NERO_UI_KEY_WHEEL_UP) {
+            if (sel > 0)
+                sel--;
+        } else if (key == NERO_UI_KEY_DOWN || key == NERO_UI_KEY_WHEEL_DOWN) {
+            if (sel < count - 1)
+                sel++;
+        } else if (key == NERO_UI_KEY_ENTER) {
+            picked = sel;
+            break;
+        } else if (key == NERO_UI_KEY_OTHER && first >= '1' && first <= '0' + max_digit) {
+            picked = first - '1';
+            break;
+        }
+    }
+    nero_operation_end(&ui);
+    if (cli_termination_signal == SIGINT)
+        cli_termination_signal = 0; /* picker cancel must not end the shell session */
+    if (picked < 0)
+        return -1;
+    snprintf(out, out_size, "%s", list[picked].name);
+    return 1;
+}
+#endif
+
 static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
 {
     const char *action = "foreground";
@@ -2741,6 +3101,8 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
     int request_link = 0;
     int want_hop = 0;
     int no_scan = 0;
+    int no_neighbors = 0;
+    int force_select = 0;
     int dwell_ms = 300;
     unsigned hop_bands = 0;
     for (size_t i = 1; i < count; ++i) {
@@ -2756,6 +3118,10 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
             want_hop = 1;
         } else if (strcmp(tokens[i], "--no-scan") == 0) {
             no_scan = 1;
+        } else if (strcmp(tokens[i], "--no-neighbors") == 0) {
+            no_neighbors = 1;
+        } else if (strcmp(tokens[i], "--select") == 0) {
+            force_select = 1;
         } else if (strcmp(tokens[i], "--dwell") == 0 && i + 1 < count) {
             if (parse_number(tokens[++i], 50, 10000, &dwell_ms) != 0)
                 return CLI_CMD_INVALID;
@@ -2819,7 +3185,8 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
     }
 
     if (strcmp(action, "enable") == 0 || strcmp(action, "disable") == 0) {
-        if (duration != 0 || channel >= 0 || request_link || want_hop)
+        if (duration != 0 || channel >= 0 || request_link || want_hop || no_scan ||
+            no_neighbors)
             return CLI_CMD_INVALID;
         return cmd_wifi_monitor_mode(interface, strcmp(action, "enable") == 0);
     }
@@ -2831,6 +3198,8 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
     (void)request_link;
     (void)want_hop;
     (void)no_scan;
+    (void)no_neighbors;
+    (void)force_select;
     (void)dwell_ms;
     (void)hop_bands;
     puts("\nwifi monitor: live capture is unavailable in this offline build.");
@@ -2839,7 +3208,28 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
 #else
     int was_running = nero_wifi_session_running(session);
     if (!was_running) {
-        const char *target = interface != NULL ? interface : default_interface();
+#if !defined(_WIN32)
+        char picked[NERO_WIFI_IFNAME_MAX] = {0};
+#endif
+        const char *target;
+        if (interface != NULL) {
+            target = interface;
+        } else {
+#if !defined(_WIN32)
+            /* No interface named: offer the detected adapters so the user can
+             * pick (e.g. a monitor-capable USB adapter over the built-in radio).
+             * Non-interactive sessions fall back to the default interface. */
+            int choice = wifi_pick_interface(picked, sizeof(picked), force_select);
+            if (choice < 0) {
+                puts("\nwifi monitor: interface selection cancelled.");
+                return CLI_CMD_CONTINUE;
+            }
+            target = choice > 0 ? picked : default_interface();
+#else
+            (void)force_select;
+            target = default_interface();
+#endif
+        }
         if (target == NULL || target[0] == '\0') {
             puts("\nwifi monitor: no Wi-Fi interface was detected.");
             return CLI_CMD_CONTINUE;
@@ -2854,11 +3244,32 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
             nl_info.has_iftype && nl_info.iftype == NERO_NL80211_IFTYPE_MONITOR)
             request_monitor = 0;
 #endif
+        if (request_monitor) {
+            puts("\nRFMON may interrupt Wi-Fi connectivity; only received frames prove delivery.");
+#if defined(__APPLE__)
+            /* Starting monitor mode on the Apple radio actively disassociates the
+             * current network (see prepare_monitor_radio). That is a real loss of
+             * connectivity, so require explicit consent instead of disconnecting on
+             * a one-line warning. Declining keeps Wi-Fi up and runs the read-only
+             * link-layer/OS-scan survey instead of silently cutting the link. */
+            puts("macOS: starting monitor mode disconnects this Wi-Fi network and pins its "
+                 "current channel via CoreWLAN.");
+            if (!wifi_monitor_confirm(1, target)) {
+                puts("Monitor capture declined; running a link-layer survey without "
+                     "disconnecting instead.");
+                puts("Use `wifi monitor --link` to choose that mode directly.");
+                request_monitor = 0;
+            } else {
+                puts("Reconnect Wi-Fi after capture if it does not restore automatically.");
+            }
+#endif
+            fflush(stdout);
+        }
         if (nero_wifi_session_start(session, target, request_monitor, error, sizeof(error)) != 0) {
             printf("\nwifi monitor: could not start passive capture: %s\n",
                    error[0] != '\0' ? error : "unknown error");
             puts("No capture data was fabricated. Possible causes:");
-            puts("  - built-in Apple Silicon Wi-Fi does not expose 802.11 monitor capture");
+            puts("  - driver rejected RFMON or did not provide 802.11 headers");
             puts("  - BPF device permission denied");
             puts("  - libpcap/Npcap missing or too old");
             puts("Import a genuine monitor-mode pcap with `wifi analyze <PCAP_FILE>` instead.");
@@ -2869,8 +3280,10 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
     if (strcmp(action, "start") == 0) {
         char interface[NERO_WIFI_IFNAME_MAX] = {0};
         nero_wifi_session_interface(session, interface, sizeof(interface));
+        nero_wifi_stats start_stats;
+        nero_wifi_session_snapshot_stats(session, &start_stats);
         printf("\n%s capture started on %s. Use `wifi monitor stop` to stop it.\n",
-               request_link ? "Link-layer" : "Passive monitor",
+               start_stats.monitor_set ? "Passive monitor" : "Link-layer",
                interface[0] != '\0' ? interface : "(unknown interface)");
         return CLI_CMD_CONTINUE;
     }
@@ -2918,11 +3331,28 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
     }
     active_hop = hop.enabled ? &hop : NULL;
 
-    puts("\nStarting passive monitor. Press Ctrl+C to stop.");
+    puts("\nStarting capture. Press Ctrl+C to stop.");
+    scan_assist_allowed = request_link && !no_scan;
+    neighbor_assist_allowed = request_link && !no_neighbors;
+#if defined(__APPLE__)
+    /* The CoreWLAN OS-scan fallback (the only way to populate the grid when the
+     * built-in Apple Silicon adapter yields no 802.11 frames) runs as a separate
+     * logged-in-user app and refuses to run under sudo. Warn up front so a root
+     * session does not just show an empty survey with the reason buried in the
+     * grid placeholder several seconds later. */
+    if (scan_assist_allowed && (geteuid() == 0 || getuid() != geteuid())) {
+        puts("\n  NOTE: running as root (sudo). The OS Wi-Fi scan that fills the grid when the");
+        puts("        adapter yields no 802.11 frames cannot run under sudo, so the survey may");
+        puts("        stay empty. For the OS-scan fallback, run `wifi monitor --link` without sudo.");
+    }
+#endif
     fflush(stdout);
-    scan_assist_allowed = !no_scan;
+    neighbor_epoch_us = 0;
     run_dashboard(session, duration, channel);
     active_hop = NULL;
+    /* Stop the neighbor poller before the post-capture summary does its own
+     * synchronous read, so the two never launch the helper at once. */
+    wifi_neighbor_assist_stop();
     if (nero_wifi_session_running(session))
         nero_wifi_session_stop(session);
     if (cli_termination_signal == SIGINT)
@@ -2952,11 +3382,24 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
                      "scan, not from monitor capture.");
             }
         }
+        int neighbor_rows = 0;
+        if (client_count == 0 && neighbor_assist_allowed && !stats.monitor_requested &&
+            stats.frames == 0) {
+            survey_source neighbor_source;
+            memset(&neighbor_source, 0, sizeof(neighbor_source));
+            client_count = wifi_neighbor_clients(stats.interface, aps, aps_count, clients,
+                                                 NERO_WIFI_MAX_CLIENTS, &neighbor_source);
+            neighbor_rows = client_count;
+        }
         print_ap_table(aps, aps_count);
+        if (neighbor_rows > 0)
+            puts("\nStations below come from the OS neighbor cache (local-link devices, not "
+                 "proven 802.11 stations).");
         print_client_table(clients, client_count, 0);
     }
     wifi_scan_assist_stop();
     scan_assist_allowed = 1;
+    neighbor_assist_allowed = 1;
     free(aps);
     free(clients);
     return CLI_CMD_CONTINUE;

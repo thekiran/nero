@@ -579,6 +579,15 @@ static void handle_probe_request(nero_wifi_tracker *tracker, const nero_wifi_fra
         is_ap_address(tracker, bssid)) {
         bind_client(client, bssid, NERO_WIFI_CONFIDENCE_OBSERVED, NERO_WIFI_STATE_OBSERVED, now);
     }
+    /* A probe request still arrives with a radiotap header, so record its real
+     * signal like every other handler. Dropping it left probe-only (often
+     * MAC-randomized) stations with an empty SIGNAL column despite captured RSSI. */
+    if (radio != NULL && radio->has_rssi) {
+        client->has_rssi = 1;
+        client->rssi = radio->rssi;
+        push_rssi(client->rssi_history, &client->rssi_history_count, &client->rssi_history_next,
+                  radio->rssi);
+    }
     if (radio != NULL && radio->has_channel) {
         client->has_channel = 1;
         client->channel = radio->channel;
@@ -643,29 +652,69 @@ static void handle_auth(nero_wifi_tracker *tracker, const nero_wifi_frame *frame
     nero_wifi_client *client = ensure_client_locked(tracker, frame->addr2, now);
     if (client == NULL)
         return;
-    bind_client(client, bssid, NERO_WIFI_CONFIDENCE_LIKELY, NERO_WIFI_STATE_ASSOCIATED, now);
+    /* Authentication is the first handshake step and precedes association
+     * (auth -> assoc-req -> assoc-resp). It directs a known BSSID, so confidence
+     * is LIKELY, but it does NOT prove association: leave the state OBSERVED so a
+     * station seen only authenticating is never reported as ASSOCIATED. */
+    bind_client(client, bssid, NERO_WIFI_CONFIDENCE_LIKELY, NERO_WIFI_STATE_OBSERVED, now);
     if (radio != NULL && radio->has_rssi) {
         client->has_rssi = 1;
         client->rssi = radio->rssi;
         push_rssi(client->rssi_history, &client->rssi_history_count, &client->rssi_history_next,
                   radio->rssi);
     }
+    if (radio != NULL && radio->has_channel) {
+        client->has_channel = 1;
+        client->channel = radio->channel;
+        client->band = radio->band;
+    }
     note_client_frame(client, 0);
 }
 
-static void handle_disconnect(nero_wifi_tracker *tracker, const nero_wifi_frame *frame, int64_t now)
+static void handle_disconnect(nero_wifi_tracker *tracker, const nero_wifi_frame *frame,
+                              const nero_wifi_radiotap *radio, int64_t now)
 {
-    const uint8_t *client_mac = frame->addr2;
+    /* Disassoc/deauth carry addr3 = BSSID; the client is whichever of the
+     * destination (addr1) or source (addr2) is not the BSSID. Resolve by BSSID
+     * identity first so an as-yet-unseen AP is never recorded as a client. */
     const uint8_t *bssid = frame->addr3;
-    if (is_ap_address(tracker, frame->addr2) && !is_ap_address(tracker, frame->addr1)) {
-        client_mac = frame->addr1;
+    const uint8_t *client_mac = NULL;
+    if (!mac_zero(bssid) && !nero_wifi_mac_is_group(bssid)) {
+        if (mac_equal(frame->addr2, bssid))
+            client_mac = frame->addr1; /* AP -> client */
+        else if (mac_equal(frame->addr1, bssid))
+            client_mac = frame->addr2; /* client -> AP */
     }
-    if (mac_zero(bssid))
-        bssid = (client_mac == frame->addr1) ? frame->addr2 : frame->addr1;
+    if (client_mac == NULL) {
+        /* No usable BSSID in addr3: fall back to the known-AP heuristic and
+         * infer the BSSID from the peer address. */
+        client_mac = frame->addr2;
+        if (is_ap_address(tracker, frame->addr2) && !is_ap_address(tracker, frame->addr1))
+            client_mac = frame->addr1;
+        if (mac_zero(bssid) || nero_wifi_mac_is_group(bssid))
+            bssid = (client_mac == frame->addr1) ? frame->addr2 : frame->addr1;
+    }
+    if (mac_zero(client_mac) || nero_wifi_mac_is_group(client_mac))
+        return; /* e.g. a broadcast deauth cannot be attributed to one station */
     nero_wifi_client *client = ensure_client_locked(tracker, client_mac, now);
     if (client == NULL)
         return;
     bind_client(client, bssid, client->confidence, NERO_WIFI_STATE_DISASSOCIATED, now);
+    /* Radiotap RSSI describes the transmitter (addr2), so apply it to the client
+     * only when the client is the one that sent the frame. */
+    if (radio != NULL && mac_equal(client_mac, frame->addr2)) {
+        if (radio->has_rssi) {
+            client->has_rssi = 1;
+            client->rssi = radio->rssi;
+            push_rssi(client->rssi_history, &client->rssi_history_count,
+                      &client->rssi_history_next, radio->rssi);
+        }
+        if (radio->has_channel) {
+            client->has_channel = 1;
+            client->channel = radio->channel;
+            client->band = radio->band;
+        }
+    }
     note_client_frame(client, 0);
 }
 
@@ -786,7 +835,7 @@ int nero_wifi_tracker_ingest(nero_wifi_tracker *tracker, const nero_wifi_frame *
             break;
         case 10: /* disassociation */
         case 12: /* deauthentication */
-            handle_disconnect(tracker, frame, now);
+            handle_disconnect(tracker, frame, radio, now);
             break;
         default: {
             nero_wifi_client *client = ensure_client_locked(tracker, frame->addr2, now);
