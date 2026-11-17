@@ -294,11 +294,15 @@ static void menu_draw(const nero_suggestion_list *list, size_t shown, size_t sel
         const char *label = list->items[i].display != NULL ? list->items[i].display
                                                            : list->items[i].text;
         const char *desc = list->items[i].description != NULL ? list->items[i].description : "";
+        /* Bound the label/description fields with a precision so the formatted
+         * row provably fits the fixed buffer. Realistic completion labels and
+         * descriptions are far shorter; this only caps pathological inputs and
+         * keeps GCC's -Wformat-truncation analysis satisfied. */
         if (i == selected && color)
-            snprintf(buffers[i], sizeof(buffers[i]), "%s\033[1;36m%-22s\033[0m \033[2m%s\033[0m",
-                     marker, label, desc);
+            snprintf(buffers[i], sizeof(buffers[i]),
+                     "%s\033[1;36m%-22.40s\033[0m \033[2m%.100s\033[0m", marker, label, desc);
         else
-            snprintf(buffers[i], sizeof(buffers[i]), "%s%-22s %s%s%s",
+            snprintf(buffers[i], sizeof(buffers[i]), "%s%-22.40s %s%.100s%s",
                      i == selected ? marker : "  ", label, color ? "\033[2m" : "", desc,
                      color ? "\033[0m" : "");
         rows[rowc++] = buffers[i];

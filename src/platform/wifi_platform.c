@@ -704,7 +704,7 @@ int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neig
         nero_wifi_neighbor *neighbor = &out[count++];
         memset(neighbor, 0, sizeof(*neighbor));
         memcpy(neighbor->mac, mac, NERO_WIFI_MAC_LEN);
-        snprintf(neighbor->ip, sizeof(neighbor->ip), "%s", ip);
+        snprintf(neighbor->ip, sizeof(neighbor->ip), "%.15s", ip);
     }
     fclose(file);
     if (error != NULL && error_len > 0)
@@ -809,7 +809,7 @@ int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neig
                 nero_wifi_neighbor *neighbor = &out[count++];
                 memset(neighbor, 0, sizeof(*neighbor));
                 memcpy(neighbor->mac, mac, NERO_WIFI_MAC_LEN);
-                snprintf(neighbor->ip, sizeof(neighbor->ip), "%s", ip);
+                snprintf(neighbor->ip, sizeof(neighbor->ip), "%.15s", ip);
             }
             pclose(pipe);
         }

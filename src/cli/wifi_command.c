@@ -3029,7 +3029,7 @@ static int wifi_pick_interface(char *out, size_t out_size, int force)
         return 1;
     }
     const char *current = default_interface();
-    char labels_buf[16][72];
+    char labels_buf[16][128];
     char values_buf[16][40];
     const char *labels[16];
     const char *values[16];
