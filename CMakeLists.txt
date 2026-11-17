@@ -464,6 +464,10 @@ if(BUILD_TESTING AND NOT MSVC)
     add_executable(wifi-helper-protocol tests/wifi_helper_protocol.c third_party/cjson/cJSON.c
         src/modules/wifi/wifi_ieee80211.c src/modules/wifi/wifi_tracker.c src/modules/wifi/wifi_pcap.c)
     nero_target(wifi-helper-protocol)
+    # This test's checks are assert()-based; a Release build defines NDEBUG and
+    # strips them, which both voids the test and leaves every local unused under
+    # -Werror. Keep asserts live so the test runs and compiles in every build type.
+    target_compile_options(wifi-helper-protocol PRIVATE -UNDEBUG)
     target_include_directories(wifi-helper-protocol PRIVATE third_party/cjson)
     if(APPLE)
         # Vendored cJSON uses sprintf; keep first-party warnings strict.
