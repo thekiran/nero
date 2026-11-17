@@ -65,22 +65,27 @@ static void test_options(void)
 
 static void test_render_smoke(void)
 {
-    /* Render to a memory stream; it must emit the syntax and not crash. */
+    /* Standard C update stream: supported by POSIX and native MinGW alike.
+     * Failure to capture output must fail the test, never silently skip it. */
     char buf[4096];
-    FILE *mem = fmemopen(buf, sizeof(buf), "w");
-    if (mem == NULL) {
-        fputs("fmemopen unavailable; skipping render smoke\n", stderr);
+    FILE *stream = tmpfile();
+    CHECK(stream != NULL);
+    if (stream == NULL)
         return;
-    }
-    nero_inline_help_render(mem, "wifi analyze", 1, 0, 0);
-    fflush(mem);
-    long n = ftell(mem);
-    fclose(mem);
-    if (n > 0) {
-        buf[n < (long)sizeof(buf) ? n : (long)sizeof(buf) - 1] = '\0';
-        CHECK(strstr(buf, "wifi analyze <PCAP>") != NULL);
-        CHECK(strstr(buf, "example:") != NULL);
-    }
+
+    nero_inline_help_render(stream, "wifi analyze", 1, 0, 0);
+    CHECK(fflush(stream) == 0);
+    CHECK(fseek(stream, 0, SEEK_SET) == 0);
+    size_t n = fread(buf, 1, sizeof(buf) - 1, stream);
+    CHECK(!ferror(stream));
+    CHECK(n > 0);
+    /* Detect truncation rather than accepting only a matching output prefix. */
+    CHECK(fgetc(stream) == EOF);
+    CHECK(!ferror(stream));
+    buf[n] = '\0';
+    CHECK(strstr(buf, "wifi analyze <PCAP>") != NULL);
+    CHECK(strstr(buf, "example:") != NULL);
+    CHECK(fclose(stream) == 0);
 }
 
 int main(void)
