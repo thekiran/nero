@@ -5,7 +5,14 @@ This is a source inspection, not a runtime certification. No compiler, shell, Qt
 
 ## Current release state
 
-**Three-frontend parity: BLOCKED (GUI).** Two of the three frontends now exist; the GUI remains the open prerequisite.
+**Three-frontend parity: PARTIAL.** All three frontends now build and run from one C11 core; per-feature three-frontend contracts are still being wired (the GUI currently surfaces version + diagnostics only).
+
+### Progress — 2026-11-17 (nero-gui foundation delivered)
+
+- `nero-gui` is a **native Qt 6 / Qt Quick** application (`apps/desktop/`) built only when `NERO_BUILD_GUI=ON`; the default CLI/Console build needs no C++ toolchain or Qt. On macOS arm64 with Qt 6.12 it builds `nero-gui.app` cleanly and runs with no QML/runtime errors.
+- It shows **real data from the shared core**, not mockups: `NeroController` calls `nero_doctor()` (captured via `open_memstream`) and reads the build version — the same core the CLI/console use. No shell strings, no ANSI parsing. Verified by an offscreen `--grab` screenshot of the live window.
+- Dark workstation theme and the full navigation shell are in place; non-Overview pages render an honest "not implemented" state with **no sample data**.
+- Remaining: Linux/Windows GUI builds + a Qt CI job; wiring Port Scanner / Wi-Fi / PCAP pages to the real C operations.
 
 ### Progress — 2026-11-17 (neroconsole delivered)
 

@@ -15,6 +15,7 @@ option(NERO_STATIC_ANALYSIS "Enable MSVC code analysis for foundation targets" O
 # this registers the non-gating source-baseline-audit test; it is OFF by
 # default so a legitimate source change never fails the default test run.
 option(NERO_SOURCE_AUDIT "Register the non-gating source baseline hash audit" OFF)
+option(NERO_BUILD_GUI "Build the NERO Desktop (Qt 6) application" OFF)
 include(CTest)
 
 include(cmake/NeroTargets.cmake)
@@ -418,4 +419,13 @@ if(BUILD_TESTING AND NERO_CORPUS_REPLAY)
     add_test(NAME fuzz-corpus COMMAND ${Python3_EXECUTABLE}
         "${PROJECT_SOURCE_DIR}/tests/fuzz/run.py" $<TARGET_FILE_DIR:fuzz-parser>)
     set_tests_properties(fuzz-corpus PROPERTIES TIMEOUT 180)
+endif()
+
+# NERO Desktop (Qt 6) — optional; enables C++ only when explicitly requested so
+# the default CLI/Console build needs no C++ toolchain or Qt.
+if(NERO_BUILD_GUI)
+    enable_language(CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    add_subdirectory(apps/desktop)
 endif()
