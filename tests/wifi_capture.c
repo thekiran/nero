@@ -1,5 +1,15 @@
 /* Deterministic libpcap state-machine tests; never opens a radio or BPF device. */
-#include <assert.h>
+#include <stdio.h>
+
+static int failures;
+
+#define CHECK(condition)                                                                          \
+    do {                                                                                          \
+        if (!(condition)) {                                                                       \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition);                  \
+            ++failures;                                                                           \
+        }                                                                                         \
+    } while (0)
 #ifndef NERO_SAFE_TEST
 #define NERO_SAFE_TEST
 #endif
@@ -26,7 +36,8 @@ static int fake_set_datalink(pcap_t *p, int value)
 }
 static int fake_nonblock(pcap_t *p, int value, char *error)
 {
-    (void)p; assert(value == 1);
+    (void)p;
+    CHECK(value == 1);
     snprintf(error, 256, "nonblock failure");
     return nonblock_result;
 }
@@ -49,7 +60,9 @@ static int fake_next(pcap_t *p, struct nero_pcap_pkthdr **h, const unsigned char
 static int callback(void *context, const nero_wifi_capture_packet *packet)
 {
     int *seen = context;
-    assert(packet->linktype == NERO_WIFI_LINKTYPE_RADIOTAP);
+    CHECK(packet != NULL);
+    if (packet != NULL)
+        CHECK(packet->linktype == NERO_WIFI_LINKTYPE_RADIOTAP);
     ++*seen;
     return 0;
 }
@@ -72,35 +85,36 @@ int main(void)
 {
     char error[256] = {0};
     nero_wifi_capture c = fixture();
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == 0);
-    assert(c.monitor_set && c.linktype == 127 && !c.link_fallback);
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == 0);
+    CHECK(c.monitor_set && c.linktype == 127 && !c.link_fallback);
     /* Stay silent longer than the former 3-second fallback, then deliver data. */
     idle_polls = 16;
     int seen = 0;
     nero_wifi_capture_summary summary;
-    assert(nero_wifi_capture_run(&c, callback, &seen, &stop_test, 200,
+    CHECK(nero_wifi_capture_run(&c, callback, &seen, &stop_test, 200,
                                  &summary, error, sizeof(error)) == 1);
-    assert(seen == 1 && summary.packets == 1 && creates == 1 && closes == 0);
-    assert(summary.monitor_set && !summary.link_fallback);
+    CHECK(seen == 1 && summary.packets == 1 && creates == 1 && closes == 0);
+    CHECK(summary.monitor_set && !summary.link_fallback);
     c = fixture(); stop_on_idle = 1;
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == 0);
-    assert(nero_wifi_capture_run(&c, callback, &seen, &stop_test, 1,
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == 0);
+    CHECK(nero_wifi_capture_run(&c, callback, &seen, &stop_test, 1,
                                  &summary, error, sizeof(error)) == 1);
-    assert(summary.packets == 0 && polls == 1 && creates == 1);
+    CHECK(summary.packets == 0 && polls == 1 && creates == 1);
     c = fixture(); allow_dlt = 105;
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == 0 && c.linktype == 105);
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == 0 && c.linktype == 105);
     c = fixture(); allow_dlt = 0;
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == -1 && !c.monitor_set);
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == -1 && !c.monitor_set);
     c = fixture(); activate_result = -1;
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == -1 && creates == 1);
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == -1 && creates == 1);
     c = fixture(); rfmon_result = -1;
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == -1);
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == -1);
     c = fixture(); c.api.set_rfmon = NULL;
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == -1);
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == -1);
     c = fixture(); nonblock_result = -1;
-    assert(capture_open_handle(&c, 1, error, sizeof(error)) == -1);
+    CHECK(capture_open_handle(&c, 1, error, sizeof(error)) == -1);
     c = fixture();
-    assert(capture_open_handle(&c, 0, error, sizeof(error)) == 0 && dlt == 1);
-    puts("wifi capture state-machine tests passed");
-    return 0;
+    CHECK(capture_open_handle(&c, 0, error, sizeof(error)) == 0 && dlt == 1);
+    if (failures == 0)
+        puts("wifi capture state-machine tests passed");
+    return failures == 0 ? 0 : 1;
 }
