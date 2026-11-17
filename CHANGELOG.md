@@ -6,13 +6,40 @@ advertised as stable or security-certified.
 
 ## Unreleased
 
-- Fix `wifi monitor` showing an empty survey labelled `MONITOR` on adapters that
-  accept monitor mode but deliver no 802.11 frames (built-in Apple Silicon
-  Wi-Fi). The status bar now reports the real capture mode live (`LINK-LAYER`
-  after the backend's link-layer fallback), and the access-point table falls
-  back to the operating system's scan, labelled `OS-SCAN`, when no 802.11 frame
-  arrives within four seconds. `wifi monitor --no-scan` keeps the survey
-  strictly passive. Stations are never synthesised.
+- Harden Wi-Fi frame tracking for honest reporting, with regression tests:
+  record the radiotap RSSI for probe-request-only and disassoc/deauth stations
+  instead of discarding it (MAC-randomized devices no longer show an empty
+  SIGNAL); stop reporting an authentication-only station as ASSOCIATED
+  (authentication precedes association); resolve the station in a disassoc/deauth
+  from the BSSID so an unseen AP's own MAC is never recorded as a phantom client;
+  and carry the observed channel on authentication frames.
+- Export CSV honestly: leave the AP/station channel and RSSI fields blank when
+  they were never observed instead of writing a fabricated 0.
+- Keep offline analysis of a capture truncated mid-write (a killed capture
+  process): stop at the last complete record and keep every parsed frame rather
+  than failing and discarding the whole file.
+- Serialize the capture session's tracker lifetime under its mutex so offline
+  `wifi analyze` cannot swap and free the tracker while a reader is mid-call.
+
+- Prepare macOS monitor capture using public CoreWLAN: disassociate from the
+  network and set the existing channel before activating RFMON. A live en0
+  diagnostic delivered 141 genuine management frames in 15 seconds after this
+  preparation, versus zero without it. Wi-Fi may need manual reconnection;
+  client visibility still depends on received station frames.
+
+- Require explicit consent before macOS `wifi monitor` disassociates the active
+  network. Because starting monitor mode drops the current Wi-Fi connection,
+  the live survey now prompts for confirmation and, when declined or run
+  non-interactively, falls back to the read-only link-layer survey instead of
+  silently disconnecting. `wifi monitor --link` still selects that mode directly.
+
+- Keep `wifi monitor` in genuine 802.11/radiotap capture: explicitly select
+  the radio link type, reject Ethernet-only monitor activation, and remove
+  the automatic three-second downgrade. Silent captures remain unverified.
+  CoreWLAN/ARP assistance is restricted to explicit `--link` sessions, so an
+  active scan cannot interrupt RFMON or substitute LAN neighbors for observed
+  wireless stations. Nonblocking reads keep idle capture cancellable.
+  Add offline libpcap state-machine regression coverage.
 - Extract the Wi-Fi table renderer into a shared, capability-gated table engine
   (`nero/table.h`, `src/cli/table.c`) used by every Wi-Fi surface — the static
   `wifi aps`/`wifi clients`/capture-statistics tables and the live monitor alike.

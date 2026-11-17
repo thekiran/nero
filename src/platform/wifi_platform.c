@@ -1,7 +1,7 @@
 /* Platform Wi-Fi discovery.
  *
- * macOS uses CoreWLAN through the Objective-C runtime, so the project remains a
- * pure C build. CoreWLAN scan is active but never joins a network. Linux and
+ * macOS reads interface metadata through the Objective-C runtime. Active scans
+ * run inside the signed NEROWiFi app with its own Location authorization. Linux and
  * Windows expose read-only interface metadata; passive frames arrive through
  * the libpcap/Npcap capture backend. Any unsupported operation returns an
  * explicit error instead of fabricated results. */
@@ -34,10 +34,15 @@
 #define PROCESSOR_ARCHITECTURE_ARM64 12
 #endif
 #else
+#include <arpa/inet.h>
 #include <net/if.h>
+#include <netinet/in.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 #if defined(__APPLE__)
+#include <net/if_dl.h>
+#include <net/route.h>
+#include <sys/socket.h>
 #include <sys/sysctl.h>
 #endif
 #endif
@@ -96,21 +101,9 @@ static id msg_obj_obj(id object, const char *selector, id argument)
     return ((id (*)(id, SEL, id))objc_msgSend)(object, sel_registerName(selector), argument);
 }
 
-static id msg_scan(id object, const char *selector, id argument, nero_objc_bool hidden, id *error)
-{
-    return ((id (*)(id, SEL, id, nero_objc_bool, id *))objc_msgSend)(
-        object, sel_registerName(selector), argument, hidden, error);
-}
-
 static nero_objc_bool msg_bool(id object, const char *selector)
 {
     return ((nero_objc_bool (*)(id, SEL))objc_msgSend)(object, sel_registerName(selector));
-}
-
-static nero_objc_bool msg_supports(id object, const char *selector, long value)
-{
-    return ((nero_objc_bool (*)(id, SEL, long))objc_msgSend)(object, sel_registerName(selector),
-                                                             value);
 }
 
 static long msg_long(id object, const char *selector)
@@ -172,85 +165,6 @@ static void fill_interface(id interface, nero_wifi_interface_info *info)
         info->band = band_from_corewlan(msg_long(channel, "channelBand"));
     }
     info->mode = (int)msg_long(interface, "interfaceMode");
-}
-
-static nero_wifi_security network_security(id network)
-{
-    if (msg_supports(network, "supportsSecurity:", 11) ||
-        msg_supports(network, "supportsSecurity:", 12)) {
-        return NERO_WIFI_SEC_WPA3;
-    }
-    if (msg_supports(network, "supportsSecurity:", 13))
-        return NERO_WIFI_SEC_WPA2_WPA3;
-    if (msg_supports(network, "supportsSecurity:", 14) ||
-        msg_supports(network, "supportsSecurity:", 15)) {
-        return NERO_WIFI_SEC_OWE;
-    }
-    if (msg_supports(network, "supportsSecurity:", 4) ||
-        msg_supports(network, "supportsSecurity:", 5) ||
-        msg_supports(network, "supportsSecurity:", 9) ||
-        msg_supports(network, "supportsSecurity:", 10)) {
-        return NERO_WIFI_SEC_WPA2;
-    }
-    if (msg_supports(network, "supportsSecurity:", 2) ||
-        msg_supports(network, "supportsSecurity:", 3) ||
-        msg_supports(network, "supportsSecurity:", 7) ||
-        msg_supports(network, "supportsSecurity:", 8)) {
-        return NERO_WIFI_SEC_WPA;
-    }
-    if (msg_supports(network, "supportsSecurity:", 1) ||
-        msg_supports(network, "supportsSecurity:", 6)) {
-        return NERO_WIFI_SEC_WEP;
-    }
-    if (msg_supports(network, "supportsSecurity:", 0))
-        return NERO_WIFI_SEC_OPEN;
-    return NERO_WIFI_SEC_UNKNOWN;
-}
-
-static void fill_network(id network, nero_wifi_ap *ap, int64_t now)
-{
-    memset(ap, 0, sizeof(*ap));
-    ap->first_seen_us = now;
-    ap->last_seen_us = now;
-    ap->security = network_security(network);
-
-    const char *bssid = ns_utf8(msg_obj(network, "bssid"));
-    if (bssid != NULL && nero_wifi_parse_mac(bssid, ap->bssid) == 0) {
-        ap->has_bssid = 1;
-    } else {
-        ap->redacted = 1;
-    }
-
-    const char *ssid = ns_utf8(msg_obj(network, "ssid"));
-    if (ssid != NULL && ssid[0] != '\0') {
-        size_t length = strlen(ssid);
-        if (length > NERO_WIFI_SSID_MAX)
-            length = NERO_WIFI_SSID_MAX;
-        size_t written = 0;
-        for (size_t i = 0; i < length; ++i) {
-            unsigned char ch = (unsigned char)ssid[i];
-            ap->ssid[written++] = (ch >= 32 && ch < 127) ? (char)ch : '?';
-        }
-        ap->ssid[written] = '\0';
-        ap->ssid_len = (uint8_t)written;
-        ap->hidden = 0;
-    } else {
-        ap->hidden = 1;
-    }
-
-    id channel = msg_obj(network, "wlanChannel");
-    if (channel != NULL) {
-        ap->has_channel = 1;
-        ap->channel = (int)msg_long(channel, "channelNumber");
-        ap->band = band_from_corewlan(msg_long(channel, "channelBand"));
-        int frequency = nero_wifi_channel_to_frequency(ap->channel, ap->band);
-        if (frequency > 0) {
-            ap->has_frequency = 1;
-            ap->frequency_mhz = frequency;
-        }
-    }
-    ap->rssi = (int)msg_long(network, "rssiValue");
-    ap->has_rssi = ap->rssi != 0;
 }
 
 static void fill_host_apple(nero_wifi_platform_status *status)
@@ -341,78 +255,17 @@ int nero_wifi_platform_list_interfaces(nero_wifi_interface_info *out, int capaci
     return 0;
 }
 
+#include "macos/wifi_helper_client.h"
+
 int nero_wifi_platform_scan(const char *interface_name, nero_wifi_ap *out, int capacity, int *count,
                             nero_wifi_platform_capabilities *capabilities, char *error,
                             size_t error_len)
 {
-    if (out == NULL || count == NULL || capacity <= 0) {
+    if (!out || !count || capacity <= 0) {
         set_error(error, error_len, "invalid scan buffer");
         return -1;
     }
-    *count = 0;
-    if (capabilities != NULL) {
-        memset(capabilities, 0, sizeof(*capabilities));
-        capabilities->corewlan_available = 1;
-        capabilities->active_scan_available = 1;
-        copy_text(capabilities->backend, sizeof(capabilities->backend), "CoreWLAN (active scan)");
-    }
-
-    id pool = autorelease_pool();
-    id client = corewlan_client();
-    if (client == NULL) {
-        drain_pool(pool);
-        set_error(error, error_len, "CoreWLAN is unavailable");
-        return -1;
-    }
-    id interface = NULL;
-    if (interface_name != NULL && interface_name[0] != '\0') {
-        id name = ((id (*)(id, SEL, const char *))objc_msgSend)(
-            (id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"),
-            interface_name);
-        if (name != NULL)
-            interface = msg_obj_obj(client, "interfaceWithName:", name);
-    }
-    if (interface == NULL)
-        interface = msg_obj(client, "interface");
-    if (interface == NULL) {
-        drain_pool(pool);
-        set_error(error, error_len, "no Wi-Fi interface");
-        return -1;
-    }
-
-    id scan_error = NULL;
-    id networks =
-        msg_scan(interface, "scanForNetworksWithName:includeHidden:error:", NULL, 1, &scan_error);
-    if (networks == NULL) {
-        const char *description = scan_error != NULL
-                                      ? ns_utf8(msg_obj(scan_error, "localizedDescription"))
-                                      : "CoreWLAN scan failed";
-        set_error(error, error_len, description != NULL ? description : "CoreWLAN scan failed");
-        drain_pool(pool);
-        return -1;
-    }
-
-    id array = msg_obj(networks, "allObjects");
-    if (array == NULL) {
-        drain_pool(pool);
-        return 0;
-    }
-    unsigned long total = (unsigned long)msg_long(array, "count");
-    int redacted = 0;
-    int64_t now = nero_wifi_now_us();
-    for (unsigned long i = 0; i < total && *count < capacity; ++i) {
-        id network = msg_index(array, "objectAtIndex:", i);
-        if (network == NULL)
-            continue;
-        fill_network(network, &out[*count], now);
-        if (!out[*count].has_bssid || out[*count].redacted)
-            redacted = 1;
-        ++*count;
-    }
-    if (capabilities != NULL)
-        capabilities->identifiers_redacted = redacted;
-    drain_pool(pool);
-    return 0;
+    return helper_scan(interface_name, out, capacity, count, capabilities, error, error_len);
 }
 
 #elif defined(_WIN32)
@@ -736,4 +589,259 @@ int nero_wifi_platform_scan(const char *interface_name, nero_wifi_ap *out, int c
     return -1;
 }
 
+#endif
+
+/* ---- Read-only OS neighbor cache --------------------------------------- *
+ * Provides a strictly local fallback for devices that cannot deliver 802.11
+ * monitor frames. The ARP table is passive state; reading it sends no probes,
+ * joins no network, and changes no interface. An entry is a device that has
+ * recently answered on the local link, not a proven Wi-Fi station. */
+#if defined(NERO_SAFE_TEST) || defined(NERO_NETWORK_UNAVAILABLE)
+int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neighbor *out,
+                                      int capacity, char *error, size_t error_len)
+{
+    (void)interface_name;
+    (void)out;
+    (void)capacity;
+    set_error(error, error_len, "the OS neighbor cache is unavailable in this build");
+    return 0;
+}
+#else
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
+static int neighbor_mac_valid(const uint8_t mac[NERO_WIFI_MAC_LEN])
+{
+    static const uint8_t zero[NERO_WIFI_MAC_LEN] = {0};
+    if (memcmp(mac, zero, NERO_WIFI_MAC_LEN) == 0)
+        return 0;
+    return (mac[0] & 0x01) == 0; /* unicast only: skip multicast/broadcast */
+}
+#endif
+
+#if defined(_WIN32)
+int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neighbor *out,
+                                      int capacity, char *error, size_t error_len)
+{
+    (void)interface_name;
+    if (out == NULL || capacity <= 0)
+        return 0;
+    ULONG size = 0;
+    DWORD status = GetIpNetTable(NULL, &size, FALSE);
+    if (status != ERROR_INSUFFICIENT_BUFFER || size == 0) {
+        set_error(error, error_len, "the OS IPv4 neighbor table is unavailable");
+        return 0;
+    }
+    PMIB_IPNETTABLE table = (PMIB_IPNETTABLE)malloc(size);
+    if (table == NULL) {
+        set_error(error, error_len, "out of memory");
+        return 0;
+    }
+    status = GetIpNetTable(table, &size, FALSE);
+    if (status != NO_ERROR) {
+        free(table);
+        set_error(error, error_len, "could not read the OS IPv4 neighbor table");
+        return 0;
+    }
+    int count = 0;
+    for (DWORD index = 0; index < table->dwNumEntries && count < capacity; ++index) {
+        const MIB_IPNETROW *row = &table->table[index];
+        if (row->dwPhysAddrLen != NERO_WIFI_MAC_LEN)
+            continue;
+        uint8_t mac[NERO_WIFI_MAC_LEN];
+        memcpy(mac, row->bPhysAddr, NERO_WIFI_MAC_LEN);
+        if (!neighbor_mac_valid(mac))
+            continue;
+        nero_wifi_neighbor *neighbor = &out[count++];
+        memset(neighbor, 0, sizeof(*neighbor));
+        memcpy(neighbor->mac, mac, NERO_WIFI_MAC_LEN);
+        struct in_addr address;
+        address.s_addr = row->dwAddr;
+        if (inet_ntop(AF_INET, &address, neighbor->ip, sizeof(neighbor->ip)) == NULL)
+            neighbor->ip[0] = '\0';
+    }
+    free(table);
+    if (error != NULL && error_len > 0)
+        error[0] = '\0';
+    return count;
+}
+#elif defined(__linux__)
+int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neighbor *out,
+                                      int capacity, char *error, size_t error_len)
+{
+    if (out == NULL || capacity <= 0)
+        return 0;
+    FILE *file = fopen("/proc/net/arp", "r");
+    if (file == NULL) {
+        set_error(error, error_len, "could not read /proc/net/arp");
+        return 0;
+    }
+    char line[256];
+    if (fgets(line, sizeof(line), file) == NULL) {
+        fclose(file);
+        return 0;
+    }
+    int count = 0;
+    while (count < capacity && fgets(line, sizeof(line), file) != NULL) {
+        char ip[64], hardware[64], mask[64], device[64];
+        unsigned type = 0, flags = 0;
+        if (sscanf(line, "%63s 0x%x 0x%x %63s %63s %63s", ip, &type, &flags, hardware, mask,
+                   device) != 6)
+            continue;
+        (void)type;
+        if ((flags & 0x2) == 0) /* incomplete entry: no verified MAC */
+            continue;
+        if (interface_name != NULL && interface_name[0] != '\0' &&
+            strcmp(interface_name, device) != 0)
+            continue;
+        unsigned int bytes[NERO_WIFI_MAC_LEN];
+        if (sscanf(hardware, "%x:%x:%x:%x:%x:%x", &bytes[0], &bytes[1], &bytes[2], &bytes[3],
+                   &bytes[4], &bytes[5]) != NERO_WIFI_MAC_LEN)
+            continue;
+        uint8_t mac[NERO_WIFI_MAC_LEN];
+        for (int i = 0; i < NERO_WIFI_MAC_LEN; ++i)
+            mac[i] = (uint8_t)bytes[i];
+        if (!neighbor_mac_valid(mac))
+            continue;
+        nero_wifi_neighbor *neighbor = &out[count++];
+        memset(neighbor, 0, sizeof(*neighbor));
+        memcpy(neighbor->mac, mac, NERO_WIFI_MAC_LEN);
+        snprintf(neighbor->ip, sizeof(neighbor->ip), "%.15s", ip);
+    }
+    fclose(file);
+    if (error != NULL && error_len > 0)
+        error[0] = '\0';
+    return count;
+}
+#elif defined(__APPLE__)
+#define NERO_ROUNDUP(value) ((value) > 0 ? (1 + (((value) - 1) | 3)) : 4)
+
+static int neighbor_from_mac_text(const char *mac_text, uint8_t mac[NERO_WIFI_MAC_LEN])
+{
+    unsigned int bytes[NERO_WIFI_MAC_LEN];
+    if (sscanf(mac_text, "%x:%x:%x:%x:%x:%x", &bytes[0], &bytes[1], &bytes[2], &bytes[3],
+               &bytes[4], &bytes[5]) != NERO_WIFI_MAC_LEN)
+        return 0;
+    for (int i = 0; i < NERO_WIFI_MAC_LEN; ++i)
+        mac[i] = (uint8_t)bytes[i];
+    return neighbor_mac_valid(mac);
+}
+
+int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neighbor *out,
+                                      int capacity, char *error, size_t error_len)
+{
+    if (out == NULL || capacity <= 0)
+        return 0;
+    int count = 0;
+    /* Modern macOS returns the IPv4 ARP table through this sysctl only on some
+     * releases, so try it first and fall back to the system arp tool. */
+    int mib[6] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO};
+    size_t needed = 0;
+    if (sysctl(mib, 6, NULL, &needed, NULL, 0) == 0 && needed > 0) {
+        char *buffer = malloc(needed);
+        if (buffer != NULL) {
+            size_t actual = needed;
+            if (sysctl(mib, 6, buffer, &actual, NULL, 0) == 0) {
+                char *cursor = buffer;
+                char *limit = buffer + actual;
+                while (cursor + sizeof(struct rt_msghdr) <= limit) {
+                    struct rt_msghdr *message = (struct rt_msghdr *)cursor;
+                    if (message->rtm_msglen == 0 || cursor + message->rtm_msglen > limit)
+                        break;
+                    if ((message->rtm_flags & RTF_LLINFO) != 0 && message->rtm_addrs != 0) {
+                        struct sockaddr *address = (struct sockaddr *)(message + 1);
+                        struct sockaddr_in *destination = NULL;
+                        struct sockaddr_dl *link = NULL;
+                        char name[IFNAMSIZ] = {0};
+                        for (int index = 0; index < RTAX_MAX; ++index) {
+                            if ((message->rtm_addrs & (1 << index)) == 0)
+                                continue;
+                            if (address->sa_len == 0)
+                                break;
+                            if (index == RTAX_DST && address->sa_family == AF_INET)
+                                destination = (struct sockaddr_in *)address;
+                            else if (index == RTAX_GATEWAY && address->sa_family == AF_LINK)
+                                link = (struct sockaddr_dl *)address;
+                            else if (index == RTAX_IFP && address->sa_family == AF_LINK) {
+                                struct sockaddr_dl *ifp = (struct sockaddr_dl *)address;
+                                if (ifp->sdl_nlen > 0 && ifp->sdl_nlen < IFNAMSIZ)
+                                    memcpy(name, ifp->sdl_data, ifp->sdl_nlen);
+                            }
+                            address = (struct sockaddr *)((char *)address +
+                                                          NERO_ROUNDUP(address->sa_len));
+                        }
+                        if (destination != NULL && link != NULL &&
+                            link->sdl_alen == NERO_WIFI_MAC_LEN) {
+                            const uint8_t *mac = (const uint8_t *)LLADDR(link);
+                            int matches = interface_name == NULL || interface_name[0] == '\0';
+                            if (!matches && name[0] != '\0')
+                                matches = strcmp(interface_name, name) == 0;
+                            if (!matches && name[0] == '\0' && interface_name != NULL)
+                                matches = link->sdl_index == if_nametoindex(interface_name);
+                            if (neighbor_mac_valid(mac) && matches && count < capacity) {
+                                nero_wifi_neighbor *neighbor = &out[count++];
+                                memset(neighbor, 0, sizeof(*neighbor));
+                                memcpy(neighbor->mac, mac, NERO_WIFI_MAC_LEN);
+                                if (inet_ntop(AF_INET, &destination->sin_addr, neighbor->ip,
+                                              sizeof(neighbor->ip)) == NULL)
+                                    neighbor->ip[0] = '\0';
+                            }
+                        }
+                    }
+                    cursor += message->rtm_msglen;
+                }
+            }
+            free(buffer);
+        }
+    }
+    if (count == 0) {
+        FILE *pipe = popen("/usr/sbin/arp -an 2>/dev/null", "r");
+        if (pipe != NULL) {
+            char line[256];
+            while (count < capacity && fgets(line, sizeof(line), pipe) != NULL) {
+                char ip[64], mac_text[64], device[64];
+                if (sscanf(line, "%*[^(](%63[^)]) at %63s on %63s", ip, mac_text, device) != 3)
+                    continue;
+                if (interface_name != NULL && interface_name[0] != '\0' &&
+                    strcmp(interface_name, device) != 0)
+                    continue;
+                uint8_t mac[NERO_WIFI_MAC_LEN];
+                if (!neighbor_from_mac_text(mac_text, mac))
+                    continue;
+                nero_wifi_neighbor *neighbor = &out[count++];
+                memset(neighbor, 0, sizeof(*neighbor));
+                memcpy(neighbor->mac, mac, NERO_WIFI_MAC_LEN);
+                snprintf(neighbor->ip, sizeof(neighbor->ip), "%.15s", ip);
+            }
+            pclose(pipe);
+        }
+    }
+    /* Recent macOS hands the sandboxed CLI process an empty routing table, so
+     * the in-process reads above return nothing even when the ARP cache has
+     * entries. Fall back to the signed NEROWiFi.app helper, which LaunchServices
+     * runs as its own responsible process and can read the real table. Needs no
+     * Location permission; never probes or sends traffic. */
+    if (count == 0 && getuid() == geteuid() && geteuid() != 0) {
+        char helper_error[160] = {0};
+        int helper_count = 0;
+        if (helper_neighbors(interface_name, out, capacity, &helper_count, helper_error,
+                             sizeof(helper_error)) == 0 &&
+            helper_count > 0)
+            count = helper_count;
+    }
+    if (count == 0)
+        set_error(error, error_len, "could not read the OS neighbor cache");
+    else if (error != NULL && error_len > 0)
+        error[0] = '\0';
+    return count;
+}
+#else
+int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neighbor *out,
+                                      int capacity, char *error, size_t error_len)
+{
+    (void)interface_name;
+    (void)out;
+    (void)capacity;
+    set_error(error, error_len, "the OS neighbor cache is unavailable on this platform");
+    return 0;
+}
+#endif
 #endif

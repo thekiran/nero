@@ -25,6 +25,8 @@ CLI_SUPPORT_SOURCES := \
     src/cli/input.c \
     src/cli/history.c \
     src/cli/render.c \
+    src/cli/suggestion_engine.c \
+    src/cli/inline_help.c \
     src/cli/table.c \
     src/cli/operation_ui.c \
     src/cli/commands.c \
@@ -40,7 +42,7 @@ CLI_SUPPORT_SOURCES := \
     src/cli/ascii.c
 
 CLI_SOURCES := src/cli/terminal.c $(CLI_SUPPORT_SOURCES)
-CLI_HEADERS := $(wildcard include/nero/*.h src/cli/*.h src/modules/*internal.h src/modules/syn/*.h)
+CLI_HEADERS := $(wildcard include/nero/*.h src/cli/*.h src/modules/*internal.h src/modules/syn/*.h src/platform/macos/wifi_helper*.h)
 SCANNER_SOURCES := src/modules/portscanner.c src/modules/scan_session.c
 WIFI_CORE_SOURCES := \
     src/modules/wifi/wifi_ieee80211.c \
@@ -197,6 +199,18 @@ $(TEST_DIR)/wifi-nl80211: tests/wifi_nl80211.c src/platform/wifi_nl80211.c \
 $(TEST_DIR)/table-engine: tests/test_table_engine.c src/cli/table.c include/nero/table.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/test_table_engine.c src/cli/table.c -o $@
 
+# Pure, deterministic IntelliSense engine and contextual-help fixtures. The
+# engine links against nothing but its own translation unit; no terminal,
+# network or command dispatch is involved.
+$(TEST_DIR)/suggestion-engine: tests/suggestion_engine_test.c src/cli/suggestion_engine.c \
+                               src/cli/suggestion_engine.h src/cli/suggestion_catalog.h \
+                               src/cli/command_catalog.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) -Isrc/cli $(SANITIZERS) tests/suggestion_engine_test.c src/cli/suggestion_engine.c -o $@
+
+$(TEST_DIR)/inline-help: tests/inline_help_test.c src/cli/inline_help.c src/cli/suggestion_engine.c \
+                         src/cli/inline_help.h src/cli/suggestion_engine.h src/cli/suggestion_catalog.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) -Isrc/cli $(SANITIZERS) tests/inline_help_test.c src/cli/inline_help.c src/cli/suggestion_engine.c -o $@
+
 $(TEST_DIR)/workload-profile: tests/workload_profile.c src/core/hardware.c src/core/platform.c include/nero/hardware.h include/nero/platform.h Makefile | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) -DNERO_HARDWARE_TEST_HOOKS tests/workload_profile.c src/core/hardware.c src/core/platform.c -o $@
 
@@ -216,7 +230,8 @@ TEST_BINS := $(TEST_DIR)/nero-safe $(TEST_DIR)/interfaces \
              $(TEST_DIR)/operation-layout $(TEST_DIR)/portscanner-reliability $(TEST_DIR)/logging-fixture \
              $(TEST_DIR)/scanner-runtime $(TEST_DIR)/live-select-pty $(TEST_DIR)/parser-boundaries $(TEST_DIR)/scan-session \
              $(TEST_DIR)/workload-profile $(TEST_DIR)/syn-settings $(TEST_DIR)/wifi-core \
-             $(TEST_DIR)/wifi-nl80211 $(TEST_DIR)/table-engine
+             $(TEST_DIR)/wifi-nl80211 $(TEST_DIR)/table-engine \
+             $(TEST_DIR)/suggestion-engine $(TEST_DIR)/inline-help
 
 ifeq ($(UNAME_S),Darwin)
 $(TEST_DIR)/interfaces-mock: tests/interfaces_mock_macos.c src/platform/macos/select_interface_macos.c Makefile | $(TEST_DIR)
@@ -249,6 +264,8 @@ endif
 	$(TEST_DIR)/wifi-core
 	$(TEST_DIR)/wifi-nl80211
 	$(TEST_DIR)/table-engine
+	$(TEST_DIR)/suggestion-engine
+	$(TEST_DIR)/inline-help
 	$(TEST_DIR)/workload-profile
 	NERO_LOG_FILE=:memory: $(TEST_DIR)/syn-settings
 	$(TEST_DIR)/diagnostic-process
@@ -262,6 +279,7 @@ endif
 	NERO_LOG_FILE=:memory: python3 tests/test_safe.py $(TEST_DIR)
 	NERO_LOG_FILE=:memory: python3 tests/test_wifi_tables.py $(TEST_DIR)/nero-safe
 	NERO_LOG_FILE=:memory: python3 tests/test_terminal_quality.py $(TEST_DIR)/nero-mock
+	NERO_LOG_FILE=:memory: python3 tests/test_intellisense.py $(TEST_DIR)/nero-mock
 	NERO_LOG_FILE=:memory: python3 tests/test_operation_layout.py $(TEST_DIR)/operation-layout
 
 test-sanitize:
@@ -299,3 +317,41 @@ help:
 test: test-console-parity
 test-console-parity: $(TARGET) $(CONSOLE_TARGET)
 	python3 tests/test_console_parity.py ./$(TARGET) ./$(CONSOLE_TARGET)
+
+# The GUI helper is separate from the C CLI; no authorization prompt at build time.
+WIFI_SIGN_IDENTITY ?= -
+ifeq ($(UNAME_S),Darwin)
+.PHONY: wifi-helper
+wifi-helper: NEROWiFi.app/Contents/MacOS/NEROWiFi
+	cp macos/NEROWiFi/Info.plist NEROWiFi.app/Contents/Info.plist
+	codesign --force --options runtime --entitlements macos/NEROWiFi/Entitlements.plist --sign "$(WIFI_SIGN_IDENTITY)" NEROWiFi.app
+	codesign --verify --strict NEROWiFi.app
+NEROWiFi.app/Contents/MacOS/NEROWiFi: macos/NEROWiFi/main.m macos/NEROWiFi/Info.plist
+	mkdir -p NEROWiFi.app/Contents/MacOS
+	$(CC) -fobjc-arc -Wall -Wextra -Werror -mmacosx-version-min=11.0 macos/NEROWiFi/main.m -o $@ -framework Cocoa -framework CoreLocation -framework CoreWLAN
+endif
+
+$(TEST_DIR)/wifi-helper-protocol: tests/wifi_helper_protocol.c src/platform/macos/wifi_helper_protocol.h third_party/cjson/cJSON.c $(WIFI_CORE_SOURCES) $(TEST_DIR)/wifi-helper-json.o Makefile | $(TEST_DIR)
+	$(CC) $(SAFE_FLAGS) $(SANITIZERS) tests/wifi_helper_protocol.c $(TEST_DIR)/wifi-helper-json.o $(WIFI_CORE_SOURCES) -o $@ -pthread -lm
+
+$(TEST_DIR)/wifi-helper-json.o: third_party/cjson/cJSON.c Makefile | $(TEST_DIR)
+	$(CC) $(SAFE_FLAGS) $(SANITIZERS) -Wno-deprecated-declarations -c $< -o $@
+
+test: test-wifi-helper
+.PHONY: test-wifi-helper
+test-wifi-helper: $(TEST_DIR)/wifi-helper-protocol
+	$(TEST_DIR)/wifi-helper-protocol
+
+ifeq ($(UNAME_S),Darwin)
+.PHONY: test-wifi-helper-bundle
+test-wifi-helper-bundle: wifi-helper
+	python3 tests/test_macos_wifi_bundle.py NEROWiFi.app
+endif
+
+$(TEST_DIR)/wifi-capture: tests/wifi_capture.c src/platform/wifi_capture.c include/nero/wifi_capture.h Makefile | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(SAFE_FLAGS) $(SANITIZERS) tests/wifi_capture.c -o $@ $(DL_LIBS)
+
+.PHONY: test-wifi-capture
+test: test-wifi-capture
+test-wifi-capture: $(TEST_DIR)/wifi-capture
+	$(TEST_DIR)/wifi-capture

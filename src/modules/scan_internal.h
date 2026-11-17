@@ -17,9 +17,9 @@
 #define SCAN_TOTAL_PORTS 65535
 #define DISCOVERY_VIEW_CAP 512
 
-/* Yığın dizilerinin derleme-zamanı üst sınırları. Tüm profiller ve manuel
- * ayar bu sınırların altında tutulur (poll() kullandığımız için FD_SETSIZE
- * sorunu yoktur; sınırlar yalnızca bellek ve hedefe nezaket içindir). */
+/* Compile-time upper bounds for the stack arrays. Every profile and manual
+ * setting stays below these limits (we use poll(), so FD_SETSIZE is not a
+ * concern; the limits exist only for memory and target friendliness). */
 #define MAX_THREADS 16
 #define MAX_BATCH 512
 #define MAX_SCAN_SOCKETS 256

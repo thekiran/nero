@@ -404,8 +404,8 @@ static cli_cmd_result cmd_syn(char **tokens, size_t count)
 
 #else
 
-    /* SYN flood'u başlat. Port taraması SYN_Flood içinde port_get()
-     * üzerinden portscanner() ile yapılır, burada ayrıca çağırmayın. */
+    /* Start the SYN flood. Port scanning is performed inside SYN_Flood via
+     * portscanner() through port_get(); do not call it again here. */
     if (SYN_Flood(tokens[0]) != 0) {
         nero_log_write(NERO_LOG_ERROR, "cli", "Legacy network operation failed: target=%s", tokens[0]);
         fprintf(stderr, "SYN flood failed for %s\n", tokens[0]);

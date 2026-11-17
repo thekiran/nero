@@ -306,7 +306,7 @@ static void test_end_to_end_restart(int run_count)
         assert(call.rc >= 1);
         assert(strstr(output, "status=complete") != NULL);
         assert(strstr(output, "unscanned=0") != NULL);
-        assert(strstr(output, "profile=Orta") != NULL);
+        assert(strstr(output, "profile=Balanced") != NULL);
         assert(strstr(output, "target=127.0.0.1") != NULL);
         free(output);
     }

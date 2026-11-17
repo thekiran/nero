@@ -29,6 +29,8 @@ set(NERO_CLI_SUPPORT_SOURCES
     src/cli/input.c
     src/cli/history.c
     src/cli/render.c
+    src/cli/suggestion_engine.c
+    src/cli/inline_help.c
     src/cli/table.c
     src/cli/operation_ui.c
     src/cli/commands.c
@@ -223,6 +225,9 @@ elseif(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         endif()
         add_test(NAME terminal-quality COMMAND ${Python3_EXECUTABLE}
             "${PROJECT_SOURCE_DIR}/tests/test_terminal_quality.py" $<TARGET_FILE:nero-mock>)
+        add_test(NAME intellisense COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/tests/test_intellisense.py" $<TARGET_FILE:nero-mock>)
+        set_tests_properties(intellisense PROPERTIES TIMEOUT 120)
         add_executable(operation-layout tests/operation_layout_fixture.c src/cli/operation_ui.c)
         nero_target(operation-layout)
         add_test(NAME operation-layout COMMAND ${Python3_EXECUTABLE}
@@ -255,6 +260,18 @@ if(BUILD_TESTING AND NOT MSVC)
     endif()
     add_test(NAME scan-session COMMAND scan-session)
     set_tests_properties(scan-session PROPERTIES TIMEOUT 60)
+    add_executable(wifi-capture tests/wifi_capture.c)
+    nero_target(wifi-capture)
+    target_link_libraries(wifi-capture PRIVATE ${CMAKE_DL_LIBS})
+    if(WIN32)
+        target_link_libraries(wifi-capture PRIVATE ws2_32 advapi32)
+        target_link_options(wifi-capture PRIVATE -static)
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(wifi-capture PRIVATE _POSIX_C_SOURCE=200809L)
+    endif()
+    add_test(NAME wifi-capture COMMAND wifi-capture)
+    set_tests_properties(wifi-capture PROPERTIES TIMEOUT 15)
     add_executable(wifi-core tests/wifi_core.c
         src/modules/wifi/wifi_ieee80211.c
         src/modules/wifi/wifi_tracker.c
@@ -284,6 +301,24 @@ if(BUILD_TESTING AND NOT MSVC)
     target_compile_definitions(table-engine PRIVATE UNICODE_SUPPORT)
     add_test(NAME table-engine COMMAND table-engine)
     set_tests_properties(table-engine PROPERTIES TIMEOUT 60)
+    # Pure IntelliSense engine + contextual help (no terminal / network).
+    add_executable(suggestion-engine tests/suggestion_engine_test.c src/cli/suggestion_engine.c)
+    nero_target(suggestion-engine)
+    # The test includes command_catalog.h / suggestion_catalog.h from src/cli to
+    # assert the IntelliSense catalog never drifts from the dispatcher keywords.
+    target_include_directories(suggestion-engine PRIVATE "${PROJECT_SOURCE_DIR}/src/cli")
+    target_compile_definitions(suggestion-engine PRIVATE UNICODE_SUPPORT NERO_SAFE_TEST)
+    add_test(NAME suggestion-engine COMMAND suggestion-engine)
+    set_tests_properties(suggestion-engine PROPERTIES TIMEOUT 60)
+    add_executable(inline-help tests/inline_help_test.c src/cli/inline_help.c src/cli/suggestion_engine.c)
+    nero_target(inline-help)
+    target_include_directories(inline-help PRIVATE "${PROJECT_SOURCE_DIR}/src/cli")
+    target_compile_definitions(inline-help PRIVATE UNICODE_SUPPORT NERO_SAFE_TEST)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(inline-help PRIVATE _POSIX_C_SOURCE=200809L)
+    endif()
+    add_test(NAME inline-help COMMAND inline-help)
+    set_tests_properties(inline-help PROPERTIES TIMEOUT 60)
     add_executable(portscanner-reliability tests/portscanner_reliability.c src/modules/portscanner.c src/modules/scan_session.c src/cli/operation_ui.c src/core/log.c)
     nero_target(portscanner-reliability)
     target_compile_definitions(portscanner-reliability PRIVATE UNICODE_SUPPORT)
@@ -428,4 +463,49 @@ if(NERO_BUILD_GUI)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     add_subdirectory(apps/desktop)
+endif()
+
+# Optional macOS Location-authorized app. CMake's CLI fixtures remain offline.
+if(APPLE)
+    enable_language(OBJC)
+    add_executable(NEROWiFi MACOSX_BUNDLE EXCLUDE_FROM_ALL macos/NEROWiFi/main.m)
+    set_target_properties(NEROWiFi PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/macos/NEROWiFi/Info.plist"
+        LINK_DEPENDS "${PROJECT_SOURCE_DIR}/macos/NEROWiFi/Entitlements.plist")
+    target_compile_options(NEROWiFi PRIVATE -fobjc-arc -Wall -Wextra -Werror -mmacosx-version-min=11.0)
+    target_link_options(NEROWiFi PRIVATE -mmacosx-version-min=11.0)
+    target_link_libraries(NEROWiFi PRIVATE "-framework Cocoa" "-framework CoreLocation" "-framework CoreWLAN")
+    set(NERO_WIFI_SIGN_IDENTITY "-" CACHE STRING "Signing identity for NEROWiFi.app")
+    add_custom_command(TARGET NEROWiFi POST_BUILD
+        COMMAND codesign --force --options runtime --entitlements "${PROJECT_SOURCE_DIR}/macos/NEROWiFi/Entitlements.plist" --sign "${NERO_WIFI_SIGN_IDENTITY}" "$<TARGET_BUNDLE_DIR:NEROWiFi>"
+        COMMAND codesign --verify --strict "$<TARGET_BUNDLE_DIR:NEROWiFi>" VERBATIM)
+    if(BUILD_TESTING)
+        add_custom_command(TARGET NEROWiFi POST_BUILD
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_macos_wifi_bundle.py"
+                "$<TARGET_BUNDLE_DIR:NEROWiFi>" VERBATIM)
+    endif()
+endif()
+if(BUILD_TESTING AND NOT MSVC)
+    add_executable(wifi-helper-protocol tests/wifi_helper_protocol.c third_party/cjson/cJSON.c
+        src/modules/wifi/wifi_ieee80211.c src/modules/wifi/wifi_tracker.c src/modules/wifi/wifi_pcap.c)
+    nero_target(wifi-helper-protocol)
+    # This test's checks are assert()-based; a Release build defines NDEBUG and
+    # strips them, which both voids the test and leaves every local unused under
+    # -Werror. Keep asserts live so the test runs and compiles in every build type.
+    target_compile_options(wifi-helper-protocol PRIVATE -UNDEBUG)
+    target_include_directories(wifi-helper-protocol PRIVATE third_party/cjson)
+    if(APPLE)
+        # Vendored cJSON uses sprintf; keep first-party warnings strict.
+        set_source_files_properties(third_party/cjson/cJSON.c PROPERTIES
+            COMPILE_OPTIONS "-Wno-deprecated-declarations")
+    endif()
+    if(WIN32)
+        target_link_options(wifi-helper-protocol PRIVATE -static)
+    endif()
+    if(NOT WIN32)
+        target_compile_definitions(wifi-helper-protocol PRIVATE _POSIX_C_SOURCE=200809L)
+        target_link_libraries(wifi-helper-protocol PRIVATE m)
+    endif()
+    target_link_libraries(wifi-helper-protocol PRIVATE Threads::Threads)
+    add_test(NAME wifi-helper-protocol COMMAND wifi-helper-protocol)
 endif()

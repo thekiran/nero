@@ -23,10 +23,7 @@ struct nero_wifi_session {
     atomic_uint_fast64_t packets;
     atomic_uint_fast64_t bytes;
     atomic_uint_fast64_t non_wifi;
-    /* Link type of the most recent packet (0 = none yet). The capture backend
-     * may silently reopen a monitor handle in link-layer mode when the adapter
-     * delivers no 802.11 frames; tracking this live keeps the dashboard honest
-     * instead of reporting MONITOR until the worker exits. */
+    /* Link type of the most recent packet (0 = none yet). */
     atomic_int live_linktype;
     nero_wifi_stats base;
     char interface[NERO_WIFI_IFNAME_MAX];
@@ -160,7 +157,12 @@ int nero_wifi_session_start(nero_wifi_session *session, const char *interface_na
     memset(&session->base, 0, sizeof(session->base));
     session->base.source_is_file = 0;
     session->base.monitor_requested = request_monitor_mode;
-    session->base.monitor_set = 0;
+    /* The capture already decided its real mode at open time (monitor accepted,
+     * or a link-layer fallback). Reflect it now so the live survey header shows
+     * the actual mode instead of the one that was merely requested; the worker
+     * refreshes these when it exits. */
+    nero_wifi_capture_mode(capture, &session->base.monitor_set, &session->base.link_fallback,
+                           &session->base.linktype);
     snprintf(session->base.backend, sizeof(session->base.backend), "%s", "libpcap/Npcap");
     snprintf(session->base.source, sizeof(session->base.source), "live: %s", interface_name);
     session->base.started_us = nero_wifi_now_us();
@@ -249,15 +251,19 @@ int nero_wifi_session_analyze(nero_wifi_session *session, const char *path, char
         nero_wifi_tracker_destroy(incoming);
         return -1;
     }
+    pthread_mutex_lock(&session->mutex);
     nero_wifi_tracker *previous = session->tracker;
     session->tracker = incoming;
-    nero_wifi_tracker_destroy(previous);
-    pthread_mutex_lock(&session->mutex);
     session->base = stats;
     session->base.source_is_file = 1;
     snprintf(session->interface, sizeof(session->interface), "file");
     session->last_error[0] = '\0';
     pthread_mutex_unlock(&session->mutex);
+    /* Destroy the old tracker only after the swap is published under the mutex:
+     * a reader holding the lock finished on the old tracker before we could swap,
+     * and readers that take the lock afterwards see the new one, so the pointer is
+     * never freed from under an in-flight getter. */
+    nero_wifi_tracker_destroy(previous);
     atomic_store_explicit(&session->packets, stats.packets, memory_order_relaxed);
     atomic_store_explicit(&session->bytes, stats.bytes, memory_order_relaxed);
     atomic_store_explicit(&session->non_wifi, stats.non_wifi, memory_order_relaxed);
@@ -291,9 +297,10 @@ void nero_wifi_session_snapshot_stats(const nero_wifi_session *session, nero_wif
         return;
     nero_wifi_session *mutable_session = (nero_wifi_session *)session;
     nero_wifi_stats tracker_stats;
-    nero_wifi_tracker_get_stats(session->tracker, &tracker_stats);
-
+    /* Hold the session mutex across the tracker read so the tracker pointer
+     * cannot be swapped and freed by nero_wifi_session_analyze mid-call. */
     pthread_mutex_lock(&mutable_session->mutex);
+    nero_wifi_tracker_get_stats(session->tracker, &tracker_stats);
     *out = session->base;
     pthread_mutex_unlock(&mutable_session->mutex);
 
@@ -326,7 +333,11 @@ int nero_wifi_session_get_aps(const nero_wifi_session *session, nero_wifi_ap *ou
 {
     if (session == NULL)
         return 0;
-    return nero_wifi_tracker_get_aps(session->tracker, out, capacity, channel_filter);
+    nero_wifi_session *mutable_session = (nero_wifi_session *)session;
+    pthread_mutex_lock(&mutable_session->mutex);
+    int result = nero_wifi_tracker_get_aps(session->tracker, out, capacity, channel_filter);
+    pthread_mutex_unlock(&mutable_session->mutex);
+    return result;
 }
 
 int nero_wifi_session_get_clients(const nero_wifi_session *session, nero_wifi_client *out,
@@ -334,7 +345,11 @@ int nero_wifi_session_get_clients(const nero_wifi_session *session, nero_wifi_cl
 {
     if (session == NULL)
         return 0;
-    return nero_wifi_tracker_get_clients(session->tracker, out, capacity, channel_filter);
+    nero_wifi_session *mutable_session = (nero_wifi_session *)session;
+    pthread_mutex_lock(&mutable_session->mutex);
+    int result = nero_wifi_tracker_get_clients(session->tracker, out, capacity, channel_filter);
+    pthread_mutex_unlock(&mutable_session->mutex);
+    return result;
 }
 
 int nero_wifi_session_find_ap(const nero_wifi_session *session,
@@ -342,7 +357,11 @@ int nero_wifi_session_find_ap(const nero_wifi_session *session,
 {
     if (session == NULL)
         return -1;
-    return nero_wifi_tracker_find_ap(session->tracker, bssid, out);
+    nero_wifi_session *mutable_session = (nero_wifi_session *)session;
+    pthread_mutex_lock(&mutable_session->mutex);
+    int result = nero_wifi_tracker_find_ap(session->tracker, bssid, out);
+    pthread_mutex_unlock(&mutable_session->mutex);
+    return result;
 }
 
 int nero_wifi_session_find_client(const nero_wifi_session *session,
@@ -350,7 +369,11 @@ int nero_wifi_session_find_client(const nero_wifi_session *session,
 {
     if (session == NULL)
         return -1;
-    return nero_wifi_tracker_find_client(session->tracker, mac, out);
+    nero_wifi_session *mutable_session = (nero_wifi_session *)session;
+    pthread_mutex_lock(&mutable_session->mutex);
+    int result = nero_wifi_tracker_find_client(session->tracker, mac, out);
+    pthread_mutex_unlock(&mutable_session->mutex);
+    return result;
 }
 
 static size_t session_copy_text(const nero_wifi_session *session, const char *source, char *out,

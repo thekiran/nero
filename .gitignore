@@ -30,3 +30,5 @@ CMakeUserPresets.json
 
 # Local git worktrees created by tooling (never part of the tracked tree)
 .claude/worktrees/
+
+/NEROWiFi.app/

@@ -97,7 +97,7 @@ The scanner never raises RLIMIT_NOFILE. It reserves 64 descriptors when sizing
 its budget, and handles exhaustion caused by other process activity as unknown.
 Deep retries use a smaller socket budget and a longer timeout, capped at
 5000 ms. Round 1 re-probes every filtered and error/unknown port. Profiles add
-further rounds (Hizli 1, Orta 2, Yavas 3, Manuel 2; hard cap 4) that re-probe
+further rounds (Fast 1, Balanced 2, Slow 3, Manual 2; hard cap 4) that re-probe
 only ports still error/unknown, so a silent target still costs exactly one
 retry per port. A port is probed at most 1 + rounds times. A work window that
 hits local resource exhaustion (EMFILE, ENFILE, ENOBUFS, ENOMEM, or
@@ -126,7 +126,7 @@ logged:
 
 ```
 Host: online | TCP: open=1 closed=65534 filtered=0 error/unknown=0 unscanned=0 total=65535 | retried=0 retry_probes=0
-Scan: target=127.0.0.1 profile=Orta duration=1.712s status=complete
+Scan: target=127.0.0.1 profile=Balanced duration=1.712s status=complete
 ```
 
 `retried` counts ports with at least one completed retry; `retry_probes`

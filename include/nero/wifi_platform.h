@@ -48,13 +48,30 @@ typedef struct {
     int mode;
 } nero_wifi_interface_info;
 
+/* One entry from the operating system's read-only IPv4 neighbor cache (ARP).
+ * It proves a device answered on the local link; it does not prove a Wi-Fi
+ * association or an 802.11 station relationship. */
+typedef struct {
+    uint8_t mac[NERO_WIFI_MAC_LEN];
+    char ip[16];
+} nero_wifi_neighbor;
+
 int nero_wifi_platform_get_status(nero_wifi_platform_status *status, char *error, size_t error_len);
 int nero_wifi_platform_list_interfaces(nero_wifi_interface_info *out, int capacity, int *count,
                                        char *error, size_t error_len);
-/* Active CoreWLAN scan. Each result has source fields populated; bssid may be
+/* Active CoreWLAN scan via the Location-authorized NEROWiFi.app on macOS.
+ * Never requests permission implicitly; open the app and use its button first.
+ * Each result has source fields populated; bssid may be
  * unavailable. Returns 0 on success, -1 on failure. */
 int nero_wifi_platform_scan(const char *interface_name, nero_wifi_ap *out, int capacity, int *count,
                             nero_wifi_platform_capabilities *capabilities, char *error,
                             size_t error_len);
+
+/* Reads the OS IPv4 neighbor cache (ARP) without sending probes or changing the
+ * interface. When interface_name is non-empty, entries on other interfaces are
+ * skipped. Returns the number of entries written (bounded by capacity) and 0
+ * when the cache is empty or unavailable; error is set only on read failure. */
+int nero_wifi_platform_neighbor_cache(const char *interface_name, nero_wifi_neighbor *out,
+                                      int capacity, char *error, size_t error_len);
 
 #endif
