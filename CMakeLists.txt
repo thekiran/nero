@@ -99,6 +99,21 @@ if(WIN32)
         endif()
         target_link_libraries(nero PRIVATE Threads::Threads ws2_32 iphlpapi advapi32)
         target_link_options(nero PRIVATE -static) # self-contained exe (winpthread/libgcc)
+        # NERO Console: same C core and terminal engine as `nero`, separate entry point.
+        add_executable(neroconsole
+            src/apps/neroconsole_main.c
+            src/cli/terminal.c
+            ${NERO_CLI_SUPPORT_SOURCES}
+            src/modules/portscanner.c
+            src/modules/scan_session.c
+            src/platform/windows/select_interface_windows.c)
+        nero_target(neroconsole)
+        target_compile_definitions(neroconsole PRIVATE UNICODE_SUPPORT NERO_SYN_UNAVAILABLE)
+        if(NERO_RELEASE_VERSION)
+            target_compile_definitions(neroconsole PRIVATE "NERO_BUILD_VERSION=\"${NERO_RELEASE_VERSION}\"")
+        endif()
+        target_link_libraries(neroconsole PRIVATE Threads::Threads ws2_32 iphlpapi advapi32)
+        target_link_options(neroconsole PRIVATE -static)
         if(BUILD_TESTING)
             add_executable(win-interfaces tests/interfaces.c
                 src/platform/windows/select_interface_windows.c)

@@ -5,7 +5,18 @@ This is a source inspection, not a runtime certification. No compiler, shell, Qt
 
 ## Current release state
 
-**Three-frontend parity: BLOCKED.** The audited tree has no `neroconsole` or `nero-gui` application target, Qt/QML sources, or common operation registry. `nero` is the existing interactive terminal. Calling that terminal “Console” does not establish support for the separate required application.
+**Three-frontend parity: BLOCKED (GUI).** Two of the three frontends now exist; the GUI remains the open prerequisite.
+
+### Progress — 2026-11-17 (neroconsole delivered)
+
+- `neroconsole` is now a **real standalone executable**, not a rename. It links the exact same C11 core, command dispatcher and `terminal_code()` engine as `nero` through a distinct entry point (`src/apps/neroconsole_main.c`), wired into the Makefile (macOS/Linux) and the Windows MinGW CMake leg (`add_executable(neroconsole …)`). No Qt or graphical dependency.
+- **Verified** on macOS arm64 (Apple clang) by `tests/test_console_parity.py` (run under `make test`, TEST=0): `--doctor` output byte-identical to `nero` (816 bytes, rc 0), `version` identical, and the `help` command vocabulary identical (36 lines). This proves shared-core behaviour, not just a launching binary.
+- Still **BLOCKED**: `nero-gui`. No Qt 6 toolchain is installed in this environment (`qmake`/`qmake6` absent, no Homebrew `qt`), so the Qt desktop application cannot be built or verified here. The non-Qt build is preserved and unaffected. GUI delivery is the remaining gate before any feature can be marked globally IMPLEMENTED.
+- Unified operation registry (`operation.h` dispatcher) remains PLANNED; `neroconsole` reaches parity today by sharing the existing dispatcher directly.
+
+The matrix rows below retain their audited status; each row's **Console Support** is now served by the shared dispatcher inside `neroconsole` (same vocabulary as `nero`, per the parity test), but rows stay PARTIAL until the GUI adapter and per-row three-frontend contract checks land.
+
+**Original audit note.** The audited tree had no `neroconsole` or `nero-gui` application target, Qt/QML sources, or common operation registry. `nero` is the existing interactive terminal. Calling that terminal “Console” does not establish support for the separate required application.
 
 Operation IDs below are design candidates, not implemented registrations. The “CLI Support” column describes source handlers inside the interactive shell; it does not claim general argv execution. `src/main.c` special-cases only `--doctor`, then enters `terminal_code()`. Platform cells record source-level availability/constraints, not a claim that hardware works. Build flags may remove live features on any OS. A family of existing test files is a starting point for inspection, not proof that every row is covered or passes.
 
