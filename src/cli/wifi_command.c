@@ -13,6 +13,8 @@
 #include "nero/wifi_nl80211.h"
 
 #include <errno.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,8 +25,6 @@
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <poll.h>
-#include <pthread.h>
-#include <stdatomic.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #endif
@@ -3208,7 +3208,9 @@ static cli_cmd_result cmd_wifi_monitor(char **tokens, size_t count)
 #else
     int was_running = nero_wifi_session_running(session);
     if (!was_running) {
+#if !defined(_WIN32)
         char picked[NERO_WIFI_IFNAME_MAX] = {0};
+#endif
         const char *target;
         if (interface != NULL) {
             target = interface;
